@@ -10,7 +10,7 @@ keywords = ["klepto", "code-search", "static-analysis", "workspace", "tantivy"]
 categories = ["development-tools"]
 
 authors = ["James Hunt <james@1o.business>"]
-repository = "https://github.com/jameshuntt/custodian_kit"
+repository = "https://github.com/1o-llc/custodian_kit"
 readme = "README.md"
 
 include = ["src/**", "schema/**", "Cargo.toml", "LICENSE*", "README*", "CHANGELOG*"]
@@ -24,7 +24,7 @@ thiserror = "1"
 tantivy = "0.26.1"
 # reading specs: klepto is the one extractor; syn reads the attribute and macro tokens klepto hands over,
 # TOML declarations with their spans, and the UTC stamp of each reading
-klepto = { version = "0.3.1", path = "../klepto" }
+klepto = "0.3.1"
 syn = { version = "2", features = ["full", "visit", "extra-traits"] }
 quote = "1"
 toml_edit = "0.22"
@@ -47,17 +47,17 @@ xccute_decisions = "0.1.1"
 # the journal's sequence and the one-writer admission for .custodian/
 uh-tom-mick = "0.1.1"
 # a job or a reading packed into one annotated file
-bundles = { version = "0.2.3", path = "../bundles", default-features = false }
+bundles = { version = "0.2.3", default-features = false }
 big-bad-bool = "0.1.1"
 core-1o = "0.1.1"
 tokei = { version = "15.0.0", default-features = false }
 scope = "0.3.1"
-task_history = { version = "0.1.0", path = "../task_history" }
+task_history = "0.1.0"
 # context windows of secret items held redacted
 classified = "0.2.1"
 # level and boundary rules stated as constraints
 flaga_solver = "0.1.1"
 # the maintenance marks' levels, the registry file, the checks' declared runner
-maintenance = { path = "../maintenance_macros/crates/maintenance", features = ["runner"] }
+maintenance = { version = "0.1.0", features = ["runner"] }
 # the journal: receipts, index keys, jobs, test results
 rusqlite = { version = "0.40", features = ["bundled"] }

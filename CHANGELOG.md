@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-10-19)
 
 The first version. It is step42's code_userland_kit, lifted onto klepto: the
 regex and walkdir scanning is gone, and every fact a reading uses comes from

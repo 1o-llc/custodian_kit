@@ -213,6 +213,12 @@ second reuses the first's reading and says so. Every digest is
 A refusal is a liaise code (`CUST0001`…`CUST0028`, `ReadingRefusal`) and one
 sentence. `api::Refusal` carries both.
 
+## Ownership
+
+Developed and published by James Hunt. The repository is held by the 1o organization
+(https://github.com/1o-llc). Assignment of the copyright to 1o is pending documentation. The license texts
+(LICENSE-MIT, LICENSE-APACHE) are left as they were found.
+
 ## License
 
 MIT OR Apache-2.0

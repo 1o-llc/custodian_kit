@@ -1,6 +1,6 @@
 # Tests every push and pull request on the newest Rust and on the oldest one
-# this crate supports (rust-version in Cargo.toml). Nothing publishes: klepto
-# and maintenance are path dependencies until their next releases are out.
+# this crate supports (rust-version in Cargo.toml). Nothing publishes from here;
+# a release is published with cargo publish.
 name: CI
 
 on:
