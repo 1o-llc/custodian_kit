@@ -116,7 +116,7 @@ pub fn check_all_job(ctx: &Ctx) -> Result<(Vec<Checked>, Vec<String>)> {
     let folder = store.job_dir(crate::store::JobState::Done, &name)?;
     let journal = store.journal()?;
     journal.put_job(&JobRow { id: id.clone(), name: name.clone(), kind: "check-all".into(), state: "running".into(), folder: ctx.rel(&folder), opened_utc: Some(now_utc()), closed_utc: None })?;
-    let in_job = InJob { id: id.clone(), readings: folder.join("readings") };
+    let in_job = InJob { id: id.clone(), readings: folder.join(crate::jobs::READINGS_DIR) };
     let mut out = Vec::new();
     let mut said = vec![format!("job {id} (check all): {}", ctx.rel(&folder))];
     for c in every_check() {

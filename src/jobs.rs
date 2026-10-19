@@ -207,6 +207,10 @@ pub struct JobFile {
 /// file and the job's own data folder: change_history's.
 pub use change_history::{Taken, Touched, COUNTS_FILE, JOB_DATA};
 
+/// A job folder's readings: `readings/<name>/<stamp>.{md,json}` in the job's
+/// folder, where a reading run in the job is kept.
+pub const READINGS_DIR: &str = "readings";
+
 /// The specs of a folder-of-specs job: the files named as specs
 /// (`v1.<name>.1o.reading`, `<name>.toml`), never the job file and never
 /// the job's own data (which sits under `data/`).
@@ -565,7 +569,7 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     let journal = store.journal()?;
     journal.put_job(&JobRow { id: id.clone(), name: name.clone(), kind: kind.clone(), state: "running".into(), folder: ctx.rel(&running), opened_utc: Some(opened.clone()), closed_utc: None })?;
     let mut said = vec![running_decision_said(), format!("job {id} ({name}, {kind}) started: {} → {}", ctx.rel(&queued), ctx.rel(&running))];
-    let in_job = InJob { id: id.clone(), readings: running.join("readings") };
+    let in_job = InJob { id: id.clone(), readings: running.join(READINGS_DIR) };
     let mut runs = Vec::new();
     let t = if kind == "specs" { None } else { Some(template_in(store, &kind)?) };
     // the task history: a new revision of the job's task, its task and intent records
@@ -741,7 +745,8 @@ pub struct Closing {
     /// When the outcome became known (the verification declared): `open`, `#<receipt>`, or never.
     #[serde(default)]
     pub outcome_known_at: Option<String>,
-    /// Each declared verification and whether the job's own runs satisfy it: `satisfied`, `failed`, `not run`.
+    /// Each declared verification and whether the job's own runs satisfy it: `satisfied`, `failed`, `not run`, or, for a
+    /// reading the job made that is the same as the one before it opened, `unchanged`.
     #[serde(default)]
     pub verify: Vec<(String, String)>,
     /// The transform receipts of the job.
@@ -766,9 +771,9 @@ pub struct Closing {
 
 pub const CLOSING_SCHEMA: &str = "custodian.job_closing.v1";
 
-fn previous(store: &Store, name: &str, before: i64, job: &str, root: &Path) -> Option<ReadingReport> {
-    let prev = store.journal().ok()?.readings_of(name).ok()?.into_iter().rfind(|r| r.seq < before && r.job.as_deref() != Some(job))?;
-    prev.outputs.iter().find(|o| o.ends_with(".json")).and_then(|j| load(&root.join(j)).ok())
+fn previous(root: &Path, all: &[Receipt], folders: &[(String, PathBuf)], name: &str, before: i64, job: &str) -> Option<ReadingReport> {
+    let prev = crate::receipts::readings_of(root, all, name, folders).into_iter().rfind(|(r, _)| r.seq < before && r.job.as_deref() != Some(job))?;
+    load(&root.join(prev.1.record)).ok()
 }
 
 /// `job close`: the closing receipt written into the folder, the folder moved to done.
@@ -794,12 +799,15 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     let routes = count_routes(&jf, t.as_ref());
     let mut count_said = Vec::new();
     if !routes.is_empty() {
-        let in_job = InJob { id: id.clone(), readings: running.join("readings") };
+        let in_job = InJob { id: id.clone(), readings: running.join(READINGS_DIR) };
         let mut count_runs = Vec::new();
         take_counts(ctx, &running, &in_job, "close", &routes, &mut count_said, &mut count_runs, by)?;
     }
     let lines_touched = lines_touched_of(&running, &taken(&running))?;
     let runs = journal.runs_of_job(&id)?;
+    // every receipt and every job folder, for the readings of a spec (`receipts::readings_of`)
+    let all_runs = journal.runs()?;
+    let folders = crate::store::job_folders(store.jobs_dir(JobState::Done)?.parent().unwrap_or(&running));
     let level_floor = 2usize; // confidential in the shipped table; a registry's own table is read below
     let mut specs = Vec::new();
     let mut sensitive = BTreeSet::new();
@@ -839,7 +847,7 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
                 }
             }
         }
-        let changed = report.as_ref().and_then(|rep| previous(store, &r.name, r.seq, &id, &ctx.root).map(|prev| diff::compare(&prev, rep)));
+        let changed = report.as_ref().and_then(|rep| previous(&ctx.root, &all_runs, &folders, &r.name, r.seq, &id).map(|prev| diff::compare(&prev, rep)));
         specs.push(SpecClosed {
             name: r.name.clone(),
             seq: r.seq,
@@ -859,7 +867,9 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         .filter_map(|r| r.outputs.iter().find(|o| o.ends_with(".json")).and_then(|o| std::fs::read_to_string(ctx.root.join(o)).ok()).and_then(|t| serde_json::from_str(&t).ok()).map(|t| (r.seq, t)))
         .collect();
     let uncovered = if mode == JobMode::Bounded { uncovered_lines(ctx, &running, &transforms.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>())? } else { Vec::new() };
-    let verify: Vec<(String, String)> = jf.verify.iter().map(|v| (v.clone(), verified(v, &runs, &tests, &specs).to_string())).collect();
+    let opened = runs.first().map_or(i64::MAX, |r| r.seq);
+    let reading = |spec: &str| reading_verified(&ctx.root, &all_runs, &folders, &id, opened, spec);
+    let verify: Vec<(String, String)> = jf.verify.iter().map(|v| (v.clone(), verified(v, &runs, &tests, &reading).to_string())).collect();
     let known_at = |at_open: Option<bool>, commands: &[&str]| -> Option<String> {
         if at_open == Some(true) {
             return Some("open".into());
@@ -1022,8 +1032,26 @@ fn result_of_parts(uncovered: &[crate::transform::Uncovered], verify: &[(String,
     ("accepted".into(), None)
 }
 
-/// Whether the job's own runs satisfy one verification.
-fn verified(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], specs: &[SpecClosed]) -> &'static str {
+/// A `reading:<spec>` verification: the job changed what it set out to change. Satisfied when the job read the spec
+/// and that reading differs from the latest reading of it before the job opened; a spec never read before the job is
+/// satisfied by its first reading. Read in the job and the same as before is `unchanged`; not read in it, `not run`.
+/// The readings are the receipts' ([`crate::receipts::readings_of`]); `opened` is the job's first receipt.
+fn reading_verified(root: &Path, all: &[Receipt], folders: &[(String, PathBuf)], job: &str, opened: i64, spec: &str) -> &'static str {
+    let readings = crate::receipts::readings_of(root, all, spec, folders);
+    // the job's last reading of the spec; a reuse names the reading it reused
+    let Some(last) = all.iter().rfind(|r| r.job.as_deref() == Some(job) && r.name == spec && (r.command == "reading" || r.command == "run") && r.accepted) else { return "not run" };
+    let at = last.reused_seq.unwrap_or(last.seq);
+    let Some((_, now)) = readings.iter().find(|(r, _)| r.seq == at) else { return "not run" };
+    let Some((_, before)) = readings.iter().rfind(|(r, _)| r.seq < opened) else { return "satisfied" };
+    match (load(&root.join(&before.record)), load(&root.join(&now.record))) {
+        (Ok(a), Ok(b)) if !diff::compare(&a, &b).is_empty() => "satisfied",
+        (Ok(_), Ok(_)) => "unchanged",
+        _ => "not run",
+    }
+}
+
+/// Whether the job's own runs satisfy one verification; a `reading:` line is answered by `reading`.
+fn verified(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], reading: &dyn Fn(&str) -> &'static str) -> &'static str {
     let Some((form, what)) = line.split_once(':') else { return "not run" };
     let what = what.trim();
     match form {
@@ -1037,11 +1065,7 @@ fn verified(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], specs
                 "not run"
             }
         }
-        "reading" => match specs.iter().rev().find(|s| s.name == what) {
-            Some(s) if s.changed.as_ref().is_some_and(|d| !d.is_empty()) => "satisfied",
-            Some(_) => "not run",
-            None => "not run",
-        },
+        "reading" => reading(what),
         "check" => match runs.iter().rev().find(|r| r.command == "check" && r.name == what) {
             Some(r) if r.accepted => "satisfied",
             Some(_) => "failed",

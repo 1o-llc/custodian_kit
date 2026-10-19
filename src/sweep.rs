@@ -26,7 +26,7 @@ pub struct Swept {
 }
 
 fn skipped(name: &str) -> bool {
-    matches!(name, "target" | ".git" | "node_modules" | ".custodian")
+    matches!(name, "target" | ".git" | "node_modules" | crate::store::FOLDER)
 }
 
 /// Walks `dir` (relative to `root` or absolute), never following links.

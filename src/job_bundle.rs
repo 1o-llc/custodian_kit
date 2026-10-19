@@ -144,7 +144,7 @@ pub fn unbundle_job(bundle: &Path, queued: &Path) -> Result<(PathBuf, String)> {
 /// The readings a job folder holds.
 pub fn job_readings(folder: &Path) -> Vec<(PathBuf, ReadingReport)> {
     let mut out = Vec::new();
-    let mut stack = vec![folder.join("readings")];
+    let mut stack = vec![folder.join(crate::jobs::READINGS_DIR)];
     while let Some(d) = stack.pop() {
         let Ok(rd) = std::fs::read_dir(&d) else { continue };
         let mut entries: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).collect();

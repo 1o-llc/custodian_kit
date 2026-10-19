@@ -7,7 +7,7 @@ use crate::exec::{Plan, Walked};
 use crate::runs::{inventory, now_utc, InJob};
 use crate::store::{named, write_whole, Store};
 use crate::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The receipt, its schema and its runners: receipt_history's.
 pub use receipt_history::{line_runner, Receipt, RECEIPT_SCHEMA, RUNNER_IN_PROCESS, RUNNER_LINE};
@@ -53,3 +53,36 @@ pub fn keep(store: &Store, r: Receipt) -> Result<(Receipt, PathBuf)> {
     Ok((r, file))
 }
 
+
+/// Where a reading's files are, relative to the project root: its record (the facts) and its page.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReadingFiles {
+    pub record: String,
+    pub page: String,
+}
+
+/// The reading a receipt made, the one rule for it: a run that read a spec (`reading`, or `run` before the kit's
+/// word), accepted, not a reuse, with the spec's hash, whose record (its `.json` output) is where the receipt says,
+/// else in its job's folder wherever that folder is now (`readings/<name>/<file>`, the receipt's own job first).
+/// `folders` is [`crate::store::job_folders`], read once by a caller that asks for many. The readings index, the
+/// readings `differences readings` compares and the reading a job's `reading:` verification reads all come from here.
+pub fn reading_of(root: &Path, r: &Receipt, folders: &[(String, PathBuf)]) -> Option<ReadingFiles> {
+    if !(r.command == "reading" || r.command == "run") || r.reused_seq.is_some() || !r.accepted || r.spec_hash.is_none() {
+        return None;
+    }
+    let json = r.outputs.iter().find(|o| o.ends_with(".json"))?;
+    let page = r.outputs.iter().find(|o| o.ends_with(".md")).cloned().unwrap_or_else(|| json.replace(".json", ".md"));
+    if root.join(json).is_file() {
+        return Some(ReadingFiles { record: json.clone(), page });
+    }
+    let rel = |q: &Path| q.strip_prefix(root).unwrap_or(q).to_string_lossy().into_owned();
+    let name = Path::new(json).file_name()?.to_string_lossy().into_owned();
+    let own = folders.iter().filter(|(_, d)| r.job.as_deref().is_some_and(|j| crate::jobs::job_file(d).id.as_deref() == Some(j)));
+    own.chain(folders.iter()).map(|(_, d)| d.join(crate::jobs::READINGS_DIR).join(&r.name).join(&name)).find(|q| q.is_file()).map(|q| ReadingFiles { record: rel(&q), page: rel(&q.with_extension("md")) })
+}
+
+/// A spec's readings as the receipts hold them, oldest first: each receipt of that name that made a reading
+/// ([`reading_of`]), with its files.
+pub fn readings_of(root: &Path, runs: &[Receipt], spec: &str, folders: &[(String, PathBuf)]) -> Vec<(Receipt, ReadingFiles)> {
+    runs.iter().filter(|r| r.name == spec).filter_map(|r| reading_of(root, r, folders).map(|f| (r.clone(), f))).collect()
+}

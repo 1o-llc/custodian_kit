@@ -222,6 +222,63 @@ pub fn investigate(f: &crate::reading::facts::Facts, words: &[String]) -> (Vec<C
     (candidates, reuse, new)
 }
 
+/// Whether a token is spelled as code names a thing (`lease_matrix_core`, `UdsRouteTable`, `a::b`), not as a word.
+fn code_like(t: &str) -> bool {
+    t.contains('_') || t.contains("::") || t.chars().skip(1).any(char::is_uppercase)
+}
+
+/// What an intent names outright, resolved through the index before any word is matched: a workspace crate (its
+/// name in either spelling, or `crate:<name>`), a declared set (`decl:<name>`), a file the scan holds (as the
+/// `crate:<name>/<file>` route of its crate), or a declaration (an item's path `a::b::C`, or a name spelled as
+/// code). Each is a candidate in the order the intent names it; the second list is the tokens that resolved, whose
+/// words are never matched again, and the third the tokens spelled as code that resolved to nothing.
+pub fn resolve_named(f: &crate::reading::facts::Facts, intent: &str) -> (Vec<Candidate>, Vec<String>, Vec<String>) {
+    let mut out: Vec<Candidate> = Vec::new();
+    let mut used = Vec::new();
+    let mut unresolved = Vec::new();
+    let add = |out: &mut Vec<Candidate>, c: Candidate| {
+        if !out.iter().any(|x| x.target == c.target) {
+            out.push(c);
+        }
+    };
+    for raw in intent.split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '(' | ')' | '"' | '\'' | '`')) {
+        let t = raw.trim_end_matches(['.', ':', '!', '?']);
+        if t.is_empty() {
+            continue;
+        }
+        let before = out.len();
+        let bare = t.strip_prefix("crate:").unwrap_or(t);
+        if let Some(p) = (!bare.contains('/')).then(|| f.packages.get(&bare.replace('-', "_"))).flatten() {
+            add(&mut out, Candidate { target: format!("crate:{}", p.name), kind: "crate".into(), words: vec![t.to_string()], file: Some(format!("{}/Cargo.toml", p.dir).trim_start_matches('/').to_string()), operations: operations_for("crate") });
+        } else if let Some(name) = t.strip_prefix("decl:").filter(|n| f.paths.file.decl.contains_key(*n)) {
+            add(&mut out, Candidate { target: format!("decl:{name}"), kind: "decl".into(), words: vec![t.to_string()], file: None, operations: operations_for("decl") });
+        } else if crate::paths::names_a_place(t) {
+            let rel = t.strip_prefix("path:").unwrap_or(t).trim_start_matches("./");
+            let rel = rel.strip_prefix("crate:").and_then(|r| r.split_once('/')).and_then(|(n, file)| f.packages.get(&n.replace('-', "_")).map(|p| format!("{}/{file}", p.dir).trim_start_matches('/').to_string())).unwrap_or_else(|| rel.to_string());
+            if f.root.join(&rel).is_file() {
+                if let Some(p) = f.package_of_rel(&rel) {
+                    let in_crate = rel.strip_prefix(&format!("{}/", p.dir)).unwrap_or(&rel);
+                    add(&mut out, Candidate { target: format!("crate:{}/{in_crate}", p.name), kind: "file".into(), words: vec![t.to_string()], file: Some(rel.clone()), operations: operations_for("file") });
+                }
+            }
+        } else if code_like(t) {
+            let tail = format!("::{t}");
+            let mut items: Vec<&klepto::ItemDecl> = f.k.items.iter().filter(|d| d.generated.is_none() && !matches!(d.kind, klepto::graph::NodeKind::Impl | klepto::graph::NodeKind::External) && (d.id == t || d.id.ends_with(&tail) || (!t.contains("::") && d.name == t))).collect();
+            items.sort_by(|a, b| a.id.cmp(&b.id));
+            for d in items {
+                let kind = format!("{:?}", d.kind).to_lowercase();
+                add(&mut out, Candidate { target: d.id.clone(), operations: operations_for(&kind), kind, words: vec![t.to_string()], file: Some(f.rel(&d.location.path)) });
+            }
+        }
+        if out.len() > before || out.iter().any(|c| c.words.iter().any(|w| w == t)) {
+            used.push(t.to_string());
+        } else if code_like(t) || crate::paths::names_a_place(t) {
+            unresolved.push(t.to_string());
+        }
+    }
+    (out, used, unresolved)
+}
+
 /// How many candidates a plan keeps, in rank order: the rest are counted, not listed (a word as common as
 /// `record` names thousands of items in a large workspace).
 pub const KEPT: usize = 25;
@@ -256,8 +313,20 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
             &facts_owned
         }
     };
-    let (candidates, reuse, new) = investigate(facts, &words);
-    said.push(format!("plan {name}: words {}; {} candidates, {} to reuse, {} named by nothing", words.join(", "), candidates.len(), reuse.len(), new.len()));
+    // what the intent names outright is resolved first and is the plan's targets; the rest of its words are matched
+    let (named_targets, used, unresolved) = resolve_named(facts, intent);
+    let consumed: BTreeSet<String> = used.iter().flat_map(|t| words_of(t)).collect();
+    let rest: Vec<String> = words.iter().filter(|w| !consumed.contains(*w)).cloned().collect();
+    let (matched, reuse, new) = investigate(facts, &rest);
+    if !named_targets.is_empty() {
+        said.push(format!("plan {name}: named outright: {}", named_targets.iter().map(|c| c.target.as_str()).collect::<Vec<_>>().join(", ")));
+    }
+    said.push(format!("plan {name}: words {}; {} candidates, {} to reuse, {} named by nothing", rest.join(", "), matched.len(), reuse.len(), new.len()));
+    let targets = named_targets.len();
+    let named_set: BTreeSet<String> = named_targets.iter().map(|c| c.target.clone()).collect();
+    let candidates: Vec<Candidate> = named_targets.into_iter().chain(matched.into_iter().filter(|c| !named_set.contains(&c.target))).collect();
+    // the targets the intent named are the ones read and stepped; with none, the best word matches
+    let read = if targets > 0 { targets.min(KEPT) } else { READ };
     // the top candidates' impact, through the reading path
     let mut impacts = Vec::new();
     let dir = match (&ctx.store, job) {
@@ -265,7 +334,7 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
         (Some(s), None) => s.dir_of(&named::INTENT_PLAN, &[("name", "x")])?.join(name),
         (None, None) => std::env::temp_dir().join(format!("custodian-plan-{}", std::process::id())),
     };
-    for c in candidates.iter().take(READ) {
+    for c in candidates.iter().take(read) {
         // the same search `run TARGET --kind impact` and a preflight make: one key
         let spec = crate::reading::spec::ReadingSpec::search(crate::reading::spec::ReadingKind::Impact, &c.target)?;
         let iname = spec.name.clone();
@@ -316,7 +385,7 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
     };
     let top = candidates.first().map(tie);
     let tied: Vec<&Candidate> = candidates.iter().filter(|c| Some(tie(c)) == top && !c.words.is_empty()).take(4).collect();
-    if tied.len() > 1 {
+    if targets == 0 && tied.len() > 1 {
         alternatives.push(Alternative {
             choice: format!("where the work is: {} candidates name the same words", tied.len()),
             options: tied.iter().map(|c| c.target.clone()).collect(),
@@ -336,8 +405,11 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
     for a in &alternatives {
         questions.push(crate::questions::question(&format!("{}: which?", a.choice), &a.options, Some("the plan cannot choose between them from the code"), &source));
     }
-    for w in &new {
-        let near = candidates.first().map(|c| c.target.clone()).unwrap_or_else(|| "a crate of the workspace".into());
+    // a name nothing in the code has is asked where it goes: a name spelled as code always; a plain word only when
+    // the intent named no target (with targets, a plain word says what to do to them, not a thing to make)
+    let near = candidates.first().map(|c| c.target.clone()).unwrap_or_else(|| "a crate of the workspace".into());
+    let asked: Vec<&String> = unresolved.iter().chain(new.iter().filter(|w| targets == 0 && !unresolved.iter().any(|u| words_of(u).contains(w)))).collect();
+    for w in asked {
         questions.push(crate::questions::question(&format!("nothing in the code is named {w}: where does it go?"), &[format!("near {near}"), "a new crate".into()], Some("a new module's place is a design decision"), &source));
     }
     if candidates.is_empty() {
@@ -352,7 +424,7 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
     let answered: Vec<crate::questions::Decision> = answered.iter().filter_map(|q| decided.get(&q.id).cloned()).collect();
     let steps: Vec<PlanStep> = candidates
         .iter()
-        .take(READ)
+        .take(read)
         .enumerate()
         .map(|(i, c)| PlanStep { n: i + 1, operation: c.operations.first().cloned().unwrap_or_default(), target: c.target.clone(), what: format!("{} {} (it names {}); other operations: {}", c.operations.first().cloned().unwrap_or_default(), c.target, c.words.join(", "), c.operations.iter().skip(1).cloned().collect::<Vec<_>>().join(", ")), status: "proposed".into(), spec: None })
         .collect();

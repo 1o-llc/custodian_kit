@@ -39,7 +39,7 @@ pub struct PathsFile {
 }
 
 /// What every walk inside a route leaves out.
-pub const DEFAULT_IGNORE: &[&str] = &["target", ".git", ".custodian", ".claude"];
+pub const DEFAULT_IGNORE: &[&str] = &["target", ".git", crate::store::FOLDER, ".claude"];
 
 /// Who is resolving: a job may only read declared routes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

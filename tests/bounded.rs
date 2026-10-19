@@ -198,6 +198,36 @@ fn the_four_combinations_of_target_and_outcome_known() {
     }
 }
 
+/// A job that sets out to change a reading (`verify reading:<spec>`) is satisfied when its reading differs from the
+/// latest one before it opened, or is the spec's first reading; the same reading again is `unchanged`, none `not run`.
+#[test]
+fn a_reading_verification_is_the_job_changing_the_reading_it_named() {
+    let (store, ctx) = project("verify-reading");
+    let file = store.root.join("env.toml");
+    std::fs::write(&file, "name = \"env_socket\"\nquestion = \"who reads the socket\"\nkind = \"readers_of_env\"\ntarget = \"FIX_SOCKET\"\n").unwrap();
+    let close = |name: &str, read: bool| -> (String, String) {
+        let w = Workspace::open_with(&store.root, &Default::default(), Resolving::Job).unwrap();
+        job(&store, name, &format!("{{ job {{ name \"{name}\" kind \"specs\" verify \"reading:env_socket\" }} }}\n"), &[]);
+        let started = jobs::start_with(&ctx, Some(name), false, Some(&w)).unwrap();
+        if read {
+            let in_job = custodian_kit::runs::InJob { id: started.id.clone(), readings: started.folder.join(jobs::READINGS_DIR) };
+            custodian_kit::runs::run_reading_by(&ctx, &file, false, Some(&in_job), Runner::InProcess(&ws(&store.root))).unwrap();
+        }
+        let (c, _, _) = jobs::close_with(&ctx, &started.id, Some(&w)).unwrap();
+        (c.verify[0].1.clone(), c.result)
+    };
+    // never read before the job: its first reading satisfies it
+    assert_eq!(close("first", true), ("satisfied".into(), "accepted".into()));
+    // read again over the same code: the reading is the one before the job, unchanged
+    assert_eq!(close("same", true), ("unchanged".into(), "pending".into()));
+    // not read in the job
+    assert_eq!(close("none", false), ("not run".into(), "pending".into()));
+    // the code changed what the reading names: satisfied
+    let lib = store.root.join("crates/core_lib/src/lib.rs");
+    std::fs::write(&lib, std::fs::read_to_string(&lib).unwrap() + "\npub fn socket_again() -> String { std::env::var(\"FIX_SOCKET\").unwrap_or_default() }\n").unwrap();
+    assert_eq!(close("moved", true), ("satisfied".into(), "accepted".into()));
+}
+
 /// A `code-passenger` on PATH that answers nothing: a bounded job needs its writer to be there.
 fn fake_writer() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("custodian-kit-fake-writer-{}", std::process::id()));
@@ -267,6 +297,28 @@ fn an_intent_is_planned_from_the_code_and_a_step_becomes_a_change_spec() {
     // a TODO left by the approval is a precondition that does not hold
     let p = preflight::run_preflight(&ctx, &spec_path, None, Runner::InProcess(&w)).unwrap().preflight;
     assert!(!p.authorized && p.preconditions.iter().any(|c| c.what == "no TODO is left in the spec" && !c.holds));
+}
+
+#[test]
+fn an_intent_naming_two_crates_targets_them_and_asks_nothing_about_them() {
+    let (_store, ctx) = project("plan-named");
+    let w = ws(&ctx.root);
+    let ran = custodian_kit::plan::run_plan(&ctx, "merge-helpers", "merge helper_a into helper_b, keep the old code on a branch", None, Runner::InProcess(&w)).unwrap();
+    let p = &ran.plan;
+    let targets: Vec<&str> = p.steps.iter().map(|s| s.target.as_str()).collect();
+    assert_eq!(targets, ["crate:helper_a", "crate:helper_b"], "the crates the intent names are the targets, read and stepped");
+    assert_eq!(p.candidates[..2].iter().map(|c| c.target.as_str()).collect::<Vec<_>>(), ["crate:helper_a", "crate:helper_b"]);
+    assert_eq!(p.impacts.iter().map(|(t, _, _)| t.as_str()).collect::<Vec<_>>(), ["crate:helper_a", "crate:helper_b"]);
+    assert!(!p.decisions.iter().any(|q| q.question.contains("where does it go")), "{:?}", p.decisions.iter().map(|q| &q.question).collect::<Vec<_>>());
+    assert!(!p.alternatives.iter().any(|a| a.choice.starts_with("where the work is")), "named targets are not a choice between word matches");
+    // a name spelled as code that names nothing is still asked
+    let ran = custodian_kit::plan::run_plan(&ctx, "merge-missing", "merge helper_zz into helper_b", None, Runner::InProcess(&w)).unwrap();
+    assert_eq!(ran.plan.steps.iter().map(|s| s.target.as_str()).collect::<Vec<_>>(), ["crate:helper_b"]);
+    assert!(ran.plan.decisions.iter().any(|q| q.question == "nothing in the code is named helper_zz: where does it go?"));
+    // a file and a declaration the intent names resolve to their routes
+    let ran = custodian_kit::plan::run_plan(&ctx, "file-and-decl", "move crates/core_lib/src/lib.rs items next to core_lib::Config", None, Runner::InProcess(&w)).unwrap();
+    let t: Vec<&str> = ran.plan.steps.iter().map(|s| s.target.as_str()).collect();
+    assert_eq!(t, ["crate:core_lib/src/lib.rs", "core_lib::Config"]);
 }
 
 #[test]

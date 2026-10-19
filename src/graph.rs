@@ -110,7 +110,7 @@ pub fn klepto_builder(root: &Path, opts: &ScanOptions) -> std::result::Result<kl
     let under_root = |g: &str| format!("{}/{}", globset::escape(&root.to_string_lossy()), g.trim_start_matches("./"));
     let mut b = Klepto::new(name).scan_workspace_root(root)?.exclude_generated()?;
     b = b.exclude_glob(&under_root(".claude/**"))?;
-    b = b.exclude_glob(&under_root(".custodian/**"))?;
+    b = b.exclude_glob(&under_root(&format!("{}/**", crate::store::FOLDER)))?;
     for g in &opts.exclude {
         b = b.exclude_glob(&under_root(g))?;
     }

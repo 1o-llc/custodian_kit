@@ -21,9 +21,14 @@ pub const FOLDER: &str = ".custodian";
 pub use receipt_history::JOURNAL_BUSY;
 
 const fn file(route_id: &'static str, kind: &'static str, endpoint: ArtifactEndpoint, base_role: AppPathRole, relative_template: &'static str, mutability: PathMutability) -> ArtifactOutputDescriptor {
+    part("custodian.layout.v1", route_id, kind, endpoint, base_role, relative_template, mutability)
+}
+
+/// A part whose record has a schema of its own (a reading's record, a check's JSON, a log).
+const fn part(schema: &'static str, route_id: &'static str, kind: &'static str, endpoint: ArtifactEndpoint, base_role: AppPathRole, relative_template: &'static str, mutability: PathMutability) -> ArtifactOutputDescriptor {
     ArtifactOutputDescriptor {
         route_id,
-        schema: "custodian.layout.v1",
+        schema,
         kind,
         version: 1,
         endpoint,
@@ -67,6 +72,35 @@ pub mod named {
     pub const LINKAGE: ArtifactOutputDescriptor = file("custodian.linkage", "linkage", ArtifactEndpoint::FileTxt, AppPathRole::Data, "linkage/v1.{name}.1o.linkage", PathMutability::Writable);
     /// An intent's plan (`crate::plan`): the investigation, the reuse, the cost, the decisions, the steps.
     pub const INTENT_PLAN: ArtifactOutputDescriptor = file("custodian.intent_plan", "plan", ArtifactEndpoint::FileJson, AppPathRole::Data, "plans/intent/{name}.json", PathMutability::Writable);
+    /// A reading's record, beside its page: the facts the page was made from (`reading::load` reads it back).
+    pub const READING_RECORD: ArtifactOutputDescriptor = part("custodian.reading.v1", "custodian.reading.record", "reading", ArtifactEndpoint::FileJson, AppPathRole::Data, "readings/{name}/{stamp}.json", PathMutability::AppendOnly);
+    /// What a maintenance check line printed, as JSON.
+    pub const CHECK_RUN: ArtifactOutputDescriptor = part("maintenance.check_run.v1", "custodian.check", "check", ArtifactEndpoint::FileJson, AppPathRole::Data, "checks/{stamp}.json", PathMutability::AppendOnly);
+    /// A log kept for a later reading (custodian's `diagnostics from -` reads it from stdin).
+    pub const LOG: ArtifactOutputDescriptor = part("custodian.log.v1", "custodian.log", "log", ArtifactEndpoint::FileTxt, AppPathRole::Data, "logs/{name}.txt", PathMutability::AppendOnly);
+    /// A tree snapshot (`tree_history::tree`), one per point.
+    pub const TREE: ArtifactOutputDescriptor = file("custodian.tree", "tree", ArtifactEndpoint::FileJson, AppPathRole::Data, "trees/{point}.json", PathMutability::AppendOnly);
+
+    /// Every part of the folder, each once: what `custodian list` prints and what the golden test pins.
+    pub const ALL: &[ArtifactOutputDescriptor] = &[
+        SETTINGS, PATHS, SCHEMA, THRESHOLDS, JOB_TEMPLATE, QUEUED_SPEC, DONE_SPEC, READING_PAGE, RECEIPT, INVENTORY, PLAN, HISTORY_INDEX, JOURNAL, JOB_FILE, SOCKET,
+        READING_RECORD, CHECK_RUN, LOG, WRITER, CHANGE_SPEC, PREFLIGHT, TRANSFORM, LINKAGE, INTENT_PLAN, TREE,
+    ];
+
+    /// The folder's policy for the project at `root`: pathgen's dev policy whose base is the root and whose app
+    /// is [`FOLDER`], so a part is `<root>/.custodian/<role>/<template>`.
+    pub fn policy(root: &Path) -> std::result::Result<PathPolicy, pathgen::PathgenError> {
+        Ok(PathPolicy::dev(FOLDER)?.with_dev_base(root))
+    }
+
+    /// A part's path under `policy`, its template filled from `vars`; a value that would leave the folder is refused.
+    pub fn resolve(policy: &PathPolicy, d: &ArtifactOutputDescriptor, vars: &[(&str, &str)]) -> std::result::Result<PathBuf, pathgen::PathgenError> {
+        let mut v = PathTemplateVars::new();
+        for (k, val) in vars {
+            v = v.with(k, val);
+        }
+        policy.artifact_output(d, &v).map(|r| r.path)
+    }
 }
 
 /// This process's one writer: uh-tom-mick's admission word, one active at a time.
@@ -126,14 +160,14 @@ pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<()> {
 
 impl Store {
     fn policy(root: &Path) -> Result<PathPolicy> {
-        PathPolicy::dev(FOLDER).map(|p| p.with_dev_base(root)).map_err(|e| write_err(root, e))
+        named::policy(root).map_err(|e| write_err(root, e))
     }
 
     /// The initialized folder at `root` or above, walking up from `start`.
     pub fn find(start: &Path) -> Option<Store> {
         let start = start.canonicalize().ok()?;
         for dir in start.ancestors() {
-            let settings = Self::policy(dir).ok()?.artifact_output(&named::SETTINGS, &PathTemplateVars::new()).ok()?.path;
+            let settings = named::resolve(&Self::policy(dir).ok()?, &named::SETTINGS, &[]).ok()?;
             if settings.is_file() {
                 return Some(Store { root: dir.to_path_buf(), policy: Self::policy(dir).ok()? });
             }
@@ -204,11 +238,7 @@ impl Store {
 
     /// A named file, its template filled.
     pub fn path(&self, d: &ArtifactOutputDescriptor, vars: &[(&str, &str)]) -> Result<PathBuf> {
-        let mut v = PathTemplateVars::new();
-        for (k, val) in vars {
-            v = v.with(k, val);
-        }
-        self.policy.artifact_output(d, &v).map(|r| r.path).map_err(|e| write_err(&self.root, e))
+        named::resolve(&self.policy, d, vars).map_err(|e| write_err(&self.root, e))
     }
 
     /// The directory a named file sits in.
@@ -269,6 +299,18 @@ impl JobState {
             JobState::Done => "done",
         }
     }
+}
+
+/// Every job folder under `jobs_root` (`state/jobs/`), with its state, in
+/// [`JobState::ALL`]'s order, each state's folders in name order.
+pub fn job_folders(jobs_root: &Path) -> Vec<(String, PathBuf)> {
+    let mut out = Vec::new();
+    for state in JobState::ALL {
+        let mut v: Vec<PathBuf> = std::fs::read_dir(jobs_root.join(state.as_str())).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect()).unwrap_or_default();
+        v.sort();
+        out.extend(v.into_iter().map(|p| (state.as_str().to_string(), p)));
+    }
+    out
 }
 
 pub use crate::receipts::{Receipt, RECEIPT_SCHEMA};
