@@ -113,6 +113,12 @@ pub struct Step {
     /// Extra spec lines (TOML) appended to each step's spec: scope, readers, declared_in.
     #[serde(default)]
     pub with: Option<String>,
+    /// The earlier step whose receipt this step reads: the step waits for it,
+    /// and each receipt file it left (relative to the root) is this step's
+    /// target, or fills `{receipt}` in this step's `target`. A step that left
+    /// no receipt gives this one nothing, and this one is skipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reads: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -396,10 +402,49 @@ pub struct Started {
     pub said: Vec<String>,
 }
 
-fn template(store: &Store, kind: &str) -> Result<Template> {
+fn template_in(store: &Store, kind: &str) -> Result<Template> {
     let p = store.path(&crate::store::named::JOB_TEMPLATE, &[("kind", kind)])?;
     let text = std::fs::read_to_string(&p).or_else(|_| SHIPPED_TEMPLATES.iter().find(|(k, _)| *k == kind).map(|(_, t)| t.to_string()).ok_or(())).map_err(|_| ReadingRefusal::NoJob.refuse(format!("no job kind `{kind}` ({})", p.display())))?;
     toml::from_str(&text).map_err(|e| ReadingRefusal::SpecInvalid.refuse(format!("{}: {e}", p.display())))
+}
+
+/// The job template of `kind` as the project at or above `root` has it
+/// (`config/jobs/<kind>.toml`, where `agent init` writes the shipped ones for
+/// the user to edit), else the shipped one; the one loader every job runner
+/// and every consumer reads templates through.
+pub fn template(root: &Path, kind: &str) -> std::result::Result<Template, crate::api::Refusal> {
+    match Store::find(root) {
+        Some(store) => Ok(template_in(&store, kind)?),
+        None => {
+            let text = SHIPPED_TEMPLATES.iter().find(|(k, _)| *k == kind).map(|(_, t)| *t).ok_or_else(|| ReadingRefusal::NoJob.refusal(format!("no job kind `{kind}` (no .custodian at {}; shipped: {})", root.display(), shipped_kinds().join(", "))))?;
+            toml::from_str(text).map_err(|e| ReadingRefusal::SpecInvalid.refusal(format!("the shipped {kind} template: {e}")))
+        }
+    }
+}
+
+/// Every job template the project at or above `root` knows, by kind: the
+/// shipped ones (as the project has them, edited or not) and any other
+/// `config/jobs/<kind>.toml` it holds.
+pub fn templates(root: &Path) -> std::result::Result<Vec<Template>, crate::api::Refusal> {
+    let mut kinds: BTreeSet<String> = shipped_kinds().into_iter().map(str::to_string).collect();
+    if let Some(store) = Store::find(root) {
+        let dir = store.path(&crate::store::named::JOB_TEMPLATE, &[("kind", "x")])?.parent().map(Path::to_path_buf).unwrap_or_default();
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.filter_map(|e| e.ok()) {
+                let p = e.path();
+                if p.extension().is_some_and(|x| x == "toml") {
+                    if let Some(k) = p.file_stem().and_then(|k| k.to_str()) {
+                        kinds.insert(k.to_string());
+                    }
+                }
+            }
+        }
+    }
+    kinds.iter().map(|k| template(root, k)).collect()
+}
+
+fn shipped_kinds() -> Vec<&'static str> {
+    SHIPPED_TEMPLATES.iter().map(|(k, _)| *k).collect()
 }
 
 /// The values an earlier step's readings hold.
@@ -482,6 +527,10 @@ impl runner::RunStep for ExecSteps<'_> {
         self.runs.push(ran);
         Ok(report)
     }
+
+    fn receipt(&self) -> Option<String> {
+        self.runs.last().and_then(|r| r.receipt_file.as_ref()).map(|f| self.ctx.rel(f))
+    }
 }
 
 /// A step's solution record: the spec run, its run number, its reading.
@@ -532,7 +581,7 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     let mut said = vec![running_decision_said(), format!("job {id} ({name}, {kind}) started: {} → {}", ctx.rel(&queued), ctx.rel(&running))];
     let in_job = InJob { id: id.clone(), readings: running.join("readings") };
     let mut runs = Vec::new();
-    let t = if kind == "specs" { None } else { Some(template(store, &kind)?) };
+    let t = if kind == "specs" { None } else { Some(template_in(store, &kind)?) };
     // the task history: a new revision of the job's task, its task and intent records
     let intent = match &t {
         Some(t) => format!("{} ({} {})", t.summary, t.kind, jf.target.clone().unwrap_or_default()),
@@ -634,7 +683,7 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     let row = journal.job(&id)?;
     // the closing count, when the job counts, then the lines touched per step and for the job
     let jkind = jf.kind.clone().unwrap_or_else(|| "specs".into());
-    let t = if jkind == "specs" { None } else { template(store, &jkind).ok() };
+    let t = if jkind == "specs" { None } else { template_in(store, &jkind).ok() };
     let routes = count_routes(&jf, t.as_ref());
     let mut count_said = Vec::new();
     if !routes.is_empty() {
@@ -720,9 +769,10 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
             }
         }
         for t in &tests {
+            // cargo's words (`ok`, `FAILED`, `ignored`), as the journal's tests table keeps them, and the older ones
             let passed = match t.outcome.as_str() {
                 "ok" | "passed" | "pass" => Some(true),
-                "failed" | "fail" => Some(false),
+                "FAILED" | "failed" | "fail" => Some(false),
                 _ => None,
             };
             crate::task_records::verification(&task, &format!("cargo test -p {} {} {}", t.package, t.target, t.test), passed, t.millis.map(|m| format!("{m} ms")).as_deref())?;
@@ -730,13 +780,13 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         for r in runs.iter().filter(|r| r.command == "check") {
             crate::task_records::verification(&task, &format!("custodian check {}", r.name), Some(r.accepted), Some(&r.reason))?;
         }
-        let failed = tests.iter().any(|t| matches!(t.outcome.as_str(), "failed" | "fail")) || runs.iter().any(|r| r.command == "check" && !r.accepted);
+        let failed = tests.iter().any(|t| matches!(t.outcome.as_str(), "FAILED" | "failed" | "fail")) || runs.iter().any(|r| r.command == "check" && !r.accepted);
         let tree = crate::api::IndexKey::of_root(&ctx.root, &Default::default()).ok().map(|k| k.0);
         crate::task_records::close(&task, if failed { "failed_test" } else { "accepted" }, tree.as_deref())?;
         history_said.push(format!("task history: {}/{} ({} changes, {} verifications, result)", task.task_id, task.revision, changes, tests.len() + runs.iter().filter(|r| r.command == "check").count()));
     }
     let kind = jf.kind.clone().unwrap_or_else(|| "specs".into());
-    let guidance = (kind != "specs").then(|| template(store, &kind).ok().map(|t| t.summary)).flatten();
+    let guidance = (kind != "specs").then(|| template_in(store, &kind).ok().map(|t| t.summary)).flatten();
     let closing = Closing {
         schema: CLOSING_SCHEMA.into(),
         id: id.clone(),

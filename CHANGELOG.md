@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.1.1 (unreleased)
+
+Additive: nothing 0.1.0 does changes.
+
+- A job template's step can read an earlier step's receipts: `Step::reads`
+  names the step; the step waits for it on `scope` (`runner::dependencies`
+  counts it), and each receipt file that step kept (relative to the root) is
+  its target, or fills `{receipt}` in its `target`. A step that left no
+  receipt gives nothing, and the step-input decision skips the reader. The
+  receipts come from the executor (`RunStep::receipt`, defaulting to none;
+  `job start`'s executor names the receipt of each reading it ran) and are
+  kept by step in `StepEnv::receipts`. This is code_passenger's
+  `features-apply` shape (plan → apply → annotate, each reading the one
+  before) and the triage contract's "a step may read the prior step's
+  receipt as its target". Proven by
+  `a_step_that_reads_another_waits_for_it_and_takes_its_receipts_as_targets`
+  in tests/count.rs. `Step` and `StepEnv` gain a field: a struct literal of
+  either outside the kit must name it (`reads: None`).
+- `jobs::template(root, kind)` and `jobs::templates(root)` load the job
+  templates as the project at or above `root` has them, else as shipped, so
+  a consumer reads the kit's templates through the kit instead of parsing
+  the files itself. The loader the job code used is the same one
+  (`template_in`). Proven by
+  `templates_load_through_the_kit_shipped_or_as_the_project_has_them`.
+- A job's close reads a test's outcome in cargo's words, as the journal's
+  `tests` table keeps them (`ok`, `FAILED`, `ignored`; the kit's own test
+  runner writes these): `FAILED` is a failed verification and makes the
+  result `failed_test`. 0.1.0 matched only `failed`/`fail`, so a failed
+  test was recorded `pending` and the job `accepted`. Proven by
+  `a_failed_test_in_cargo_s_words_fails_the_jobs_result`.
+- `rust-version` is 1.88 (tantivy 0.26.1 needs 1.86; time, globset, ignore
+  and darling in the lock need 1.88), and CI tests stable and 1.88: 0.1.0's
+  1.85 job could not build.
+
 ## 0.1.0 (2026-10-19)
 
 The first version. It is step42's code_userland_kit, lifted onto klepto: the

@@ -2,7 +2,7 @@
 //!
 //! Every step of a template job is a task in one scope. A step that reads
 //! another step's readings (its `for_each` or `change_items` names that step)
-//! waits until that step is done; steps that depend on nothing run together,
+//! or its receipts (`reads`) waits until that step is done; steps that depend on nothing run together,
 //! one reading per poll, interleaved in the scope's fixed order, so the same
 //! job runs and completes in the same order every time. The scope environment
 //! holds what every step shares: the open [`Workspace`] (borrowed, never
@@ -20,13 +20,19 @@ use crate::api::Workspace;
 use crate::reading::ReadingReport;
 use crate::Result;
 use scope::{run_scoped, Cx, ScopedTask, TaskPoll};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// One reading of one step, for one target.
 pub trait RunStep {
     /// `n` is the target's place in the step's targets; `ws` is the scope's
     /// open workspace, when one was opened.
     fn run(&mut self, ws: Option<&Workspace>, step: &Step, n: usize, target: &str, items: &[String], said: &mut Vec<String>) -> Result<Option<ReadingReport>>;
+
+    /// The receipt file (relative to the root) the last `run` kept, for a
+    /// step that `reads` this one. An executor that keeps none says none.
+    fn receipt(&self) -> Option<String> {
+        None
+    }
 }
 
 /// What happened, in order: `start <step>`, `read <step> <target>`, `done <step>`, `skip <step>`.
@@ -44,6 +50,9 @@ pub struct StepEnv<'a> {
     pub said: Vec<String>,
     /// The first refusal; every step stops at its next poll.
     pub error: Option<crate::CustodianError>,
+    /// The receipt files each step's runs kept, by step, in run order: what a
+    /// step that `reads` it takes as its targets.
+    pub receipts: BTreeMap<String, Vec<String>>,
 }
 
 enum Phase {
@@ -57,9 +66,9 @@ struct StepTask<'s> {
     phase: Phase,
 }
 
-/// The steps a step reads: the ones its `for_each` and `change_items` name.
+/// The steps a step reads: the ones its `for_each`, `change_items` and `reads` name.
 pub fn dependencies(step: &Step) -> Vec<String> {
-    let mut d: Vec<String> = step.for_each.iter().chain(step.change_items.iter()).map(|f| f.step.clone()).collect();
+    let mut d: Vec<String> = step.for_each.iter().chain(step.change_items.iter()).map(|f| f.step.clone()).chain(step.reads.iter().cloned()).collect();
     d.sort();
     d.dedup();
     d
@@ -83,14 +92,19 @@ where
                     return cx.yield_now();
                 }
                 let items = step.change_items.as_ref().map(|f| values(&env.done, f)).unwrap_or_default();
-                let targets: Vec<String> = match (&step.for_each, &step.target) {
-                    (Some(f), _) => values(&env.done, f),
-                    (None, Some(tt)) => vec![tt.replace("{target}", &env.target)],
-                    (None, None) => vec![env.target.clone()],
+                // the receipts of the step this one reads: each one a target, or `{receipt}` in its target
+                let read = step.reads.as_ref().map(|r| env.receipts.get(r).cloned().unwrap_or_default());
+                let targets: Vec<String> = match (&step.for_each, &read, &step.target) {
+                    (Some(f), _, _) => values(&env.done, f),
+                    (None, Some(rs), Some(tt)) => rs.iter().map(|r| tt.replace("{target}", &env.target).replace("{receipt}", r)).collect(),
+                    (None, Some(rs), None) => rs.clone(),
+                    (None, None, Some(tt)) => vec![tt.replace("{target}", &env.target)],
+                    (None, None, None) => vec![env.target.clone()],
                 };
-                let gate = match (&step.change_items, &step.for_each) {
-                    (Some(f), _) => Some(crate::decisions::step_input(&step.name, &f.step, &items)),
-                    (None, Some(f)) => Some(crate::decisions::step_input(&step.name, &f.step, &targets)),
+                let gate = match (&step.change_items, &step.for_each, &step.reads) {
+                    (Some(f), _, _) => Some(crate::decisions::step_input(&step.name, &f.step, &items)),
+                    (None, Some(f), _) => Some(crate::decisions::step_input(&step.name, &f.step, &targets)),
+                    (None, None, Some(r)) => Some(crate::decisions::step_input(&step.name, r, &targets)),
                     _ => None,
                 };
                 if let Some(g) = &gate {
@@ -111,7 +125,12 @@ where
                     let t = targets[*next].clone();
                     let ws = env.ws;
                     match env.exec.run(ws, step, *next, &t, items, &mut env.said) {
-                        Ok(r) => reports.extend(r),
+                        Ok(r) => {
+                            reports.extend(r);
+                            if let Some(f) = env.exec.receipt() {
+                                env.receipts.entry(step.name.clone()).or_default().push(f);
+                            }
+                        }
                         Err(e) => {
                             env.error = Some(e);
                             return TaskPoll::Ready;
@@ -138,7 +157,7 @@ pub fn run_steps<'a>(steps: &[Step], target: &str, ws: Option<&'a Workspace>, ex
             return Err(crate::reading::refusal::ReadingRefusal::SpecInvalid.refuse(format!("step {} reads step {d}, which the job does not have", s.name)));
         }
     }
-    let mut env = StepEnv { ws, exec, target: target.to_string(), done: Vec::new(), events: Vec::new(), said: Vec::new(), error: None };
+    let mut env = StepEnv { ws, exec, target: target.to_string(), done: Vec::new(), events: Vec::new(), said: Vec::new(), error: None, receipts: BTreeMap::new() };
     let report = run_scoped(&mut env, |s| {
         for step in steps {
             s.spawn_named(step.name.clone(), StepTask { step, deps: dependencies(step), phase: Phase::Waiting });

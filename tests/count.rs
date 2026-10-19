@@ -300,6 +300,39 @@ fn a_job_is_a_task_history_that_round_trips_and_holds_against_the_tree() {
 }
 
 #[test]
+fn a_failed_test_in_cargo_s_words_fails_the_jobs_result() {
+    use custodian_kit::store::{JobState, Mode, Store, TestRow};
+    use task_history::DiffRecordKind;
+    let (store, _) = Store::init(&copy_fixture("job-failed-test"), Mode::Agent).unwrap();
+    let dir = store.job_dir(JobState::Queued, "t").unwrap();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("v1.job.1o.job"), "{ job { name \"t\" kind \"specs\" } }\n").unwrap();
+    let ctx = custodian_kit::runs::Ctx { root: store.root.clone(), store: Some(store.clone()), exe: line_program() };
+    let started = custodian_kit::jobs::start(&ctx, Some("t"), false).unwrap();
+    // a test line run inside the job, its outcomes as cargo prints them (what the journal's tests table keeps)
+    let receipt: custodian_kit::api::Receipt = serde_json::from_value(serde_json::json!({
+        "schema": "custodian.receipt.v1", "seq": 0, "utc": "2026-10-19T00:00:00Z", "command": "test", "name": "copy_a",
+        "spec": null, "spec_hash": null, "code_digest": null, "index_key": null, "plan_id": "p", "plan_digest": "d", "operation_digest": "d",
+        "receipt_digest": "d", "line": "cargo test -p copy_a", "exit_code": 101, "accepted": false, "disposition": "Stop", "reason": "failed",
+        "outputs": [], "job": started.id, "reused_seq": null, "millis": 1
+    }))
+    .unwrap();
+    let journal = store.journal().unwrap();
+    let kept = journal.record(receipt).unwrap();
+    for (test, outcome) in [("a", "ok"), ("b", "FAILED")] {
+        journal.put_test(&TestRow { seq: kept.seq, package: "copy_a".into(), target: "lib".into(), test: test.into(), outcome: outcome.into(), millis: None }).unwrap();
+    }
+    let (closing, _, _) = custodian_kit::jobs::close(&ctx, &started.id).unwrap();
+    assert_eq!(closing.tests.len(), 2);
+    let task = custodian_kit::task_records::read(&store, "t").unwrap().unwrap();
+    let docs = &task.revisions[0].documents;
+    let outcomes: Vec<&str> = docs.iter().filter(|d| d.kind().ok() == Some(DiffRecordKind::Verification)).map(|d| d.one("outcome").unwrap()).collect();
+    assert_eq!(outcomes, vec!["pass", "fail"], "FAILED is a failure, not pending");
+    let result = docs.iter().find(|d| d.kind().ok() == Some(DiffRecordKind::Result)).unwrap();
+    assert_eq!(result.one("status").unwrap(), "failed_test");
+}
+
+#[test]
 fn a_folder_of_specs_lists_only_its_specs_never_the_jobs_own_data() {
     let dir = copy_fixture("job-specs").join("job");
     std::fs::create_dir_all(dir.join("data/counts")).unwrap();
@@ -346,7 +379,7 @@ fn a_reading_kept_in_a_job_resolves_after_the_job_moves_to_done() {
 fn the_steps_run_on_scope_independent_ones_together_a_dependent_one_after() {
     use custodian_kit::jobs::runner::run_steps;
     use custodian_kit::jobs::{From, Step};
-    let step = |name: &str, kind: &str, target: Option<&str>, for_each: Option<From>| Step { name: name.into(), kind: kind.into(), target: target.map(str::to_string), for_each, change_items: None, with: None };
+    let step = |name: &str, kind: &str, target: Option<&str>, for_each: Option<From>| Step { name: name.into(), kind: kind.into(), target: target.map(str::to_string), for_each, change_items: None, with: None, reads: None };
     let steps = vec![
         // c reads a's use sites: it waits for a
         step("c", "dependents", None, Some(From { step: "a".into(), row: "use-site".into(), field: "full_path".into() })),
@@ -376,9 +409,115 @@ fn the_steps_run_on_scope_independent_ones_together_a_dependent_one_after() {
 fn a_step_reading_a_step_the_job_lacks_is_refused() {
     use custodian_kit::jobs::runner::run_steps;
     use custodian_kit::jobs::{From, Step};
-    let steps = vec![Step { name: "c".into(), kind: "reach".into(), target: None, for_each: Some(From { step: "nope".into(), row: "x".into(), field: "label".into() }), change_items: None, with: None }];
+    let steps = vec![Step { name: "c".into(), kind: "reach".into(), target: None, for_each: Some(From { step: "nope".into(), row: "x".into(), field: "label".into() }), change_items: None, with: None, reads: None }];
     let mut exec = Answer;
     assert!(run_steps(&steps, "x", None, &mut exec).is_err());
+}
+
+/// An executor that keeps a receipt file per run (`receipts/<n>.json`) and
+/// records what each step was given, for the `reads` tests.
+#[derive(Default)]
+struct Kept {
+    n: usize,
+    given: Vec<(String, String)>,
+}
+
+impl custodian_kit::jobs::runner::RunStep for Kept {
+    fn run(&mut self, _ws: Option<&Workspace>, step: &custodian_kit::jobs::Step, _n: usize, target: &str, _items: &[String], _said: &mut Vec<String>) -> custodian_kit::Result<Option<custodian_kit::reading::ReadingReport>> {
+        self.n += 1;
+        self.given.push((step.name.clone(), target.to_string()));
+        Ok(None)
+    }
+
+    fn receipt(&self) -> Option<String> {
+        // the step named `silent` keeps no receipt
+        (self.given.last().map(|(s, _)| s.as_str()) != Some("silent")).then(|| format!(".custodian/data/receipts/{}.json", self.n))
+    }
+}
+
+#[test]
+fn a_step_that_reads_another_waits_for_it_and_takes_its_receipts_as_targets() {
+    use custodian_kit::jobs::runner::run_steps;
+    use custodian_kit::jobs::Template;
+    // code_passenger's shape: plan → apply → annotate, each reading the step before it; declared in the
+    // job template as data, out of order, so only `reads` puts them in order
+    let t: Template = toml::from_str(
+        r#"kind = "chain"
+[[step]]
+name = "annotate"
+kind = "use_sites"
+reads = "apply"
+target = "--after {receipt}"
+
+[[step]]
+name = "apply"
+kind = "use_sites"
+reads = "plan"
+
+[[step]]
+name = "plan"
+kind = "use_sites"
+target = "{target}"
+
+[[step]]
+name = "after-silent"
+kind = "use_sites"
+reads = "silent"
+
+[[step]]
+name = "silent"
+kind = "use_sites"
+"#,
+    )
+    .unwrap();
+    assert_eq!(t.step[1].reads.as_deref(), Some("plan"));
+    assert_eq!(custodian_kit::jobs::runner::dependencies(&t.step[0]), vec!["apply".to_string()]);
+    let mut exec = Kept::default();
+    let (done, events, said) = run_steps(&t.step, "core_lib", None, &mut exec).unwrap();
+    let given: Vec<(&str, &str)> = exec.given.iter().map(|(s, t)| (s.as_str(), t.as_str())).collect();
+    assert_eq!(
+        given,
+        vec![
+            ("plan", "core_lib"),
+            ("silent", "core_lib"),
+            ("apply", ".custodian/data/receipts/1.json"),
+            ("annotate", "--after .custodian/data/receipts/3.json"),
+        ],
+        "each step after the one it reads, its target that step's receipt: {events:?}"
+    );
+    // a step that left no receipt gives nothing: the step reading it is skipped, by the step-input decision
+    assert!(events.contains(&"skip after-silent".to_string()), "{events:?}");
+    assert!(said.iter().any(|s| s.contains("did step silent give step after-silent its input?")), "{said:?}");
+    let order: Vec<&str> = done.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(order, vec!["plan", "silent", "after-silent", "apply", "annotate"]);
+    // reading a step the job does not have is refused, as for for_each
+    let lacking: Template = toml::from_str("kind = \"x\"\n[[step]]\nname = \"a\"\nkind = \"reach\"\nreads = \"nope\"\n").unwrap();
+    assert!(run_steps(&lacking.step, "x", None, &mut Kept::default()).is_err());
+}
+
+#[test]
+fn templates_load_through_the_kit_shipped_or_as_the_project_has_them() {
+    use custodian_kit::store::{Mode, Store};
+    // no project: the shipped templates
+    let bare = std::env::temp_dir().join(format!("custodian-kit-templates-bare-{}", std::process::id()));
+    std::fs::create_dir_all(&bare).unwrap();
+    let t = custodian_kit::jobs::template(&bare, "triage").unwrap();
+    assert_eq!((t.kind.as_str(), t.step.len()), ("triage", 4));
+    assert_eq!(custodian_kit::jobs::template(&bare, "nope").unwrap_err().code, "CUST0015", "no job kind");
+    let kinds: Vec<String> = custodian_kit::jobs::templates(&bare).unwrap().into_iter().map(|t| t.kind).collect();
+    assert_eq!(kinds, vec!["features", "triage"]);
+    // a project's own: an edited shipped one and one of its own kind, both through the same loader
+    let root = copy_fixture("templates");
+    let (store, _) = Store::init(&root, Mode::Agent).unwrap();
+    let dir = store.path(&custodian_kit::store::named::JOB_TEMPLATE, &[("kind", "x")]).unwrap().parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("chain.toml"), "kind = \"chain\"\nsummary = \"a chain\"\n[[step]]\nname = \"a\"\nkind = \"reach\"\n[[step]]\nname = \"b\"\nkind = \"reach\"\nreads = \"a\"\n").unwrap();
+    std::fs::write(dir.join("triage.toml"), "kind = \"triage\"\nsummary = \"edited\"\n[[step]]\nname = \"codes\"\nkind = \"diagnostics\"\ntarget = \"{target}\"\n").unwrap();
+    let all = custodian_kit::jobs::templates(&root.join("crates")).unwrap();
+    let by: Vec<(&str, usize)> = all.iter().map(|t| (t.kind.as_str(), t.step.len())).collect();
+    assert_eq!(by, vec![("chain", 2), ("features", 3), ("triage", 1)], "found from below the root, the project's own over the shipped");
+    assert_eq!(custodian_kit::jobs::template(&root, "chain").unwrap().step[1].reads.as_deref(), Some("a"));
+    assert_eq!(custodian_kit::jobs::template(&root, "triage").unwrap().summary, "edited");
 }
 
 /// A step executor for the runner's own tests: each step answered over the

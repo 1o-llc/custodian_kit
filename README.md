@@ -132,6 +132,19 @@ the code's index key as the tree digest), then the history's index.
 `job brief` reads them back through `load_task_history`. The receipts and
 the journal stay beside them.
 
+## Job templates
+
+A template job (`kind` names a template) is a list of steps, each a reading.
+`jobs::template(root, kind)` loads one as the project has it
+(`config/jobs/<kind>.toml`, written by `agent init` for the user to edit),
+else as shipped; `jobs::templates(root)` loads every kind the project knows.
+A step reads an earlier step in one of three ways, and waits for it on
+`scope` in each: `for_each` (one reading per value a row of that step's
+readings holds), `change_items` (those values as the change), or `reads`
+(each receipt file that step kept is this step's target, or fills
+`{receipt}` in its `target`). A step whose earlier step gave it nothing is
+skipped, and the step-input decision says so.
+
 ## Counts
 
 `count` counts a route with tokei, as a library: files, lines, code,

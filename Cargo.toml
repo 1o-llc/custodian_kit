@@ -1,8 +1,9 @@
 [package]
 name = "custodian_kit"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
-rust-version = "1.85"
+# tantivy 0.26 needs 1.86; time, globset, ignore and darling in the lock need 1.88
+rust-version = "1.88"
 
 license = "MIT OR Apache-2.0"
 description = "Read a Rust workspace as data: code graph, queries, pins, context windows, Tantivy search receipts, and reading specs that answer one question from klepto's facts into a dated page"
