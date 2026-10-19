@@ -54,6 +54,9 @@ pub mod api;
 pub mod oneo;
 pub mod change;
 pub mod linkage;
+pub mod preflight;
+pub mod questions;
+pub mod transform;
 
 #[cfg(test)]
 mod tests;

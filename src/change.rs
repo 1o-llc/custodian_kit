@@ -28,7 +28,7 @@
 use crate::reading::refusal::ReadingRefusal;
 use crate::reading::spec::vocabulary;
 use crate::Result;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 vocabulary! {
@@ -1191,6 +1191,132 @@ pub fn render_impl_piece(g: &Piece) -> std::result::Result<String, String> {
 /// Whether the source a spec writes calls the toolkit (so the crate needs the dependency).
 pub fn uses_toolkit(spec: &ChangeSpec) -> bool {
     spec.pieces().iter().any(|p| piece(&p.piece).is_some_and(|d| d.family != Family::Step))
+}
+
+// ---------------------------------------------------------------------------
+// where an operation lands, one rule for the preflight and the writer
+
+/// Where in a file an operation writes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum At {
+    /// The end of the module's file (before its `#[cfg(test)]` module when it has one).
+    EndOfFile,
+    /// Inside the item at this line (a struct's fields, an enum's variants, an impl's functions, a test module).
+    Inside { line: u32 },
+    /// After the item at this line.
+    After { line: u32 },
+    /// Above the item at this line (its attributes).
+    Above { line: u32 },
+    /// At the item at this line (its name, its signature).
+    At { line: u32 },
+    /// A new file, its `mod` line in `parent`.
+    NewFile { parent: String },
+    /// The crate's manifest.
+    Manifest,
+}
+
+/// Where an operation lands: the file, its module, its crate, the item it works on, the place in the file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Landing {
+    /// Relative to the root.
+    pub file: String,
+    /// The module path (`core_lib::store`).
+    pub module: String,
+    pub package: String,
+    /// The item the operation works on, when it targets one.
+    pub item: Option<String>,
+    pub at: At,
+}
+
+impl Landing {
+    /// One line a person reads: `inside core_lib::Config at crates/core_lib/src/lib.rs:47`.
+    pub fn line(&self) -> String {
+        match &self.at {
+            At::EndOfFile => format!("the end of {} (module {})", self.file, self.module),
+            At::Inside { line } => format!("inside {} at {}:{line}", self.item.as_deref().unwrap_or(&self.module), self.file),
+            At::After { line } => format!("after {} at {}:{line}", self.item.as_deref().unwrap_or(&self.module), self.file),
+            At::Above { line } => format!("above {} at {}:{line}", self.item.as_deref().unwrap_or(&self.module), self.file),
+            At::At { line } => format!("{} at {}:{line}", self.item.as_deref().unwrap_or(&self.module), self.file),
+            At::NewFile { parent } => format!("a new file {} (module {}), its mod line in {parent}", self.file, self.module),
+            At::Manifest => format!("{} ({})", self.file, self.package),
+        }
+    }
+}
+
+fn rel(root: &Path, p: &Path) -> String {
+    p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/")
+}
+
+/// The module whose own file is `file` (not an inline one).
+pub fn module_of_file<'k>(k: &'k klepto::Klepto, file: &Path) -> Option<&'k klepto::ModuleInfo> {
+    let want = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    k.modules.modules.values().find(|m| !m.inline && m.file.canonicalize().unwrap_or_else(|_| m.file.clone()) == want)
+}
+
+/// The item a target names: its id exactly, else by its trailing segments.
+pub fn item_named<'k>(k: &'k klepto::Klepto, target: &str) -> Option<&'k klepto::ItemDecl> {
+    let t = target.trim();
+    k.items.iter().find(|d| d.id == t).or_else(|| k.items.iter().find(|d| crate::path_names_item(&d.id, t)))
+}
+
+/// A route's file: a crate's library (else its first binary), or the file a `crate:<name>/<file>` route names.
+pub fn route_file(k: &klepto::Klepto, root: &Path, route: &str) -> Option<(String, std::path::PathBuf)> {
+    let rest = route.trim().strip_prefix("crate:")?;
+    let (name, file) = match rest.split_once('/') {
+        Some((n, f)) => (n, Some(f)),
+        None => (rest, None),
+    };
+    let p = k.packages.get(&name.replace('-', "_"))?;
+    let path = match file {
+        Some(f) => p.root.join(f),
+        None => p.targets.iter().find(|t| t.kind == "lib").or_else(|| p.targets.iter().find(|t| t.kind == "bin")).map(|t| t.src_path.clone())?,
+    };
+    let _ = root;
+    path.is_file().then(|| (p.name.clone(), path))
+}
+
+/// Where `spec`'s operation lands in the scan, or why it cannot.
+pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::result::Result<Landing, String> {
+    use Operation::*;
+    let op = spec.op();
+    let at_item = |d: &klepto::ItemDecl, at: fn(u32) -> At| -> Landing {
+        let line = d.location.line.unwrap_or(1);
+        Landing { file: rel(root, &d.location.path), module: d.module.clone(), package: d.package.clone(), item: Some(d.id.clone()), at: at(line) }
+    };
+    match op {
+        MakeStruct | MakeEnum | MakeFn | AddModule | Extract | AddDependency => {
+            let (package, file) = route_file(k, root, &spec.target).ok_or_else(|| format!("`{}` is not a crate:<name> or crate:<name>/<file>.rs route of the workspace", spec.target))?;
+            if op == AddDependency {
+                let m = k.packages.get(&package).map(|p| rel(root, &p.manifest_path)).unwrap_or_default();
+                return Ok(Landing { file: m, module: package.clone(), package, item: None, at: At::Manifest });
+            }
+            let module = module_of_file(k, &file).map(|m| m.path.clone()).unwrap_or_else(|| package.clone());
+            if matches!(op, AddModule | Extract) {
+                let name = spec.module.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+                let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                let dir = file.parent().map(Path::to_path_buf).unwrap_or_default();
+                let new = if ["lib", "main", "mod"].contains(&stem.as_str()) { dir.join(format!("{name}.rs")) } else { dir.join(&stem).join(format!("{name}.rs")) };
+                return Ok(Landing { file: rel(root, &new), module: format!("{module}::{name}"), package, item: None, at: At::NewFile { parent: rel(root, &file) } });
+            }
+            Ok(Landing { file: rel(root, &file), module, package, item: None, at: At::EndOfFile })
+        }
+        _ => {
+            let d = item_named(k, &spec.target).ok_or_else(|| format!("`{}` names no item of the scan", spec.target))?;
+            Ok(match op {
+                AddField | AddVariant => at_item(d, |l| At::Inside { line: l }),
+                AddMethod | AddConstructor => match k.impls_of(&d.id).into_iter().find(|i| i.trait_.is_none()) {
+                    Some(i) => Landing { file: rel(root, &i.location.path), module: i.module.clone(), package: i.package.clone(), item: Some(d.id.clone()), at: At::Inside { line: i.location.line.unwrap_or(1) } },
+                    None => at_item(d, |l| At::After { line: l }),
+                },
+                MakeImpl | AddTraitImpl => at_item(d, |l| At::After { line: l }),
+                AddDerive | AddAttribute | Gate | Anchor => at_item(d, |l| At::Above { line: l }),
+                ChangeSignature | Rename | Move => at_item(d, |l| At::At { line: l }),
+                AddTest => at_item(d, |l| At::After { line: l }),
+                _ => unreachable!("the place-targeting operations are matched above"),
+            })
+        }
+    }
 }
 
 #[cfg(test)]

@@ -46,6 +46,26 @@
         "revision": {
           "type": "string",
           "description": "The revision of the task this run is: base, fix1, ..."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "bounded",
+            "unbounded"
+          ],
+          "description": "bounded (the agent writes no code: change specs only, every touched line covered by a transform receipt) or unbounded (help, nothing refused); the workspace's job_mode when unset."
+        },
+        "verify": {
+          "type": "string",
+          "description": "What done looks like, declared up front: test:<name>, reading:<spec> (a reading that must change), check:<which>. Repeats: one value per line, in order."
+        },
+        "target_known": {
+          "type": "boolean",
+          "description": "At open: the job's target resolved to a route or an item through the index."
+        },
+        "outcome_known": {
+          "type": "boolean",
+          "description": "At open: the job declared its verification."
         }
       }
     }

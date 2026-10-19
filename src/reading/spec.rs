@@ -4,7 +4,7 @@
 
 use super::refusal::ReadingRefusal;
 use crate::Result;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Declares a closed vocabulary once: the enum, its spelling in spec files,
@@ -55,14 +55,14 @@ macro_rules! vocabulary {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(self.as_str()) }
         }
 
-        impl Serialize for $name {
-            fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> { s.serialize_str(self.as_str()) }
+        impl ::serde::Serialize for $name {
+            fn serialize<S: ::serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> { s.serialize_str(self.as_str()) }
         }
 
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-                let s = String::deserialize(d)?;
-                s.parse().map_err(serde::de::Error::custom)
+        impl<'de> ::serde::Deserialize<'de> for $name {
+            fn deserialize<D: ::serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+                let s = <String as ::serde::Deserialize>::deserialize(d)?;
+                s.parse().map_err(::serde::de::Error::custom)
             }
         }
     };

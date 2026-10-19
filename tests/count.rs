@@ -237,6 +237,7 @@ fn a_jobs_counts_give_lines_touched_per_step_and_for_the_job_and_sum_across_jobs
         guidance: None,
         findings: vec![],
         lines_touched: touched,
+        ..Default::default()
     };
     std::fs::write(folder.join("closing.json"), serde_json::to_string(&closing).unwrap()).unwrap();
     let journal = store.journal().unwrap();

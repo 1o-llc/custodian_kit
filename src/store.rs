@@ -95,6 +95,9 @@ pub struct Settings {
     /// Globs (relative to the root) no reading reads, on top of a spec's own.
     #[serde(default)]
     pub exclude: Vec<String>,
+    /// A job's mode when its job file names none: `bounded` or `unbounded` (unbounded when unset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_mode: Option<crate::jobs::JobMode>,
 }
 
 /// An initialized project: its root and the folder's paths.
@@ -143,7 +146,7 @@ impl Store {
         let store = Store { policy: Self::policy(&root)?, root };
         let mut made = Vec::new();
         let settings = store.path(&named::SETTINGS, &[])?;
-        let mut current: Settings = std::fs::read_to_string(&settings).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or(Settings { mode, exclude: Vec::new() });
+        let mut current: Settings = std::fs::read_to_string(&settings).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or(Settings { mode, exclude: Vec::new(), job_mode: None });
         if mode == Mode::Agent {
             current.mode = Mode::Agent;
         }

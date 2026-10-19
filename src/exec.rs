@@ -166,6 +166,11 @@ pub fn passenger_gate(root: &Path, spec: &Path, write: bool) -> PassengerAtRoote
     CodePassenger::at_root(root.as_os_str()).words(words)
 }
 
+/// Whether a program is on PATH (a bounded job needs code-passenger, its writer).
+pub fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
+}
+
 /// A declared line run from the copy of its program at a path of its own (the
 /// running custodian, a built binary), its words and rules the line's.
 #[derive(Debug, Clone)]

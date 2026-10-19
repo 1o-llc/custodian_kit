@@ -89,6 +89,30 @@ kind = "sensitivity"
 target = "*"
 "#;
 
+crate::reading::spec::vocabulary! {
+    /// How a job may change code.
+    JobMode, "job mode" {
+        Bounded = "bounded" : "strict: the agent writes no code; it submits change specs, custodian generates and places the code through code_passenger and simple_impl, and every line the job touches must be covered by a transform receipt of the job",
+        Unbounded = "unbounded" : "help: readings, plans, impact and cost, the decisions list and reuse by digest are there; the agent writes code itself and nothing is refused; the closing receipt records what ran and the lines touched",
+    }
+}
+
+/// The ways a job declares what done looks like, each `<form>:<what>`.
+pub const VERIFY_FORMS: &[&str] = &["test", "reading", "check"];
+
+/// A verify line checked: `test:<name>`, `reading:<spec>` (a reading that must change), `check:<which>`.
+pub fn check_verify(line: &str) -> Result<()> {
+    match line.split_once(':') {
+        Some((form, what)) if VERIFY_FORMS.contains(&form) && !what.trim().is_empty() => Ok(()),
+        _ => Err(ReadingRefusal::SpecInvalid.refuse(format!("`{line}` is not a verification: test:<name>, reading:<spec>, check:<which>"))),
+    }
+}
+
+/// A name as one folder or file name: lowercase letters, digits and `-`.
+pub fn slug_of(s: &str) -> String {
+    slug(s)
+}
+
 /// Values taken from an earlier step's reading: the rows of a kind, one
 /// attribute (`label`, `path` and `crate` name the row's own fields).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +189,18 @@ pub struct JobFile {
     /// The revision of it this run is (`base`, `fix1`, ...).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
+    /// `bounded` or `unbounded`; the workspace's `job_mode` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<JobMode>,
+    /// What done looks like, declared up front: `test:<name>`, `reading:<spec>`, `check:<which>`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verify: Vec<String>,
+    /// At open: the job's target resolved to a route or an item through the index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_known: Option<bool>,
+    /// At open: the job declared its verification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_known: Option<bool>,
 }
 
 /// One count a job took: when (`open`, `step 3 apply`, `close`), of which route, its reading.
@@ -224,6 +260,10 @@ fn taken(folder: &Path) -> Vec<Taken> {
 
 /// The routes a job counts, when it counts: the job file's, else the template's, else the workspace.
 fn count_routes(jf: &JobFile, t: Option<&Template>) -> Vec<String> {
+    // a bounded job counts the whole workspace at open and close: every line it touches must be covered
+    if jf.mode == Some(JobMode::Bounded) {
+        return vec!["*".to_string()];
+    }
     let on = jf.count.unwrap_or_else(|| t.is_some_and(|t| t.count));
     if !on {
         return Vec::new();
@@ -507,16 +547,39 @@ struct ExecSteps<'a> {
     again: bool,
     question: String,
     runs: Vec<Ran>,
+    /// The routes the job counts (a count is taken after each step that changes code).
+    routes: Vec<String>,
+    steps_changed: usize,
 }
 
 impl runner::RunStep for ExecSteps<'_> {
     fn run(&mut self, ws: Option<&crate::api::Workspace>, step: &Step, n: usize, target: &str, items: &[String], said: &mut Vec<String>) -> Result<Option<ReadingReport>> {
-        let question = self.question.replace("a step", &format!("step {}", step.name));
-        let spec = step_spec(self.folder, n, step, target, items, &question)?;
         let by = match ws {
             Some(ws) => Runner::InProcess(ws),
             None => Runner::Line,
         };
+        if step.kind == "preflight" {
+            let spec = self.ctx.root.join(target);
+            let ran = crate::preflight::run_preflight(self.ctx, &spec, Some(self.in_job), by)?;
+            said.extend(ran.said.iter().cloned());
+            crate::task_records::solution(self.task, &format!("preflight {} ({}): {}", ran.preflight.spec_name, ran.preflight.operation, if ran.preflight.authorized { "authorized" } else { "not authorized" }))?;
+            self.runs.push(Ran { receipt: ran.receipt, receipt_file: ran.receipt_file, summary: None, reused: None, printed: None, said: ran.said });
+            return Ok(None);
+        }
+        if CHANGES_CODE.contains(&step.kind.as_str()) {
+            let ran = run_change_step(self.ctx, self.folder, self.in_job, step, target)?;
+            said.extend(ran.said.iter().cloned());
+            crate::task_records::solution(self.task, &format!("{} {}: {}", step.kind, target, ran.receipt.as_ref().map(|r| format!("run #{} ({})", r.seq, r.reason)).unwrap_or_default()))?;
+            self.runs.push(ran);
+            self.steps_changed += 1;
+            if !self.routes.is_empty() {
+                let mut runs = Vec::new();
+                take_counts(self.ctx, self.folder, self.in_job, &format!("step {} {}", self.steps_changed, step.name), &self.routes, said, &mut runs, by)?;
+            }
+            return Ok(None);
+        }
+        let question = self.question.replace("a step", &format!("step {}", step.name));
+        let spec = step_spec(self.folder, n, step, target, items, &question)?;
         let ran = run_reading_by(self.ctx, &spec, self.again, Some(self.in_job), by)?;
         said.extend(ran.said.iter().cloned());
         crate::task_records::solution(self.task, &solution_text(self.ctx, &spec, &ran))?;
@@ -590,8 +653,36 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     let task = crate::task_records::open(store, &name, &kind, &id, &intent)?;
     jf.task_id = Some(task.task_id.clone());
     jf.revision = Some(task.revision.clone());
+    // the mode, and the two facts the job starts from: is its target known, is its outcome known
+    let mode = jf.mode.unwrap_or_else(|| store.settings().ok().and_then(|s| s.job_mode).unwrap_or(JobMode::Unbounded));
+    if mode == JobMode::Bounded && !crate::exec::on_path("code-passenger") {
+        return Err(ReadingRefusal::NoWriter.refuse(format!("job {id} is bounded: install code-passenger (cargo install code_passenger)")));
+    }
+    for v in &jf.verify {
+        check_verify(v)?;
+    }
+    jf.mode = Some(mode);
+    let target_known = jf.target.as_deref().is_some_and(|t| target_resolves(ctx, t, ws));
+    jf.target_known = Some(target_known);
+    jf.outcome_known = Some(!jf.verify.is_empty());
     write_job_file(&running, &jf)?;
     said.push(format!("task history: {}/{} (task, intent)", task.task_id, task.revision));
+    said.push(format!("mode: {} — {}", mode.as_str(), mode.doc()));
+    said.push(match (&jf.target, target_known) {
+        (Some(t), true) => format!("target known: {t} resolves through the index"),
+        (Some(t), false) => format!("target unknown: {t} does not resolve; find it first (custodian plan, or an impact reading)"),
+        (None, _) => "target unknown: the job names none; find it first (custodian plan <intent>)".to_string(),
+    });
+    if jf.verify.is_empty() {
+        let q = crate::questions::done_question(&name);
+        let asked = crate::questions::ask(store, &task, &q)?;
+        said.push(match asked {
+            crate::questions::Asked::Answered(d) => format!("outcome known from an earlier answer: {} → {}", d.question, d.answer),
+            _ => format!("outcome unknown: no verification declared; decision {} asked: {}", q.id, q.question),
+        });
+    } else {
+        said.push(format!("outcome known: done is {}", jf.verify.join(", ")));
+    }
     let routes = count_routes(&jf, t.as_ref());
     take_counts(ctx, &running, &in_job, "open", &routes, &mut said, &mut runs, by)?;
     if kind == "specs" {
@@ -604,13 +695,9 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     } else {
         let t = t.expect("a template job has its template");
         let target = jf.target.clone().unwrap_or_default();
-        if let Some((i, step)) = t.step.iter().enumerate().find(|(_, s)| CHANGES_CODE.contains(&s.kind.as_str())) {
-            // a step that changes code runs through code_passenger's line for it, then is counted;
-            // no such line exists yet, so the job is refused here rather than counted as if it ran
-            return Err(ReadingRefusal::NoWriterLine.refuse(format!("step {} {} ({}): no code_passenger line runs it yet", i + 1, step.name, step.kind)));
-        }
-        // the steps on scope: independent ones together, dependent ones after what they read
-        let mut exec = ExecSteps { ctx, folder: &running, in_job: &in_job, task: &task, again, question: format!("{} — a step of the {} job for {target}", t.summary, t.kind), runs: Vec::new() };
+        // the steps on scope: independent ones together, dependent ones after what they read; a step that changes
+        // code runs code_passenger's line for it (after its preflight gate), and is counted after when the job counts
+        let mut exec = ExecSteps { ctx, folder: &running, in_job: &in_job, task: &task, again, question: format!("{} — a step of the {} job for {target}", t.summary, t.kind), runs: Vec::new(), routes: routes.clone(), steps_changed: 0 };
         let (_, events, step_said) = runner::run_steps(&t.step, &target, ws, &mut exec)?;
         said.extend(step_said);
         said.push(format!("steps: {}", events.join(" · ")));
@@ -618,6 +705,73 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     }
     Ok(Started { id, folder: running, runs, said })
 }
+
+/// Whether a job's target resolves: a declared route, or an item of the scan.
+fn target_resolves(ctx: &Ctx, target: &str, ws: Option<&crate::api::Workspace>) -> bool {
+    let table = match ws {
+        Some(w) => Some(w.paths().clone()),
+        None => crate::paths::PathsTable::load(&ctx.root, ctx.store.as_ref()).ok(),
+    };
+    if crate::paths::names_a_place(target) {
+        return table.is_some_and(|t| t.resolve(target, crate::paths::Resolving::Job).is_ok());
+    }
+    if table.as_ref().is_some_and(|t| t.crates.contains_key(&target.replace('-', "_"))) {
+        return true;
+    }
+    match ws {
+        Some(w) => w.klepto().items.iter().any(|d| crate::path_names_item(&d.id, target)) || w.klepto().graph.resolve_id(target).is_some(),
+        None => crate::reading::facts::Facts::build(&ctx.root, &Default::default(), crate::paths::Resolving::Job).is_ok_and(|f| f.k.items.iter().any(|d| crate::path_names_item(&d.id, target))),
+    }
+}
+
+/// A code-changing step: `transform` (a change spec, after its preflight gate), `apply` (code_passenger's features
+/// apply), `annotate` (its annotate): code_passenger's declared line, run through the executor, its receipt kept
+/// under the job; a transform's record kept in the job's folder.
+fn run_change_step(ctx: &Ctx, folder: &Path, in_job: &InJob, step: &Step, target: &str) -> Result<Ran> {
+    let store = ctx.store()?;
+    let mut said = Vec::new();
+    let (words, name, spec_meta): (Vec<std::ffi::OsString>, String, Option<(String, String)>) = match step.kind.as_str() {
+        "transform" => {
+            let spec_path = ctx.root.join(target);
+            let spec = crate::change::ChangeSpec::from_path(&spec_path)?;
+            let code = crate::code_digest(&ctx.root, &crate::reading::spec::Scope { tests: true, ..Default::default() }.scan_options()).map_err(|e| ReadingRefusal::Scan.refuse(e))?;
+            let (d, prev) = crate::preflight::gate(store, &spec, &code)?;
+            said.push(d.said());
+            if !d.go {
+                return Err(ReadingRefusal::NoPreflight.refuse(format!("{}: {}", spec.name, d.reason)));
+            }
+            let out = folder.join(JOB_DATA).join("transforms").join(format!("{}.json", slug(&spec.name)));
+            let mut w: Vec<std::ffi::OsString> = vec!["transform".into(), "--spec".into(), spec_path.into_os_string(), "--write".into(), "--out".into(), out.into_os_string()];
+            if let Some(p) = prev {
+                w.push("--preflight".into());
+                w.push(p.seq.to_string().into());
+            }
+            (w, spec.name.clone(), Some((spec.digest(), code)))
+        }
+        "apply" => (vec!["features".into(), "apply".into(), "--write".into()], format!("features apply {target}"), None),
+        "annotate" => (vec!["annotate".into(), "--write".into()], format!("annotate {target}"), None),
+        other => return Err(ReadingRefusal::NoWriterLine.refuse(format!("step {} ({other})", step.name))),
+    };
+    let line = crate::exec::CodePassenger::at_root(ctx.root.as_os_str()).words(words);
+    let mut l = crate::exec::line(format!("code-passenger:{}", step.kind), &line)?;
+    l.env.push((CODE_PASSENGER_JOB_ENV.to_string(), in_job.id.clone()));
+    let plan = crate::exec::Plan::new(format!("step:{}", step.name)).then(l);
+    let walked = plan.walk(crate::exec::Watch::Quiet, |_, _| {})?;
+    let w = walked.first().ok_or_else(|| ReadingRefusal::LineNotStarted.refuse(&step.name))?;
+    let outputs: Vec<String> = w.stdout.lines().filter_map(|l| l.strip_prefix("record: ")).map(|p| ctx.rel(Path::new(p.trim()))).collect();
+    let (spec_hash, code) = spec_meta.map(|(a, b)| (Some(a), Some(b))).unwrap_or((None, None));
+    let receipt = crate::receipts::receipt_of(&plan, w, &step.kind, &name, Some(target.to_string()), spec_hash, code, None, outputs, Some(in_job));
+    let (r, f) = keep(store, receipt)?;
+    said.push(format!("{}: {} → {:?} ({}) #{}", step.kind, r.line, r.exit_code, r.reason, r.seq));
+    if !r.accepted {
+        let tail: String = w.stderr.lines().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+        return Err(ReadingRefusal::LineRefused.refuse(format!("{} → {:?} ({}): {tail}", r.line, r.exit_code, r.reason)));
+    }
+    Ok(Ran { receipt: Some(r), receipt_file: Some(f), summary: None, reused: None, printed: None, said })
+}
+
+/// The environment variable code_passenger reads to leave keeping a step's receipt to the job runner.
+pub const CODE_PASSENGER_JOB_ENV: &str = "CODE_PASSENGER_JOB";
 
 /// One spec's part of the closing receipt.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -632,7 +786,7 @@ pub struct SpecClosed {
 }
 
 /// The closing receipt.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Closing {
     pub schema: String,
     pub id: String,
@@ -655,6 +809,36 @@ pub struct Closing {
     /// Lines touched, per step that changed code and for the job, from its counts.
     #[serde(default)]
     pub lines_touched: Vec<Touched>,
+    /// `bounded` or `unbounded`.
+    #[serde(default)]
+    pub mode: Option<JobMode>,
+    /// When the target became known: `open`, `#<receipt>`, or never (`None`).
+    #[serde(default)]
+    pub target_known_at: Option<String>,
+    /// When the outcome became known (the verification declared): `open`, `#<receipt>`, or never.
+    #[serde(default)]
+    pub outcome_known_at: Option<String>,
+    /// Each declared verification and whether the job's own runs satisfy it: `satisfied`, `failed`, `not run`.
+    #[serde(default)]
+    pub verify: Vec<(String, String)>,
+    /// The transform receipts of the job.
+    #[serde(default)]
+    pub transforms: Vec<i64>,
+    /// Bounded: the files (and lines) the job touched that no transform of it covers.
+    #[serde(default)]
+    pub uncovered: Vec<crate::transform::Uncovered>,
+    /// The task history's result: `accepted`, `pending`, `failed_test`, `rejected`.
+    #[serde(default)]
+    pub result: String,
+    /// Why the result is not `accepted`.
+    #[serde(default)]
+    pub result_reason: Option<String>,
+    /// The decisions the job's task left open.
+    #[serde(default)]
+    pub decisions_open: Vec<crate::questions::Question>,
+    /// Set when the close is refused (a bounded job with uncovered lines): the code and what was refused.
+    #[serde(default)]
+    pub refusal: Option<crate::api::Refusal>,
 }
 
 pub const CLOSING_SCHEMA: &str = "custodian.job_closing.v1";
@@ -744,6 +928,24 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     }
     let test_seqs: Vec<i64> = runs.iter().filter(|r| r.command == "test").map(|r| r.seq).collect();
     let tests = journal.tests_of_runs(&test_seqs)?;
+    // the mode's rule, the verifications, the two facts' times
+    let mode = jf.mode.unwrap_or(JobMode::Unbounded);
+    let transforms: Vec<(i64, crate::transform::TransformRecord)> = runs
+        .iter()
+        .filter(|r| r.command == "transform" && r.accepted)
+        .filter_map(|r| r.outputs.iter().find(|o| o.ends_with(".json")).and_then(|o| std::fs::read_to_string(ctx.root.join(o)).ok()).and_then(|t| serde_json::from_str(&t).ok()).map(|t| (r.seq, t)))
+        .collect();
+    let uncovered = if mode == JobMode::Bounded { uncovered_lines(ctx, &running, &transforms.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>())? } else { Vec::new() };
+    let verify: Vec<(String, String)> = jf.verify.iter().map(|v| (v.clone(), verified(v, &runs, &tests, &specs).to_string())).collect();
+    let known_at = |at_open: Option<bool>, commands: &[&str]| -> Option<String> {
+        if at_open == Some(true) {
+            return Some("open".into());
+        }
+        runs.iter().find(|r| commands.contains(&r.command.as_str())).map(|r| format!("#{}", r.seq))
+    };
+    let target_known_at = known_at(jf.target_known, &["preflight", "plan"]);
+    let outcome_known_at = known_at(jf.outcome_known, &["verify"]);
+    let mut result: (String, Option<String>) = result_of_parts(&uncovered, &verify, false);
     // the task history: changes (from the open and close counts), verifications, the result
     let mut history_said = Vec::new();
     if let Some(task) = crate::task_records::of_job(store, jf.task_id.as_deref(), jf.revision.as_deref())? {
@@ -781,12 +983,19 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
             crate::task_records::verification(&task, &format!("custodian check {}", r.name), Some(r.accepted), Some(&r.reason))?;
         }
         let failed = tests.iter().any(|t| matches!(t.outcome.as_str(), "FAILED" | "failed" | "fail")) || runs.iter().any(|r| r.command == "check" && !r.accepted);
+        let (status, why) = result_of(failed, &uncovered, &verify);
+        result = (status.to_string(), why.clone());
         let tree = crate::api::IndexKey::of_root(&ctx.root, &Default::default()).ok().map(|k| k.0);
-        crate::task_records::close(&task, if failed { "failed_test" } else { "accepted" }, tree.as_deref())?;
+        crate::task_records::close_noted(&task, status, tree.as_deref(), why.as_deref())?;
         history_said.push(format!("task history: {}/{} ({} changes, {} verifications, result)", task.task_id, task.revision, changes, tests.len() + runs.iter().filter(|r| r.command == "check").count()));
     }
     let kind = jf.kind.clone().unwrap_or_else(|| "specs".into());
     let guidance = (kind != "specs").then(|| template_in(store, &kind).ok().map(|t| t.summary)).flatten();
+    let decisions_open: Vec<crate::questions::Question> = match (&jf.task_id, crate::questions::open(store)) {
+        (Some(t), Ok(qs)) => qs.into_iter().filter(|q| q.task.as_deref().is_some_and(|x| x.starts_with(&format!("{t}/")))).collect(),
+        _ => Vec::new(),
+    };
+    let refusal = (!uncovered.is_empty()).then(|| ReadingRefusal::BoundedUncovered.refusal(uncovered.iter().map(|u| if u.lines.is_empty() { u.path.clone() } else { format!("{}:{}", u.path, u.lines.iter().map(u32::to_string).collect::<Vec<_>>().join(",")) }).collect::<Vec<_>>().join("; ")));
     let closing = Closing {
         schema: CLOSING_SCHEMA.into(),
         id: id.clone(),
@@ -803,6 +1012,16 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         guidance,
         findings,
         lines_touched,
+        mode: Some(mode),
+        target_known_at,
+        outcome_known_at,
+        verify,
+        transforms: transforms.iter().map(|(s, _)| *s).collect(),
+        uncovered,
+        result: result.0.clone(),
+        result_reason: result.1.clone(),
+        decisions_open,
+        refusal,
     };
     let json = serde_json::to_string_pretty(&closing)? + "\n";
     write_whole(&running.join("closing.json"), json.as_bytes())?;
@@ -850,12 +1069,171 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     Ok((closing, done, said))
 }
 
+/// The job's result from its evidence: a bounded job with lines no transform covers is `rejected`; a failed test or
+/// check is `failed_test`; no verification declared, or one not satisfied, is `pending` (never `accepted` without
+/// evidence); else `accepted`.
+fn result_of(failed: bool, uncovered: &[crate::transform::Uncovered], verify: &[(String, String)]) -> (&'static str, Option<String>) {
+    let (s, w) = result_of_parts(uncovered, verify, failed);
+    (match s.as_str() {
+        "rejected" => "rejected",
+        "failed_test" => "failed_test",
+        "pending" => "pending",
+        _ => "accepted",
+    }, w)
+}
+
+fn result_of_parts(uncovered: &[crate::transform::Uncovered], verify: &[(String, String)], failed: bool) -> (String, Option<String>) {
+    if !uncovered.is_empty() {
+        return ("rejected".into(), Some(format!("bounded: {} files touched by hand, not by a transform of the job", uncovered.len())));
+    }
+    if failed || verify.iter().any(|(_, s)| s == "failed") {
+        return ("failed_test".into(), Some("a test or check the job ran failed".into()));
+    }
+    if verify.is_empty() {
+        return ("pending".into(), Some("no verification declared: what does done look like? (job start --verify, or answer the decision)".into()));
+    }
+    let not_run: Vec<&str> = verify.iter().filter(|(_, s)| s != "satisfied").map(|(v, _)| v.as_str()).collect();
+    if !not_run.is_empty() {
+        return ("pending".into(), Some(format!("not verified yet: {}", not_run.join(", "))));
+    }
+    ("accepted".into(), None)
+}
+
+/// Whether the job's own runs satisfy one verification.
+fn verified(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], specs: &[SpecClosed]) -> &'static str {
+    let Some((form, what)) = line.split_once(':') else { return "not run" };
+    let what = what.trim();
+    match form {
+        "test" => {
+            let hits: Vec<&crate::store::TestRow> = tests.iter().filter(|t| t.test == what || t.test.ends_with(&format!("::{what}")) || t.package == what).collect();
+            if hits.iter().any(|t| matches!(t.outcome.as_str(), "FAILED" | "failed" | "fail")) {
+                "failed"
+            } else if hits.iter().any(|t| matches!(t.outcome.as_str(), "ok" | "passed" | "pass")) {
+                "satisfied"
+            } else {
+                "not run"
+            }
+        }
+        "reading" => match specs.iter().rev().find(|s| s.name == what) {
+            Some(s) if s.changed.as_ref().is_some_and(|d| !d.is_empty()) => "satisfied",
+            Some(_) => "not run",
+            None => "not run",
+        },
+        "check" => match runs.iter().rev().find(|r| r.command == "check" && r.name == what) {
+            Some(r) if r.accepted => "satisfied",
+            Some(_) => "failed",
+            None => "not run",
+        },
+        _ => "not run",
+    }
+}
+
+/// A bounded job's files that no transform of it covers, from its open and close counts of the workspace, each with
+/// the lines changed by hand when code_passenger holds a snapshot of the state the hand edit began from.
+fn uncovered_lines(ctx: &Ctx, folder: &Path, transforms: &[crate::transform::TransformRecord]) -> Result<Vec<crate::transform::Uncovered>> {
+    let counts = taken(folder);
+    let of = |label: &str| counts.iter().filter(|t| t.route == "*" && t.label == label).last().cloned();
+    let (Some(open), Some(close)) = (of("open"), of("close")) else { return Ok(Vec::new()) };
+    let digests = |t: &Taken| -> Result<std::collections::BTreeMap<String, String>> {
+        let r = load(&folder.join(&t.reading))?;
+        Ok(r.count.map(|c| c.crates.iter().flat_map(|k| k.file_counts.iter()).filter(|f| !f.path.contains('#')).map(|f| (f.path.clone(), f.digest.clone())).collect()).unwrap_or_default())
+    };
+    let mut out = crate::transform::coverage(&digests(&open)?, &digests(&close)?, transforms);
+    if crate::exec::on_path("code-passenger") {
+        for u in out.iter_mut().filter(|u| u.from != "none" && u.now != "none") {
+            let line = crate::exec::CodePassenger::at_root(ctx.root.as_os_str()).words(["passenger", "diff", "--from", u.from.as_str(), "--file", u.path.as_str()]);
+            let plan = crate::exec::Plan::new("bounded-coverage").then(crate::exec::line("code-passenger:passenger-diff", &line)?);
+            if let Some(w) = plan.walk(crate::exec::Watch::Quiet, |_, _| {})?.first() {
+                if let Some(l) = w.stdout.lines().find_map(|l| l.strip_prefix("lines: ")) {
+                    u.lines = l.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// A verification declared on a running job (`custodian job verify LINE`, or the answer to "what does done look
+/// like"): added to its job file, with a `verify` receipt, so the closing receipt says when the outcome became known.
+pub fn declare_verify(ctx: &Ctx, which: Option<&str>, line: &str) -> Result<(String, Receipt)> {
+    check_verify(line)?;
+    let store = ctx.store()?;
+    let running = find(store, JobState::Running, which)?;
+    let mut jf = job_file(&running);
+    let id = jf.id.clone().ok_or_else(|| ReadingRefusal::JobState.refuse(format!("{} was never started", running.display())))?;
+    if !jf.verify.iter().any(|v| v == line) {
+        jf.verify.push(line.to_string());
+    }
+    write_job_file(&running, &jf)?;
+    if let Some(t) = crate::task_records::of_job(store, jf.task_id.as_deref(), jf.revision.as_deref())? {
+        crate::task_records::verification(&t, &format!("done is: {line}"), None, Some("declared"))?;
+    }
+    let digest = crate::digest::of_value(&(&id, line));
+    let r = Receipt {
+        schema: RECEIPT_SCHEMA.into(),
+        seq: 0,
+        utc: now_utc(),
+        command: "verify".into(),
+        name: id.clone(),
+        spec: None,
+        spec_hash: None,
+        code_digest: None,
+        index_key: None,
+        plan_id: format!("job:{id}"),
+        plan_digest: digest.clone(),
+        operation_digest: digest.clone(),
+        receipt_digest: digest,
+        line: format!("custodian job verify {line}"),
+        exit_code: Some(0),
+        accepted: true,
+        disposition: "Continue".into(),
+        reason: "declared".into(),
+        outputs: vec![ctx.rel(&running.join(job_file_name()))],
+        job: Some(id.clone()),
+        reused_seq: None,
+        millis: 0,
+        runner: crate::receipts::RUNNER_IN_PROCESS.into(),
+    };
+    let (r, _) = keep(store, r)?;
+    Ok((id, r))
+}
+
 /// The closing receipt as a page: facts first.
 pub fn render_closing(c: &Closing) -> String {
     let mut s = format!("# job {} — {}\n\n", c.id, c.name);
     s.push_str(&format!("- kind: {} · opened {} · closed {}\n- runs: {} (#{}) · readings reused from the cache: {}\n", c.kind, c.opened_utc.clone().unwrap_or_default(), c.closed_utc, c.runs.len(), c.runs.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(", #"), c.reused));
     if let Some(g) = &c.guidance {
         s.push_str(&format!("- guidance: {g}\n"));
+    }
+    if !c.result.is_empty() {
+        s.push_str(&format!("- result: **{}**{}\n", c.result, c.result_reason.as_ref().map(|r| format!(" — {r}")).unwrap_or_default()));
+    }
+    if let Some(m) = c.mode {
+        s.push_str(&format!("- mode: {} · target known: {} · outcome known: {}\n", m.as_str(), c.target_known_at.clone().unwrap_or_else(|| "never".into()), c.outcome_known_at.clone().unwrap_or_else(|| "never".into())));
+    }
+    if let Some(r) = &c.refusal {
+        s.push_str(&format!("- refused: {r}\n"));
+    }
+    if !c.verify.is_empty() {
+        s.push_str("\n## verification\n\n");
+        for (v, st) in &c.verify {
+            s.push_str(&format!("- {v}: {st}\n"));
+        }
+    }
+    if !c.uncovered.is_empty() {
+        s.push_str("\n## touched by hand, not by a transform (bounded)\n\n");
+        for u in &c.uncovered {
+            s.push_str(&format!("- {}{}\n", u.path, if u.lines.is_empty() { String::new() } else { format!(": lines {}", u.lines.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")) }));
+        }
+    }
+    if !c.transforms.is_empty() {
+        s.push_str(&format!("\n- transforms: #{}\n", c.transforms.iter().map(i64::to_string).collect::<Vec<_>>().join(", #")));
+    }
+    if !c.decisions_open.is_empty() {
+        s.push_str("\n## decisions still open\n\n");
+        for q in &c.decisions_open {
+            s.push_str(&format!("- `{}` {}\n", q.id, q.question));
+        }
     }
     if !c.findings.is_empty() {
         s.push_str("\n## findings\n\n");
@@ -909,7 +1287,20 @@ pub fn brief(ctx: &Ctx, which: &str) -> Result<String> {
     let done = find(store, JobState::Done, Some(which))?;
     let text = std::fs::read_to_string(done.join("closing.json")).map_err(|e| ReadingRefusal::MissingInput.refuse(format!("{}: {e}", done.display())))?;
     let c: Closing = serde_json::from_str(&text).map_err(|e| ReadingRefusal::MissingInput.refuse(e))?;
-    let mut s = format!("job {} ({}) closed {} — {} runs, {} reused\n", c.id, c.name, c.closed_utc, c.runs.len(), c.reused);
+    let mut s = String::new();
+    for q in &c.decisions_open {
+        s.push_str(&format!("decision open {}: {}{}\n", q.id, q.question, if q.options.is_empty() { String::new() } else { format!(" ({})", q.options.join(" | ")) }));
+    }
+    s.push_str(&format!("job {} ({}) closed {} — {} runs, {} reused\n", c.id, c.name, c.closed_utc, c.runs.len(), c.reused));
+    if !c.result.is_empty() {
+        s.push_str(&format!("result: {}{}\n", c.result, c.result_reason.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()));
+    }
+    if let Some(m) = c.mode {
+        s.push_str(&format!("mode: {} · target known: {} · outcome known: {}\n", m.as_str(), c.target_known_at.clone().unwrap_or_else(|| "never".into()), c.outcome_known_at.clone().unwrap_or_else(|| "never".into())));
+    }
+    for u in &c.uncovered {
+        s.push_str(&format!("touched by hand (bounded): {}{}\n", u.path, if u.lines.is_empty() { String::new() } else { format!(":{}", u.lines.iter().map(u32::to_string).collect::<Vec<_>>().join(",")) }));
+    }
     if let Some(g) = &c.guidance {
         s.push_str(&format!("guidance: {g}\n"));
     }
@@ -947,7 +1338,7 @@ pub fn run_template(ctx: &Ctx, kind: &str, target: &str, again: bool) -> Result<
     let store = ctx.store()?;
     let name = format!("{kind}-{}", crate::runs::stamp());
     let dir = store.job_dir(JobState::Queued, &name)?;
-    let jf = JobFile { id: None, name: Some(name.clone()), kind: Some(kind.to_string()), target: Some(target.to_string()), origin: None, count: None, routes: Vec::new(), task_id: None, revision: None };
+    let jf = JobFile { name: Some(name.clone()), kind: Some(kind.to_string()), target: Some(target.to_string()), ..JobFile::default() };
     write_job_file(&dir, &jf)?;
     let started = start(ctx, Some(&name), again)?;
     let (closing, done, said) = close(ctx, &started.id)?;

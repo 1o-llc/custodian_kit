@@ -119,8 +119,18 @@ pub fn verification(t: &TaskRef, check: &str, passed: Option<bool>, note: Option
 /// `job close`: the result (status and the tree's digest, the hex of the
 /// code's index key), and the history's index refreshed.
 pub fn close(t: &TaskRef, status: &str, tree_digest: Option<&str>) -> Result<DiffDocument> {
+    close_noted(t, status, tree_digest, None)
+}
+
+/// [`close`], with why the status is what it is (`pending`: no verification declared; `rejected`: lines no
+/// transform covers) as the result record's `note`.
+pub fn close_noted(t: &TaskRef, status: &str, tree_digest: Option<&str>, note: Option<&str>) -> Result<DiffDocument> {
     let digest = tree_digest.map(|d| d.trim_start_matches("sha256:").to_string()).filter(|d| d.len() == 64).unwrap_or_else(|| "pending".to_string());
-    let r = t.write(DiffDocument::record(DiffRecordKind::Result).with("status", status).with("resulting_tree_digest", digest))?;
+    let mut doc = DiffDocument::record(DiffRecordKind::Result).with("status", status).with("resulting_tree_digest", digest);
+    if let Some(n) = note {
+        doc = doc.with("note", n);
+    }
+    let r = t.write(doc)?;
     task_history::write_index(&t.root).map_err(refuse)?;
     Ok(r)
 }

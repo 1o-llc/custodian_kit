@@ -24,7 +24,7 @@ use crate::reading::spec::{vocabulary, ReadingSpec};
 use crate::reading::Answer;
 use crate::store::{named as layout, write_whole, Store};
 use crate::{CodeQueryResult, Result};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 

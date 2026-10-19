@@ -192,7 +192,7 @@ fn the_schemas_name_exactly_the_fields_of_the_rust_forms() {
     declared.sort();
     assert_eq!(have, declared);
 
-    let job = custodian_kit::jobs::JobFile { id: Some("1".into()), name: Some("n".into()), kind: Some("specs".into()), target: Some("t".into()), origin: Some("o".into()), count: Some(true), routes: vec!["*".into()], task_id: Some("t".into()), revision: Some("base".into()) };
+    let job = custodian_kit::jobs::JobFile { id: Some("1".into()), name: Some("n".into()), kind: Some("specs".into()), target: Some("t".into()), origin: Some("o".into()), count: Some(true), routes: vec!["*".into()], task_id: Some("t".into()), revision: Some("base".into()), mode: Some(custodian_kit::jobs::JobMode::Bounded), verify: vec!["test:x".into()], target_known: Some(true), outcome_known: Some(true) };
     let mut have = Vec::new();
     keys(&serde_json::to_value(&job).unwrap(), "", &mut have);
     let mut declared = Vec::new();
@@ -205,6 +205,45 @@ fn the_schemas_name_exactly_the_fields_of_the_rust_forms() {
     schema_keys(&Doc::Paths.schema()["properties"]["paths"], "", &mut declared);
     declared.sort();
     assert_eq!(declared, vec!["decl", "ignore", "path"]);
+
+    // the change spec and the linkage record, every field set once
+    let piece = |name: &str| {
+        let mut v = serde_json::Map::new();
+        v.insert("piece".into(), name.into());
+        for s in custodian_kit::change::SLOTS {
+            v.insert(s.to_string(), if ["conditions", "errors", "candidates", "fields", "flags", "args"].contains(s) { serde_json::json!(["x"]) } else { serde_json::json!("x") });
+        }
+        serde_json::Value::Object(v)
+    };
+    let f = serde_json::json!({"name": "f", "vis": "pub", "receiver": "&self", "params": [{"name": "a", "ty": "u8"}], "returns": "u8", "generics": "<T>", "where": "T: Clone", "async": true, "const": true, "unsafe": true, "attrs": ["#[inline]"], "doc": "d", "body": [piece("ensure")], "generator": piece("getter")});
+    let field = serde_json::json!({"name": "n", "ty": "u8", "vis": "pub", "doc": "d", "attrs": ["#[x]"], "default": "0"});
+    let variant = serde_json::json!({"name": "V", "doc": "d", "attrs": ["#[x]"], "tuple": ["u8"], "fields": [field.clone()], "discriminant": "1"});
+    let change = serde_json::json!({
+        "name": "c", "objective": "o", "operation": "make_struct", "target": "crate:x",
+        "item": {"name": "S", "vis": "pub", "doc": "d", "generics": "<T>", "derives": ["Debug"], "attrs": ["#[x]"], "fields": [field.clone()], "tuple": ["u8"], "variants": [variant.clone()], "generator": piece("shell_command_builder")},
+        "function": f.clone(), "functions": [f.clone()], "field": field.clone(), "variant": variant.clone(), "derive": ["Clone"], "attribute": "#[x]", "trait": "Display", "assoc": ["type O = u8;"],
+        "generator": piece("impl_std_error"), "module": {"name": "m", "vis": "pub", "doc": "d"}, "dependency": {"name": "d", "version": "1", "path": "p", "features": ["f"]},
+        "new_name": "n", "to": "crate:x/src/y.rs", "items": ["x::a"], "feature": "f", "linkage": "l", "call_sites": {"pass": "0"}, "compatibility": "preserve",
+        "scope": {"read": ["crate:x"], "write": ["crate:x"]}, "features": ["default"], "validate": ["check"], "postconditions": ["exists x::S"], "decisions": [{"question": "q", "options": ["a"], "why": "w"}]
+    });
+    let spec: custodian_kit::change::ChangeSpec = serde_json::from_value(change).unwrap();
+    let mut have = Vec::new();
+    keys(&serde_json::to_value(&spec).unwrap(), "", &mut have);
+    let mut declared = Vec::new();
+    schema_keys(&Doc::Change.schema()["properties"]["change"], "", &mut declared);
+    have.sort();
+    have.dedup();
+    declared.sort();
+    declared.dedup();
+    assert_eq!(have, declared);
+    let rec = custodian_kit::linkage::LinkageRecord { name: "l".into(), kind: custodian_kit::linkage::LinkKind::Invariant, why: "w".into(), binds: vec!["a".into()], author: Some("a".into()), recorded_utc: Some("t".into()), evidence: vec!["e".into()] };
+    let mut have = Vec::new();
+    keys(&serde_json::to_value(&rec).unwrap(), "", &mut have);
+    let mut declared = Vec::new();
+    schema_keys(&Doc::Linkage.schema()["properties"]["linkage"], "", &mut declared);
+    have.sort();
+    declared.sort();
+    assert_eq!(have, declared);
 }
 
 #[test]
