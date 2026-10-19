@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// `.custodian/config/paths.toml`.
+/// The paths table: `.custodian/config/v1.paths.1o.paths` (or the older `paths.toml`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PathsFile {
@@ -125,8 +125,11 @@ pub struct PathsTable {
 }
 
 /// The table's own file in an initialized project.
+/// `config/v1.paths.1o.paths`, or the older `config/paths.toml` when only it is there.
 pub fn paths_file(store: &Store) -> Result<PathBuf> {
-    store.path(&named::THRESHOLDS, &[("name", "paths")])
+    let oneo = store.path(&named::PATHS, &[])?;
+    let old = store.path(&named::THRESHOLDS, &[("name", "paths")])?;
+    Ok(if !oneo.exists() && old.exists() { old } else { oneo })
 }
 
 impl PathsTable {
@@ -145,7 +148,10 @@ impl PathsTable {
         if let Some(s) = store {
             let p = paths_file(s)?;
             if let Ok(text) = std::fs::read_to_string(&p) {
-                file = toml::from_str(&text).map_err(|e| ReadingRefusal::SpecInvalid.refuse(format!("{}: {e}", p.display())))?;
+                file = match crate::oneo::Doc::of_file(&p) {
+                    Some((crate::oneo::Doc::Paths, _)) => crate::oneo::parse(crate::oneo::Doc::Paths, &p.display().to_string(), &text)?,
+                    _ => toml::from_str(&text).map_err(|e| ReadingRefusal::SpecInvalid.refuse(format!("{}: {e}", p.display())))?,
+                };
             }
             custodian.insert("specs".into(), s.dir_of(&named::QUEUED_SPEC, &[("name", "x")])?.parent().map(Path::to_path_buf).unwrap_or_default());
             custodian.insert("readings".into(), s.reading_dir("x")?.parent().map(Path::to_path_buf).unwrap_or_default());
@@ -180,7 +186,7 @@ impl PathsTable {
             return Ok(Route { name: s.into(), place: Place::Crate { name: key, root: root.clone(), file } });
         }
         if let Some(name) = s.strip_prefix("decl:") {
-            let globs = self.file.decl.get(name).ok_or_else(|| undeclared("not in [decl] of .custodian/config/paths.toml"))?;
+            let globs = self.file.decl.get(name).ok_or_else(|| undeclared("not among the decl sets of the paths table (.custodian/config/v1.paths.1o.paths)"))?;
             return Ok(Route { name: s.into(), place: Place::Decl { name: name.into(), globs: globs.clone() } });
         }
         if let Some(part) = s.strip_prefix("custodian:") {

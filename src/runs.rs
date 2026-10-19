@@ -243,7 +243,7 @@ fn copy_into(outputs: &[String], dir: &Path, root: &Path) -> Result<Vec<String>>
 /// The specs waiting in `specs/queued`, in name order.
 pub fn queued_specs(store: &Store) -> Result<Vec<PathBuf>> {
     let dir = store.dir_of(&named::QUEUED_SPEC, &[("name", "x")])?;
-    let mut v: Vec<PathBuf> = std::fs::read_dir(&dir).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "toml")).collect()).unwrap_or_default();
+    let mut v: Vec<PathBuf> = std::fs::read_dir(&dir).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| crate::reading::spec::SpecForm::of(p).is_some()).collect()).unwrap_or_default();
     v.sort();
     Ok(v)
 }
@@ -254,10 +254,13 @@ pub fn run_queue(ctx: &Ctx, again: bool) -> Result<Vec<Ran>> {
     let mut out = Vec::new();
     for spec in queued_specs(store)? {
         let mut ran = run_reading(ctx, &spec, again, None)?;
-        let stem = spec.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        let mut done = store.path(&named::DONE_SPEC, &[("name", &stem)])?;
+        // the done spec keeps its form and its name; a second one of the name gets the stamp
+        let form = crate::reading::spec::SpecForm::of(&spec).unwrap_or(crate::reading::spec::SpecForm::Toml);
+        let stem = crate::reading::spec::SpecForm::stem(&spec).unwrap_or_default();
+        let done_dir = store.dir_of(&named::DONE_SPEC, &[("name", "x")])?;
+        let mut done = done_dir.join(form.file_name(&stem));
         if done.exists() {
-            done = store.path(&named::DONE_SPEC, &[("name", &format!("{stem}-{}", stamp()))])?;
+            done = done_dir.join(form.file_name(&format!("{stem}-{}", stamp())));
         }
         if let Some(d) = done.parent() {
             std::fs::create_dir_all(d).map_err(|e| ReadingRefusal::Write.refuse(format!("{}: {e}", d.display())))?;

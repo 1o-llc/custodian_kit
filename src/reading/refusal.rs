@@ -64,6 +64,10 @@ pub enum ReadingRefusal {
     JobRunning,
     #[liaise(code = 28, msg = "the serve socket answered with something that is not a receipt")]
     BadReply,
+    #[liaise(code = 29, msg = "a 1o document does not parse, does not match its schema, or does not read into its form")]
+    OneoInvalid,
+    #[liaise(code = 30, msg = "a value cannot be written in 1o (core-1o strings have no escapes, so a double quote cannot be carried; no negative numbers)")]
+    OneoUnwritable,
     #[liaise(code = 101, msg = "the bundle filters break the word's own rules")]
     FiltersRefused,
     #[liaise(code = 102, msg = "the route holds no file the filters keep")]

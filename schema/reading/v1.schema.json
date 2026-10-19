@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "custodian reading spec v1",
+  "description": "One question about a Rust workspace, answered by custodian from klepto's facts. A key marked as repeating is written once per value.",
+  "type": "object",
+  "required": [
+    "reading"
+  ],
+  "properties": {
+    "reading": {
+      "type": "object",
+      "required": [
+        "name",
+        "question",
+        "kind",
+        "target"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The folder its readings go to: readings/<name>/."
+        },
+        "question": {
+          "type": "string",
+          "description": "The question, one line, in the asker's words."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "use_sites",
+            "readers_of_env",
+            "duplicates",
+            "dependents",
+            "declared_in",
+            "sockets",
+            "reach",
+            "constructs",
+            "matches_on",
+            "public_api",
+            "tests_covering",
+            "affected_tests",
+            "sensitivity",
+            "diagnostics",
+            "bundle",
+            "sweep"
+          ],
+          "description": "What the reading reads (the kinds table in custodian_kit's README)."
+        },
+        "target": {
+          "type": "string",
+          "description": "A route (crate:<name>, crate:<name>/src/x.rs, decl:<name>, custodian:<part>, path:<raw> in free mode), a name, an item path, an env key or PREFIX*, a binary, or * for the whole scope."
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Which part of the workspace is read.",
+          "properties": {
+            "exclude": {
+              "type": "string",
+              "description": "A path glob, relative to the root, whose .rs files are not read. Repeats: one value per line, in order."
+            },
+            "tests": {
+              "type": "boolean",
+              "description": "Read each member's tests/ too."
+            },
+            "dependency_macros": {
+              "type": "boolean",
+              "description": "Expand the #[macro_export] macros of dependencies."
+            }
+          }
+        },
+        "declared_in": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "files",
+            "key"
+          ],
+          "description": "One family of declaration files: TOML matching files, read at key. Repeats: one value per line, in order.",
+          "properties": {
+            "files": {
+              "type": "string",
+              "description": "A glob relative to the root, or a declared route (decl:<name>). Repeats: one value per line, in order."
+            },
+            "key": {
+              "type": "string",
+              "description": "The key path whose values are the declared names: binary, binds[], env.*, nodes[].answers.*"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "name",
+                "binary",
+                "env",
+                "socket",
+                "socket_env"
+              ],
+              "description": "What the value is, so kinds can join on it."
+            },
+            "entry": {
+              "type": "string",
+              "description": "The key path of the entry's own name (id); the file stem when unset."
+            }
+          }
+        },
+        "readers": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What counts as reading an env key.",
+          "properties": {
+            "fns": {
+              "type": "string",
+              "description": "A function that reads the environment. Repeats: one value per line, in order."
+            },
+            "macros": {
+              "type": "string",
+              "description": "A macro that reads it at compile time. Repeats: one value per line, in order."
+            },
+            "follow": {
+              "type": "boolean",
+              "description": "Also every function reaching one of fns."
+            }
+          }
+        },
+        "duplicates": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How alike two bodies must be.",
+          "properties": {
+            "level": {
+              "type": "string",
+              "enum": [
+                "exact",
+                "renamed",
+                "literals",
+                "types",
+                "callees"
+              ],
+              "description": "klepto's shape level."
+            },
+            "min_tokens": {
+              "type": "integer",
+              "description": "Bodies with fewer significant tokens are not compared."
+            }
+          }
+        },
+        "change": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "affected_tests: what changed.",
+          "properties": {
+            "files": {
+              "type": "string",
+              "description": "A changed file, relative to the root. Repeats: one value per line, in order."
+            },
+            "git_ref": {
+              "type": "string",
+              "description": "A git ref diffed by a declared line before the reading."
+            },
+            "items": {
+              "type": "string",
+              "description": "A changed item path. Repeats: one value per line, in order."
+            }
+          }
+        },
+        "bundle": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "bundle: what the bundle leaves out.",
+          "properties": {
+            "filters": {
+              "type": "string",
+              "enum": [
+                "no_tests",
+                "no_benches",
+                "no_examples",
+                "only_src"
+              ],
+              "description": "A filter of the filters word. Repeats: one value per line, in order."
+            },
+            "no_features": {
+              "type": "string",
+              "description": "A feature whose gated files and items are left out. Repeats: one value per line, in order."
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -49,6 +49,7 @@ pub mod sweep;
 pub mod job_bundle;
 pub mod bundle;
 pub mod api;
+pub mod oneo;
 
 #[cfg(test)]
 mod tests;

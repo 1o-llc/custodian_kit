@@ -323,14 +323,69 @@ impl ReadingSpec {
         spec.checked()
     }
 
+    /// The same spec written in 1o (`{ reading { ... } }`), checked against
+    /// the shipped reading schema.
+    pub fn from_1o(text: &str) -> Result<Self> {
+        let spec: ReadingSpec = crate::oneo::parse(crate::oneo::Doc::Reading, "reading", text)?;
+        spec.checked()
+    }
+
+    /// The spec as a 1o document.
+    pub fn to_1o(&self) -> Result<String> {
+        crate::oneo::render(crate::oneo::Doc::Reading, self)
+    }
+
+    /// A spec file: `v1.<name>.1o.reading` in 1o, `.json`, or TOML.
     pub fn from_path(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path).map_err(|e| ReadingRefusal::SpecUnreadable.refuse(format!("{}: {e}", path.display())))?;
-        if path.extension().and_then(|e| e.to_str()) == Some("json") {
-            Self::from_json(&text)
-        } else {
-            Self::from_toml(&text)
+        match SpecForm::of(path) {
+            Some(SpecForm::Oneo) => Self::from_1o(&text),
+            Some(SpecForm::Json) => Self::from_json(&text),
+            _ => Self::from_toml(&text),
         }
     }
+}
+
+/// The forms a spec file is written in, by its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecForm {
+    Oneo,
+    Toml,
+    Json,
+}
+
+impl SpecForm {
+    /// The form of a spec file, or `None` when the name is not a spec's.
+    pub fn of(path: &Path) -> Option<SpecForm> {
+        if let Some((doc, _)) = crate::oneo::Doc::of_file(path) {
+            return (doc == crate::oneo::Doc::Reading).then_some(SpecForm::Oneo);
+        }
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("toml") => Some(SpecForm::Toml),
+            Some("json") => Some(SpecForm::Json),
+            _ => None,
+        }
+    }
+
+    /// A spec file's name in this form: `v1.<stem>.1o.reading`, `<stem>.toml`, `<stem>.json`.
+    pub fn file_name(self, stem: &str) -> String {
+        match self {
+            SpecForm::Oneo => crate::oneo::Doc::Reading.file_name(stem),
+            SpecForm::Toml => format!("{stem}.toml"),
+            SpecForm::Json => format!("{stem}.json"),
+        }
+    }
+
+    /// A spec file's name without its form: `v1.x.1o.reading`, `x.toml`, `x.json` → `x`.
+    pub fn stem(path: &Path) -> Option<String> {
+        match Self::of(path)? {
+            SpecForm::Oneo => crate::oneo::Doc::of_file(path).map(|(_, n)| n),
+            _ => path.file_stem().map(|s| s.to_string_lossy().into_owned()),
+        }
+    }
+}
+
+impl ReadingSpec {
 
     fn checked(mut self) -> Result<Self> {
         if self.kind.reads_tests() {

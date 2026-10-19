@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "custodian job file v1",
+  "description": "A job folder's own file: every key optional.",
+  "type": "object",
+  "required": [
+    "job"
+  ],
+  "properties": {
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The job's id, given when it starts."
+        },
+        "name": {
+          "type": "string",
+          "description": "The job's name."
+        },
+        "kind": {
+          "type": "string",
+          "description": "specs (the folder's spec files, the default) or a job template's kind (triage)."
+        },
+        "target": {
+          "type": "string",
+          "description": "A template's {target}."
+        },
+        "origin": {
+          "type": "string",
+          "description": "For an imported job: the digest of the bundle it came from."
+        }
+      }
+    }
+  }
+}

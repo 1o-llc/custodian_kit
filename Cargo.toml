@@ -13,7 +13,7 @@ authors = ["James Hunt <james@1o.business>"]
 repository = "https://github.com/jameshuntt/custodian_kit"
 readme = "README.md"
 
-include = ["src/**", "Cargo.toml", "LICENSE*", "README*", "CHANGELOG*"]
+include = ["src/**", "schema/**", "Cargo.toml", "LICENSE*", "README*", "CHANGELOG*"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -49,6 +49,7 @@ uh-tom-mick = "0.1.1"
 # a job or a reading packed into one annotated file
 bundles = { version = "0.2.3", path = "../bundles", default-features = false }
 big-bad-bool = "0.1.1"
+core-1o = "0.1.1"
 # context windows of secret items held redacted
 classified = "0.2.1"
 # level and boundary rules stated as constraints

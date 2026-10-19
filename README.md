@@ -36,6 +36,44 @@ A spec whose scope (tests read, globs left out) differs from the open
 workspace's is refused with `CUST0002`; open one for it with
 `Workspace::open_for`.
 
+## Documents in 1o
+
+A reading spec, a job file and the paths table are 1o documents, each
+declared once as a 1o schema shipped in this crate:
+
+| document | file | schema |
+|---|---|---|
+| reading spec | `v1.<name>.1o.reading` | `schema/reading/v1.schema.json` |
+| job file | `v1.job.1o.job` | `schema/job/v1.schema.json` |
+| paths table | `v1.paths.1o.paths` | `schema/paths/v1.schema.json` |
+
+```text
+{
+  reading {
+    name "serve-metrics-use-sites"
+    question "Who calls serve_metrics?"
+    kind "use_sites"
+    target "serve_metrics"
+    scope {
+      exclude "attempts/**"
+      exclude "crates/old/**"
+    }
+  }
+}
+```
+
+core-1o parses the text and checks it against the schema; the result reads
+into the same `ReadingSpec` a TOML spec reads into, so a spec and its TOML
+twin are one spec with one digest (the digest is over that form, never the
+text). A key written several times is a list. TOML and JSON specs are still
+read.
+
+`custodian init` copies the schemas to `.custodian/config/schema/` and lists
+that folder in the project's `oneo.project.json`, which is where core-1o's
+workspace, and so language-server-1o, looks: a spec being edited is checked
+against its schema as it is typed. The kinds below are the schema's `kind`
+enum; a test holds the two equal.
+
 ## Reading kinds
 
 | kind | what it means |

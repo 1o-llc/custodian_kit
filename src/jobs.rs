@@ -110,8 +110,27 @@ pub struct JobFile {
     pub origin: Option<String>,
 }
 
-fn job_file(dir: &Path) -> JobFile {
+/// The job file's name in 1o: `v1.job.1o.job`.
+pub fn job_file_name() -> String {
+    crate::oneo::Doc::Job.file_name("job")
+}
+
+/// Whether a file in a job folder is its job file (1o, or the older job.toml).
+pub fn is_job_file(p: &Path) -> bool {
+    p.file_name().is_some_and(|n| n == "job.toml" || n.to_string_lossy() == job_file_name())
+}
+
+/// A job folder's job file: `v1.job.1o.job`, else `job.toml`, else empty.
+pub fn job_file(dir: &Path) -> JobFile {
+    if let Ok(t) = std::fs::read_to_string(dir.join(job_file_name())) {
+        return crate::oneo::parse(crate::oneo::Doc::Job, &job_file_name(), &t).unwrap_or_default();
+    }
     std::fs::read_to_string(dir.join("job.toml")).ok().and_then(|t| toml::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// Writes a job folder's job file in 1o (the older job.toml beside it is left).
+fn write_job_file(dir: &Path, jf: &JobFile) -> Result<()> {
+    write_whole(&dir.join(job_file_name()), crate::oneo::render(crate::oneo::Doc::Job, jf)?.as_bytes())
 }
 
 fn folders(store: &Store, state: JobState) -> Result<Vec<PathBuf>> {
@@ -199,9 +218,14 @@ fn step_spec(folder: &Path, n: usize, step: &Step, target: &str, items: &[String
     if !items.is_empty() {
         t.push_str(&format!("\n[change]\nitems = [{}]\n", items.iter().map(|i| toml_str(i)).collect::<Vec<_>>().join(", ")));
     }
-    let p = folder.join("steps").join(format!("{name}.toml"));
-    ReadingSpec::from_toml(&t)?;
-    write_whole(&p, t.as_bytes())?;
+    // the step's spec in 1o; a value 1o cannot carry (a double quote) keeps it in TOML
+    let spec = ReadingSpec::from_toml(&t)?;
+    let (p, text) = match spec.to_1o() {
+        Ok(o) => (folder.join("steps").join(crate::oneo::Doc::Reading.file_name(&name)), o),
+        Err(crate::CustodianError::Reading { code, .. }) if code == liaise::Liaise::code(&ReadingRefusal::OneoUnwritable) => (folder.join("steps").join(format!("{name}.toml")), t),
+        Err(e) => return Err(e),
+    };
+    write_whole(&p, text.as_bytes())?;
     Ok(p)
 }
 
@@ -225,14 +249,14 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
     jf.id = Some(id.clone());
     jf.name = Some(name.clone());
     jf.kind = Some(kind.clone());
-    write_whole(&running.join("job.toml"), toml::to_string(&jf).map_err(|e| ReadingRefusal::Write.refuse(e))?.as_bytes())?;
+    write_job_file(&running, &jf)?;
     let journal = store.journal()?;
     journal.put_job(&JobRow { id: id.clone(), name: name.clone(), kind: kind.clone(), state: "running".into(), folder: ctx.rel(&running), opened_utc: Some(opened.clone()), closed_utc: None })?;
     let mut said = vec![running_decision_said(), format!("job {id} ({name}, {kind}) started: {} → {}", ctx.rel(&queued), ctx.rel(&running))];
     let in_job = InJob { id: id.clone(), readings: running.join("readings") };
     let mut runs = Vec::new();
     if kind == "specs" {
-        let mut specs: Vec<PathBuf> = std::fs::read_dir(&running).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "toml") && p.file_name().is_some_and(|n| n != "job.toml")).collect()).unwrap_or_default();
+        let mut specs: Vec<PathBuf> = std::fs::read_dir(&running).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| crate::reading::spec::SpecForm::of(p).is_some() && !is_job_file(p)).collect()).unwrap_or_default();
         specs.sort();
         for s in specs {
             let ran = run_reading(ctx, &s, again, Some(&in_job))?;
@@ -527,7 +551,7 @@ pub fn run_template(ctx: &Ctx, kind: &str, target: &str, again: bool) -> Result<
     let name = format!("{kind}-{}", crate::runs::stamp());
     let dir = store.job_dir(JobState::Queued, &name)?;
     let jf = JobFile { id: None, name: Some(name.clone()), kind: Some(kind.to_string()), target: Some(target.to_string()), origin: None };
-    write_whole(&dir.join("job.toml"), toml::to_string(&jf).map_err(|e| ReadingRefusal::Write.refuse(e))?.as_bytes())?;
+    write_job_file(&dir, &jf)?;
     let started = start(ctx, Some(&name), again)?;
     let (closing, done, said) = close(ctx, &started.id)?;
     Ok((started, closing, done, said))

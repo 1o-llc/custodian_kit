@@ -45,8 +45,12 @@ pub mod named {
     pub const INVENTORY: ArtifactOutputDescriptor = file("custodian.inventory", "inventory", ArtifactEndpoint::FileMarkdown, AppPathRole::Data, "inventory.md", PathMutability::Writable);
     pub const PLAN: ArtifactOutputDescriptor = file("custodian.plan", "plan", ArtifactEndpoint::FileToml, AppPathRole::Data, "plans/{name}.toml", PathMutability::Writable);
     pub const JOURNAL: ArtifactOutputDescriptor = file("custodian.journal", "journal", ArtifactEndpoint::FileTxt, AppPathRole::State, "journal.sqlite", PathMutability::Writable);
-    pub const JOB_FILE: ArtifactOutputDescriptor = file("custodian.job", "job", ArtifactEndpoint::FileToml, AppPathRole::State, "jobs/{state}/{job}/job.toml", PathMutability::Writable);
+    pub const JOB_FILE: ArtifactOutputDescriptor = file("custodian.job", "job", ArtifactEndpoint::FileToml, AppPathRole::State, "jobs/{state}/{job}/v1.job.1o.job", PathMutability::Writable);
     pub const WRITER: ArtifactOutputDescriptor = file("custodian.writer", "writer", ArtifactEndpoint::FileTxt, AppPathRole::State, "writer.sqlite", PathMutability::Writable);
+    /// The paths table, in 1o (`paths.toml` beside it is read when this is missing).
+    pub const PATHS: ArtifactOutputDescriptor = file("custodian.paths", "paths", ArtifactEndpoint::FileTxt, AppPathRole::Config, "v1.paths.1o.paths", PathMutability::Writable);
+    /// The 1o schemas, in core-1o's layout, listed in the project's oneo.project.json.
+    pub const SCHEMA: ArtifactOutputDescriptor = file("custodian.schema", "schema", ArtifactEndpoint::FileJson, AppPathRole::Config, "schema/{modifier}/v1.schema.json", PathMutability::Writable);
     pub const SOCKET: ArtifactOutputDescriptor = file("custodian.serve", "socket", ArtifactEndpoint::FileTxt, AppPathRole::Runtime, "serve.sock", PathMutability::Ephemeral);
 }
 
@@ -154,6 +158,17 @@ impl Store {
         for d in dirs {
             std::fs::create_dir_all(&d).map_err(|e| write_err(&d, e))?;
             made.push(d);
+        }
+        // the 1o schemas where the language server finds them, and an empty paths table in 1o
+        let schema_dir = store.dir_of(&named::SCHEMA, &[("modifier", "x")])?.parent().map(Path::to_path_buf).unwrap_or_default();
+        made.extend(crate::oneo::write_schemas(&schema_dir)?);
+        let rel = schema_dir.strip_prefix(&store.root).unwrap_or(&schema_dir).to_string_lossy().replace('\\', "/");
+        made.push(crate::oneo::declare_schema_dir(&store.root, &rel)?);
+        let paths = store.path(&named::PATHS, &[])?;
+        let old_paths = store.path(&named::THRESHOLDS, &[("name", "paths")])?;
+        if !paths.exists() && !old_paths.exists() {
+            write_whole(&paths, crate::oneo::render(crate::oneo::Doc::Paths, &crate::paths::PathsFile::default())?.as_bytes())?;
+            made.push(paths);
         }
         let journal = store.journal()?;
         made.push(journal.path.clone());
