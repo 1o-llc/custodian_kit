@@ -44,7 +44,9 @@
             "diagnostics",
             "count",
             "bundle",
-            "sweep"
+            "sweep",
+            "impact",
+            "linkage"
           ],
           "description": "What the reading reads (the kinds table in custodian_kit's README)."
         },

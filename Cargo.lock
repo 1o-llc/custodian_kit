@@ -504,6 +504,7 @@ dependencies = [
  "scope",
  "serde",
  "serde_json",
+ "simple_impl",
  "simple_impl_derive",
  "stable_digest",
  "syn 2.0.118",
@@ -1940,9 +1941,9 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "simple_impl"
-version = "0.1.10"
+version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6bf798c82bbf2e27992cfc62a2b8461be04c5972b54beafb7ac03810a0dca39"
+checksum = "f3e73baf85ccf92fe0b3da7467f7860ce4e02fce8bdf1aa815774b9429b1d9dc"
 
 [[package]]
 name = "simple_impl_attr_kit"

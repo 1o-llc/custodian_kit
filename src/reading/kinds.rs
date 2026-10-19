@@ -42,6 +42,8 @@ pub fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
         ReadingKind::Count => super::count::rows(f, spec),
         ReadingKind::Bundle => bundle_rows(f, spec),
         ReadingKind::Sweep => Err(ReadingRefusal::SpecInvalid.refuse("a sweep is read without a scan")),
+        ReadingKind::Impact => super::impact::answer(f, spec),
+        ReadingKind::Linkage => crate::linkage::answer(f, spec),
     }
 }
 
@@ -51,7 +53,7 @@ pub fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 /// A row at a place in the source, with its crate, the line as context, and
 /// the enclosing item's marks.
 #[allow(clippy::too_many_arguments)]
-fn site(f: &Facts, kind: &str, label: impl Into<String>, file: &Path, line: u32, col: Option<u32>, item: Option<&str>, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
+pub(crate) fn site(f: &Facts, kind: &str, label: impl Into<String>, file: &Path, line: u32, col: Option<u32>, item: Option<&str>, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
     let label = label.into();
     let rel = f.rel(file);
     let mut a = BTreeMap::new();
@@ -106,7 +108,7 @@ fn site(f: &Facts, kind: &str, label: impl Into<String>, file: &Path, line: u32,
 }
 
 /// A row at an item's own place.
-fn item_row(f: &Facts, kind: &str, id: &str, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
+pub(crate) fn item_row(f: &Facts, kind: &str, id: &str, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
     match f.item(id).and_then(|d| Some((d, d.location.line?))) {
         Some((d, line)) => site(f, kind, id, &d.location.path, line, d.location.column, Some(id), reason, attrs),
         None => {
@@ -127,7 +129,7 @@ pub(crate) fn named_row(kind: &str, label: &str, crate_name: Option<String>, rea
     named(kind, label.to_string(), crate_name, reason, vec![])
 }
 
-fn named(kind: &str, label: impl Into<String>, crate_name: Option<String>, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
+pub(crate) fn named(kind: &str, label: impl Into<String>, crate_name: Option<String>, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
     let label = label.into();
     CodeQueryResult {
         id: stable_id(kind, &label),
@@ -150,7 +152,7 @@ fn declared_row(f: &Facts, kind: &str, d: &Declared, reason: &str) -> CodeQueryR
     r
 }
 
-fn canonical(r: &Resolution) -> Option<&str> {
+pub(crate) fn canonical(r: &Resolution) -> Option<&str> {
     Facts::canonical(r)
 }
 
@@ -161,13 +163,13 @@ fn unresolved_text(r: &Resolution) -> Option<(String, String)> {
     }
 }
 
-fn crates_and_bins(f: &Facts, rows: &[CodeQueryResult]) -> (usize, usize) {
+pub(crate) fn crates_and_bins(f: &Facts, rows: &[CodeQueryResult]) -> (usize, usize) {
     let crates: BTreeSet<&str> = rows.iter().filter_map(|r| r.crate_name.as_deref()).collect();
     let bins: BTreeSet<String> = crates.iter().flat_map(|c| f.bins_of(c)).collect();
     (crates.len(), bins.len())
 }
 
-fn sort_rows(rows: &mut [CodeQueryResult]) {
+pub(crate) fn sort_rows(rows: &mut [CodeQueryResult]) {
     rows.sort_by(|a, b| (&a.kind, &a.path, a.line, a.column, &a.label).cmp(&(&b.kind, &b.path, b.line, b.column, &b.label)));
 }
 
@@ -187,7 +189,7 @@ fn sensitive_among<'a>(f: &Facts, ids: impl IntoIterator<Item = &'a str>) -> BTr
 // ---------------------------------------------------------------------------
 // use_sites
 
-fn use_sites(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+pub(crate) fn use_sites(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     let target = spec.target.trim();
     let name = tail(target);
     let k = &f.k;
@@ -473,7 +475,7 @@ fn env_reads(f: &Facts, spec: &ReadingSpec, target: &str, prefix: &str) -> EnvRe
     out
 }
 
-fn declared(f: &Facts, spec: &ReadingSpec) -> Result<Vec<Declared>> {
+pub(crate) fn declared(f: &Facts, spec: &ReadingSpec) -> Result<Vec<Declared>> {
     read_declared(&f.root, &spec.declared_in, &f.paths, f.how)
 }
 
@@ -626,7 +628,7 @@ fn duplicates(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 // ---------------------------------------------------------------------------
 // dependents
 
-fn dependents(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+pub(crate) fn dependents(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     let target = spec.target.trim();
     let mut ans = Answer::default();
     if let Some(p) = f.package_named(target) {
@@ -663,7 +665,7 @@ fn dependents(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 }
 
 /// The graph node a target names: exactly, or by its trailing segments.
-fn item_id(f: &Facts, target: &str) -> Result<String> {
+pub(crate) fn item_id(f: &Facts, target: &str) -> Result<String> {
     let g = &f.k.graph;
     g.resolve_id(target)
         .map(str::to_string)
@@ -806,7 +808,7 @@ fn codes_touched(f: &Facts, items: &BTreeSet<String>) -> Vec<(String, String)> {
     out.into_iter().collect()
 }
 
-fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+pub(crate) fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     let target = spec.target.trim();
     let mut rows = Vec::new();
     // a changed crate reaches every binary linking it; changed items reach the
@@ -881,6 +883,12 @@ fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     for (code, msg) in &codes {
         rows.push(named("reach-code", code.clone(), None, "a liaise code the reached items raise", vec![("message", msg.clone())]));
     }
+    // the env keys the reached items read, as their `reads_env` marks declare them (the maintenance registry is the
+    // declaration; no second source)
+    let env = env_read_by(f, &items);
+    for (key, by) in &env {
+        rows.push(named("reach-env", key.clone(), None, "an env key a reached item reads (its reads_env mark)", vec![("read_by", by.iter().cloned().collect::<Vec<_>>().join(", "))]));
+    }
     for u in &scopes {
         rows.extend(scope_rows(u));
     }
@@ -894,12 +902,26 @@ fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     ans.count("declarations naming those binaries", entries.len());
     ans.count("items at level confidential or above", sensitive.len());
     ans.count("liaise codes raised there", codes.len());
+    ans.count("env keys read there (reads_env)", env.len());
     ans.count("test-only dependents", rows.iter().filter(|r| r.kind == "reach-test-only").count());
     ans.count("items unavailable with it off", scopes.iter().map(|u| u.items.len()).sum());
     ans.count("files wholly behind it", scopes.iter().map(|u| u.units.iter().filter(|x| x.depth == Depth::File).count()).sum());
     ans.count("callers in other crates losing items", scopes.iter().map(|u| u.callers_elsewhere.len()).sum());
     ans.rows = rows;
     Ok(ans)
+}
+
+/// Env key → the items among `items` whose `reads_env` marks name it.
+pub(crate) fn env_read_by(f: &Facts, items: &BTreeSet<String>) -> BTreeMap<String, BTreeSet<String>> {
+    let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for id in items {
+        if let Some(m) = f.marks.get(id) {
+            for k in &m.reads_env {
+                out.entry(k.clone()).or_default().insert(id.clone());
+            }
+        }
+    }
+    out
 }
 
 /// A scope as rows: one `scope` row per crate (its depth), one
@@ -931,11 +953,11 @@ pub fn scope_rows(u: &crate::reading::scope::Unavailable) -> Vec<CodeQueryResult
 // ---------------------------------------------------------------------------
 // constructs
 
-fn types_named<'f>(f: &'f Facts, target: &str) -> Vec<&'f klepto::TypeDecl> {
+pub(crate) fn types_named<'f>(f: &'f Facts, target: &str) -> Vec<&'f klepto::TypeDecl> {
     f.k.types.iter().filter(|t| path_names_item(&t.id, target)).collect()
 }
 
-fn constructs(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+pub(crate) fn constructs(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     let target = spec.target.trim();
     let types = types_named(f, target);
     if types.is_empty() {
@@ -991,7 +1013,7 @@ fn constructs(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 // ---------------------------------------------------------------------------
 // matches_on
 
-fn matches_on(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+pub(crate) fn matches_on(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     let target = spec.target.trim();
     let enums: Vec<&klepto::TypeDecl> = types_named(f, target).into_iter().filter(|t| !t.variants.is_empty()).collect();
     if enums.is_empty() {
@@ -1053,7 +1075,7 @@ fn matches_on(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 // ---------------------------------------------------------------------------
 // public_api
 
-fn public_api(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+pub(crate) fn public_api(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     let target = spec.target.trim();
     let p = f.package_named(target).ok_or_else(|| ReadingRefusal::TargetUnknown.refuse(target))?;
     let mut rows = Vec::new();
@@ -1143,7 +1165,7 @@ fn test_case(f: &Facts, id: &str) -> Option<TestCase> {
     Some(TestCase { package: d.package.clone(), target, filter: segs.join("::"), id: id.to_string() })
 }
 
-fn tests_reaching(f: &Facts, seeds: &BTreeSet<String>) -> Vec<TestCase> {
+pub(crate) fn tests_reaching(f: &Facts, seeds: &BTreeSet<String>) -> Vec<TestCase> {
     let tests = f.tests();
     let reached = f.closure_of(seeds.iter().map(String::as_str));
     let mut cases: Vec<TestCase> = tests.iter().filter(|t| reached.contains(*t) || seeds.contains(*t)).filter_map(|t| test_case(f, t)).collect();
@@ -1151,7 +1173,7 @@ fn tests_reaching(f: &Facts, seeds: &BTreeSet<String>) -> Vec<TestCase> {
     cases
 }
 
-fn test_rows(f: &Facts, cases: &[TestCase], reason: &str) -> Vec<CodeQueryResult> {
+pub(crate) fn test_rows(f: &Facts, cases: &[TestCase], reason: &str) -> Vec<CodeQueryResult> {
     let mut rows: Vec<CodeQueryResult> = cases.iter().map(|c| item_row(f, "test", &c.id, reason, vec![("filter", c.filter.clone()), ("test_target", c.target.clone())])).collect();
     for (p, t, filters) in test_lines(cases) {
         let line = format!("cargo test -p {p} {} -- {} --exact", target_flag(&t), filters.join(" "));

@@ -118,7 +118,36 @@ impl IndexKey {
     /// The key of what a scan of `root` with `scope` would read, without parsing.
     pub fn of_root(root: &Path, scope: &Scope) -> Result<IndexKey, Refusal> {
         let code = crate::code_digest(root, &scope.scan_options()).map_err(|e| Refusal::from(RefusalCode::Scan.refuse(e)))?;
-        Ok(IndexKey(crate::digest::of_value(&(crate::reading::READING_SCHEMA, code))))
+        Ok(Self::of_code_digest(&code))
+    }
+
+    /// The key made from a code digest already taken (`crate::code_digest`).
+    pub fn of_code_digest(code: &str) -> IndexKey {
+        IndexKey(crate::digest::of_value(&(crate::reading::READING_SCHEMA, code)))
+    }
+}
+
+/// The one same-search key: the spec's hash (its canonical form) and
+/// klepto's fingerprint of the code the spec's scope reads, with the index
+/// key made from that fingerprint. A run of the same spec over the same code
+/// has the same key, whoever runs it: the reading line, the in-process
+/// runner, the command line, a bundle with its filters (the filters are part
+/// of the spec, `ReadingSpec.bundle`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SearchKey {
+    /// `runs::spec_hash`: the spec's canonical form, digested.
+    pub spec_hash: String,
+    /// klepto's fingerprint of the files the scope reads, digested.
+    pub code_digest: String,
+    /// The code's index key, from the same fingerprint ([`IndexKey::of_root`]).
+    pub index_key: IndexKey,
+}
+
+impl SearchKey {
+    /// The key of `spec` over the code at `root`, without parsing it.
+    pub fn of(root: &Path, spec: &ReadingSpec) -> Result<SearchKey, Refusal> {
+        let code = crate::code_digest(root, &spec.scope.scan_options()).map_err(|e| Refusal::from(RefusalCode::Scan.refuse(e)))?;
+        Ok(SearchKey { spec_hash: crate::runs::spec_hash(spec), index_key: IndexKey::of_code_digest(&code), code_digest: code })
     }
 }
 

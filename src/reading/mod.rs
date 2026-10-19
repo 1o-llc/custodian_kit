@@ -10,6 +10,7 @@
 pub mod declared;
 pub mod diag;
 pub mod facts;
+pub mod impact;
 pub mod kinds;
 pub mod refusal;
 pub mod count;

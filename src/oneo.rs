@@ -28,10 +28,14 @@ pub enum Doc {
     Reading,
     Job,
     Paths,
+    /// A change spec (`crate::change`).
+    Change,
+    /// A linkage record (`crate::linkage`).
+    Linkage,
 }
 
 impl Doc {
-    pub const ALL: &'static [Doc] = &[Doc::Reading, Doc::Job, Doc::Paths];
+    pub const ALL: &'static [Doc] = &[Doc::Reading, Doc::Job, Doc::Paths, Doc::Change, Doc::Linkage];
 
     /// The modifier: the file name's last part and the document's top key.
     pub fn modifier(self) -> &'static str {
@@ -39,6 +43,8 @@ impl Doc {
             Doc::Reading => "reading",
             Doc::Job => "job",
             Doc::Paths => "paths",
+            Doc::Change => "change",
+            Doc::Linkage => "linkage",
         }
     }
 
@@ -48,6 +54,8 @@ impl Doc {
             Doc::Reading => include_str!("../schema/reading/v1.schema.json"),
             Doc::Job => include_str!("../schema/job/v1.schema.json"),
             Doc::Paths => include_str!("../schema/paths/v1.schema.json"),
+            Doc::Change => include_str!("../schema/change/v1.schema.json"),
+            Doc::Linkage => include_str!("../schema/linkage/v1.schema.json"),
         }
     }
 

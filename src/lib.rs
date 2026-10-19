@@ -52,6 +52,8 @@ pub mod job_bundle;
 pub mod bundle;
 pub mod api;
 pub mod oneo;
+pub mod change;
+pub mod linkage;
 
 #[cfg(test)]
 mod tests;

@@ -9,7 +9,7 @@ use crate::reading::refusal::ReadingRefusal;
 use crate::reading::spec::{ReadingKind, ReadingSpec};
 use crate::reading::{ReadingSummary, CHANGE_FILES_ENV};
 use crate::store::{named, write_whole, Receipt, Store};
-use crate::{code_digest, Result};
+use crate::Result;
 use std::path::{Path, PathBuf};
 
 /// Where a run happens.
@@ -127,8 +127,9 @@ pub fn run_reading_by(ctx: &Ctx, spec_path: &Path, again: bool, job: Option<&InJ
             env.push((CHANGE_FILES_ENV.to_string(), files.join("\n")));
         }
     }
-    let hash = spec_hash(&spec);
-    let digest = code_digest(&ctx.root, &spec.scope.scan_options()).map_err(|e| ReadingRefusal::Scan.refuse(e))?;
+    // the one same-search key (api::SearchKey), whoever runs the reading
+    let key = crate::api::SearchKey::of(&ctx.root, &spec).map_err(crate::CustodianError::from)?;
+    let (hash, digest) = (key.spec_hash, key.code_digest);
     let spec_rel = ctx.rel(&spec_path.canonicalize().unwrap_or_else(|_| spec_path.to_path_buf()));
 
     if let (Some(store), false, true) = (&ctx.store, again, env.is_empty()) {

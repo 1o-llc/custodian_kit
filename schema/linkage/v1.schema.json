@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "custodian linkage record v1",
+  "description": "Why declarations are bound together: the kind, the reason, the declarations bound. Checked against the code each time it is read.",
+  "type": "object",
+  "required": [
+    "linkage"
+  ],
+  "properties": {
+    "linkage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The record's name: its file's name, the name an anchor carries."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "responsibility",
+            "invariant",
+            "connected",
+            "compatibility",
+            "synchronized",
+            "guarded",
+            "semantics"
+          ],
+          "description": "Why the declarations are bound (the linkage kinds table in custodian_kit's README)."
+        },
+        "why": {
+          "type": "string",
+          "description": "The reason, in the author's words."
+        },
+        "binds": {
+          "type": "string",
+          "description": "A declaration bound: an item path, a crate:/decl: route, or dep:<crate>. Repeats: one value per line, in order."
+        },
+        "author": {
+          "type": "string",
+          "description": "Who recorded it."
+        },
+        "recorded_utc": {
+          "type": "string",
+          "description": "When, UTC."
+        },
+        "evidence": {
+          "type": "string",
+          "description": "A bound file as it was when recorded: <path>=<sha256 hex>. Repeats: one value per line, in order."
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "why"
+      ],
+      "description": "The record."
+    }
+  }
+}

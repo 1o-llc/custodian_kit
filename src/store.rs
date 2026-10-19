@@ -54,6 +54,16 @@ pub mod named {
     /// The 1o schemas, in core-1o's layout, listed in the project's oneo.project.json.
     pub const SCHEMA: ArtifactOutputDescriptor = file("custodian.schema", "schema", ArtifactEndpoint::FileJson, AppPathRole::Config, "schema/{modifier}/v1.schema.json", PathMutability::Writable);
     pub const SOCKET: ArtifactOutputDescriptor = file("custodian.serve", "socket", ArtifactEndpoint::FileTxt, AppPathRole::Runtime, "serve.sock", PathMutability::Ephemeral);
+    /// A change spec (`crate::change`), in 1o; `<name>.toml` beside it is its twin.
+    pub const CHANGE_SPEC: ArtifactOutputDescriptor = file("custodian.change", "change", ArtifactEndpoint::FileTxt, AppPathRole::Data, "specs/changes/v1.{name}.1o.change", PathMutability::Writable);
+    /// A preflight's record: what a change spec entails over the code it was read against, and the decision.
+    pub const PREFLIGHT: ArtifactOutputDescriptor = file("custodian.preflight", "preflight", ArtifactEndpoint::FileJson, AppPathRole::Data, "preflight/{name}/{stamp}.json", PathMutability::AppendOnly);
+    /// A transform's record (code_passenger's, `crate::transform::TransformRecord`): what it wrote, file by file.
+    pub const TRANSFORM: ArtifactOutputDescriptor = file("custodian.transform", "transform", ArtifactEndpoint::FileJson, AppPathRole::Data, "transforms/{name}/{stamp}.json", PathMutability::AppendOnly);
+    /// A linkage record (`crate::linkage`), in 1o; `<name>.toml` beside it is its twin.
+    pub const LINKAGE: ArtifactOutputDescriptor = file("custodian.linkage", "linkage", ArtifactEndpoint::FileTxt, AppPathRole::Data, "linkage/v1.{name}.1o.linkage", PathMutability::Writable);
+    /// An intent's plan (`crate::plan`): the investigation, the reuse, the cost, the decisions, the steps.
+    pub const INTENT_PLAN: ArtifactOutputDescriptor = file("custodian.intent_plan", "plan", ArtifactEndpoint::FileJson, AppPathRole::Data, "plans/intent/{name}.json", PathMutability::Writable);
 }
 
 /// This process's one writer: uh-tom-mick's admission word, one active at a time.

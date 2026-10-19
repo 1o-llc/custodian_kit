@@ -68,6 +68,22 @@ pub enum ReadingRefusal {
     OneoInvalid,
     #[liaise(code = 30, msg = "a value cannot be written in 1o (core-1o strings have no escapes, so a double quote cannot be carried; no negative numbers)")]
     OneoUnwritable,
+    #[liaise(code = 31, msg = "a bounded job's touched lines are not all covered by its transform receipts: the agent wrote code by hand")]
+    BoundedUncovered,
+    #[liaise(code = 32, msg = "the change spec is not a change spec (a field is missing, unknown or the wrong type, or its operation lacks what it needs)")]
+    ChangeInvalid,
+    #[liaise(code = 33, msg = "a code-changing step has no preflight receipt of this spec over this code that authorized it")]
+    NoPreflight,
+    #[liaise(code = 34, msg = "the preflight did not authorize the change")]
+    NotAuthorized,
+    #[liaise(code = 35, msg = "a linkage record is not a linkage record, or a declaration it binds does not resolve")]
+    LinkageInvalid,
+    #[liaise(code = 36, msg = "no such decision is open")]
+    NoDecision,
+    #[liaise(code = 37, msg = "a bounded job needs code-passenger on PATH: it is the writer")]
+    NoWriter,
+    #[liaise(code = 38, msg = "the plan has no step of that number")]
+    NoPlanStep,
     #[liaise(code = 101, msg = "the bundle filters break the word's own rules")]
     FiltersRefused,
     #[liaise(code = 102, msg = "the route holds no file the filters keep")]

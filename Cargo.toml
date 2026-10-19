@@ -62,3 +62,7 @@ flaga_solver = "0.1.1"
 maintenance = { version = "0.1.0", features = ["runner"] }
 # the journal: receipts, index keys, jobs, test results
 rusqlite = { version = "0.40", features = ["bundled"] }
+
+[dev-dependencies]
+# the toolkit the change pieces are declared against: change::tests reads its macros from the registry
+simple_impl = "0.1.11"
