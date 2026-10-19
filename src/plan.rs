@@ -137,6 +137,25 @@ fn parts(name: &str) -> Vec<String> {
     out
 }
 
+/// A candidate's place in the list, first to last: the most intent words named; then the longest run of them in
+/// the intent's order inside the name (`uds route table` in `UdsRouteTable` is 3); then the largest share of the
+/// name's own words the intent names; then code before tests (unless the intent says test); then the shortest path
+/// (the outermost declaration); then the name.
+fn rank(c: &Candidate, words: &[String]) -> (std::cmp::Reverse<usize>, std::cmp::Reverse<usize>, std::cmp::Reverse<usize>, bool, usize, String) {
+    let last = c.target.rsplit("::").next().unwrap_or(&c.target).trim_start_matches("crate:");
+    let ps = parts(last);
+    let mut run = 0;
+    for i in 0..words.len() {
+        for j in 0..ps.len() {
+            let n = words[i..].iter().zip(&ps[j..]).take_while(|(w, p)| w == p).count();
+            run = run.max(n);
+        }
+    }
+    let share = if ps.is_empty() { 0 } else { ps.iter().filter(|p| words.contains(p)).count() * 1000 / ps.len() };
+    let test = !words.iter().any(|w| w == "test" || w == "tests") && (c.target.contains("::tests::") || c.file.as_deref().is_some_and(|f| f.starts_with("tests/") || f.contains("/tests/")));
+    (std::cmp::Reverse(c.words.len()), std::cmp::Reverse(run), std::cmp::Reverse(share), test, c.target.matches("::").count(), c.target.clone())
+}
+
 fn operations_for(kind: &str) -> Vec<String> {
     let ops: &[Operation] = match kind {
         "struct" => &[Operation::AddField, Operation::AddMethod, Operation::AddTraitImpl],
@@ -172,8 +191,7 @@ pub fn investigate(f: &crate::reading::facts::Facts, words: &[String]) -> (Vec<C
         }
     }
     let mut candidates: Vec<Candidate> = found.into_values().collect();
-    // the most words named first, then the shortest path (the outermost declaration)
-    candidates.sort_by(|a, b| b.words.len().cmp(&a.words.len()).then(a.target.matches("::").count().cmp(&b.target.matches("::").count())).then(a.target.cmp(&b.target)));
+    candidates.sort_by_cached_key(|c| rank(c, words));
     let mut reuse = Vec::new();
     for p in f.packages.values() {
         let hit: Vec<String> = words.iter().filter(|w| parts(&p.name).contains(w)).cloned().collect();
@@ -283,8 +301,13 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
     let risks: Vec<String> = impacts.iter().map(|(t, _, i)| format!("{t}: {}", i.risk_class)).collect();
     // real choices only
     let mut alternatives = Vec::new();
-    let top = candidates.first().map(|c| c.words.len()).unwrap_or(0);
-    let tied: Vec<&Candidate> = candidates.iter().filter(|c| c.words.len() == top && top > 0).take(4).collect();
+    // a tie is the same words named, the same run of them, the same share of the name: the facts cannot choose
+    let tie = |c: &Candidate| {
+        let r = rank(c, &words);
+        (r.0, r.1, r.2)
+    };
+    let top = candidates.first().map(tie);
+    let tied: Vec<&Candidate> = candidates.iter().filter(|c| Some(tie(c)) == top && !c.words.is_empty()).take(4).collect();
     if tied.len() > 1 {
         alternatives.push(Alternative {
             choice: format!("where the work is: {} candidates name the same words", tied.len()),
@@ -518,6 +541,20 @@ pub fn has_todo(spec: &ChangeSpec) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_named_thing_ranks_before_names_that_share_its_words() {
+        let words: Vec<String> = ["record", "contract", "artifact", "uds", "route", "table", "read"].iter().map(|s| s.to_string()).collect();
+        let c = |t: &str, f: &str, hit: &[&str]| Candidate { target: t.into(), kind: "struct".into(), words: hit.iter().map(|s| s.to_string()).collect(), file: Some(f.into()), operations: vec![] };
+        let mut cs = [
+            c("nodeplan_macros::expand_nodeplan_daemon_uds_contract_from_artifact", "registry/nodeplan_macros/src/lib.rs", &["contract", "artifact", "uds"]),
+            c("nodeplan_package::tests::uds_function_route_binding_blocks_when_artifact_is_not_ready", "registry/nodeplan_package/src/lib.rs", &["artifact", "uds", "route"]),
+            c("nodeplan_sdk::uds_contract::UdsRouteTable", "registry/nodeplan_sdk/src/uds_contract.rs", &["uds", "route", "table"]),
+        ];
+        cs.sort_by_cached_key(|x| rank(x, &words));
+        assert_eq!(cs[0].target, "nodeplan_sdk::uds_contract::UdsRouteTable");
+        assert!(cs[2].target.contains("::tests::"), "a test item is last when the intent does not say test");
+    }
 
     #[test]
     fn an_intent_is_read_as_the_words_code_is_named_with() {
