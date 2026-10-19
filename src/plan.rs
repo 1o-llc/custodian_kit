@@ -212,10 +212,6 @@ pub struct Ran {
     pub said: Vec<String>,
 }
 
-fn toml_str(s: &str) -> String {
-    toml::Value::String(s.to_string()).to_string()
-}
-
 /// The plan of an intent: investigated, its top candidates' impact read, its decisions asked, its steps proposed;
 /// kept (`data/plans/intent/<name>.json` and `.md`) with a `plan` receipt; its records in the running job's task
 /// history, or a task of its own (`plan-<name>`).
@@ -244,8 +240,9 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
         (None, None) => std::env::temp_dir().join(format!("custodian-plan-{}", std::process::id())),
     };
     for c in candidates.iter().take(READ) {
-        let iname = format!("impact-{}", crate::jobs::slug_of(&c.target));
-        let spec = crate::reading::spec::ReadingSpec::from_toml(&format!("name = {}\nquestion = {}\nkind = \"impact\"\ntarget = {}\n", toml_str(&iname), toml_str(&format!("what would {intent} touch at {}?", c.target)), toml_str(&c.target)))?;
+        // the same search `run TARGET --kind impact` and a preflight make: one key
+        let spec = crate::reading::spec::ReadingSpec::search(crate::reading::spec::ReadingKind::Impact, &c.target)?;
+        let iname = spec.name.clone();
         let rec = match &ctx.store {
             Some(_) => {
                 let p = dir.join(crate::oneo::Doc::Reading.file_name(&iname));

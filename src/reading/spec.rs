@@ -319,7 +319,38 @@ pub struct BundleOptions {
     pub no_features: Vec<String>,
 }
 
+/// The question a search on one target asks: the same words wherever the search starts (the command line's
+/// `run TARGET --kind K`, a preflight's impact, a plan's), so the one same-search key finds it again.
+pub const SEARCH_QUESTION: &str = "a search on one target";
+
+/// A search's name: `<kind>-<target>`, the target's characters other than ASCII letters, digits and `-` written
+/// `_` (runs of them once, none at the ends), at most 48 of them; `all` when none is left.
+pub fn search_name(kind: ReadingKind, target: &str) -> String {
+    format!("{}-{}", kind.as_str(), name_slug(target))
+}
+
+/// A target as one name: what [`search_name`] puts after the kind.
+pub fn name_slug(s: &str) -> String {
+    let mut out: String = s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    while out.contains("__") {
+        out = out.replace("__", "_");
+    }
+    let out: String = out.trim_matches('_').chars().take(48).collect();
+    if out.is_empty() {
+        "all".into()
+    } else {
+        out
+    }
+}
+
 impl ReadingSpec {
+    /// A search on one target, as every line that starts one writes it: [`search_name`], [`SEARCH_QUESTION`], the
+    /// kind and the target, the scope the kind's own.
+    pub fn search(kind: ReadingKind, target: &str) -> Result<Self> {
+        let s = |v: &str| toml::Value::String(v.to_string()).to_string();
+        Self::from_toml(&format!("name = {}\nquestion = {}\nkind = \"{}\"\ntarget = {}\n", s(&search_name(kind, target)), s(SEARCH_QUESTION), kind.as_str(), s(target)))
+    }
+
     pub fn from_toml(text: &str) -> Result<Self> {
         let spec: ReadingSpec = toml::from_str(text).map_err(|e| ReadingRefusal::SpecInvalid.refuse(e.to_string().trim()))?;
         spec.checked()

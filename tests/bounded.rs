@@ -268,3 +268,19 @@ fn an_intent_is_planned_from_the_code_and_a_step_becomes_a_change_spec() {
     let p = preflight::run_preflight(&ctx, &spec_path, None, Runner::InProcess(&w)).unwrap().preflight;
     assert!(!p.authorized && p.preconditions.iter().any(|c| c.what == "no TODO is left in the spec" && !c.holds));
 }
+
+#[test]
+fn a_preflight_finds_the_impact_the_command_line_already_read() {
+    let (store, ctx) = project("one-key");
+    let w = ws(&store.root);
+    // `custodian run core_lib::Config --kind impact` makes this spec; the preflight makes the same one
+    let line = custodian_kit::api::ReadingSpec::search(custodian_kit::api::ReadingKind::Impact, "core_lib::Config").unwrap();
+    assert_eq!(line.name, "impact-core_lib_Config");
+    let file = store.root.join("impact-line.toml");
+    std::fs::write(&file, toml::to_string(&line).unwrap()).unwrap();
+    let first = custodian_kit::runs::run_reading_by(&ctx, &file, false, None, Runner::InProcess(&w)).unwrap();
+    let n = first.receipt.as_ref().unwrap().seq;
+    let s = spec(&store.root, "config-digest", ADD_DIGEST);
+    let ran = preflight::run_preflight(&ctx, &s, None, Runner::InProcess(&w)).unwrap();
+    assert!(ran.said.iter().any(|l| l.contains("reused, not read again") && l.contains(&format!("#{n}"))), "{:?}", ran.said);
+}

@@ -513,8 +513,9 @@ pub fn run_preflight(ctx: &Ctx, spec_path: &Path, job: Option<&InJob>, runner: R
     let mut said = Vec::new();
     // the impact, as a reading: same spec over the same code is a reuse
     let target = impact_target(&spec);
-    let iname = format!("impact-{}", crate::jobs::slug_of(&target));
-    let ispec = crate::reading::spec::ReadingSpec::from_toml(&format!("name = {}\nquestion = {}\nkind = \"impact\"\ntarget = {}\n", toml_str(&iname), toml_str(&format!("what does a change to {target} entail? (preflight of {})", spec.name)), toml_str(&target)))?;
+    // the same search the command line's `run TARGET --kind impact` makes: one key, so either finds the other
+    let ispec = crate::reading::spec::ReadingSpec::search(crate::reading::spec::ReadingKind::Impact, &target)?;
+    let iname = ispec.name.clone();
     let dir = match (&ctx.store, job) {
         (_, Some(j)) => j.readings.parent().map(|p| p.join("steps")).unwrap_or_else(|| j.readings.clone()),
         (Some(s), None) => s.dir_of(&named::PREFLIGHT, &[("name", &spec.name), ("stamp", "x")])?,
@@ -615,10 +616,6 @@ pub fn run_preflight(ctx: &Ctx, spec_path: &Path, job: Option<&InJob>, runner: R
 /// A preflight receipt's reason when the change is authorized.
 pub const AUTHORIZED: &str = "authorized";
 pub const NOT_AUTHORIZED: &str = "not authorized";
-
-fn toml_str(s: &str) -> String {
-    toml::Value::String(s.to_string()).to_string()
-}
 
 /// The step-input gate of a code-changing step: the newest preflight receipt of this spec (its digest now) over
 /// this code (its digest now). Go only when it authorized the change; a spec edited or code moved since is
