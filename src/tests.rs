@@ -730,8 +730,10 @@ fn klepto_index_key_json_binds_klepto_fields_to_index_schema() {
     assert_eq!(value["tenant_scope"]["tenant_id"], "acme-dev");
     assert_eq!(value["feature_binding"]["target_feature"], "serde_support");
     assert!(value["key"]["key_id"].as_str().unwrap().starts_with("kidx_"));
-    assert!(value["key"]["schema_hash"].as_str().unwrap().starts_with("fnv1a64:"));
-    assert!(value["key"]["field_contract_hash"].as_str().unwrap().starts_with("fnv1a64:"));
+    // every digest is stable_digest (sha256) now, one rule (crate::digest); fnv1a64 is gone
+    assert!(value["key"]["schema_hash"].as_str().unwrap().starts_with("sha256:"));
+    // every digest is stable_digest (sha256) now, one rule (crate::digest); fnv1a64 is gone
+    assert!(value["key"]["field_contract_hash"].as_str().unwrap().starts_with("sha256:"));
     assert!(value["klepto_document_count"].as_u64().unwrap() >= 2);
     assert_eq!(value["index_schema_field_count"].as_u64().unwrap(), 23);
     let bindings = value["field_bindings"].as_array().unwrap();
@@ -897,7 +899,7 @@ fn klepto_index_version_plan_json_detects_analyzer_change_and_ignores_write_flag
         "--registered-key".to_string(),
         "kidx_old".to_string(),
         "--registered-analyzer-hash".to_string(),
-        "fnv1a64:0000000000000000".to_string(),
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_string(),
         "--kind".to_string(),
         "use-site".to_string(),
         "--dep".to_string(),
@@ -1029,7 +1031,7 @@ fn klepto_index_registry_entry_json_bumps_minor_and_ignores_write_flags() {
         "--registered-version".to_string(),
         "1.2.3".to_string(),
         "--registered-analyzer-hash".to_string(),
-        "fnv1a64:0000000000000000".to_string(),
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_string(),
         "--kind".to_string(),
         "use-site".to_string(),
         "--dep".to_string(),
@@ -1176,7 +1178,8 @@ fn klepto_index_registry_write_json_writes_with_ack() {
     assert_eq!(registry_value["schema"], "code_passenger.klepto_index_registry_file.v1");
     assert_eq!(registry_value["entry_count"].as_u64().unwrap(), 1);
     assert_eq!(registry_value["entries"].as_array().unwrap().len(), 1);
-    assert!(value["registry_file_digest"].as_str().unwrap().starts_with("fnv1a64:"));
+    // every digest is stable_digest (sha256) now, one rule (crate::digest); fnv1a64 is gone
+    assert!(value["registry_file_digest"].as_str().unwrap().starts_with("sha256:"));
     assert!(value["findings"].as_array().unwrap().iter().any(|finding| finding["code"] == "CPW004"));
     let _ = fs::remove_file(&registry_path);
     let _ = fs::remove_dir_all(root);
@@ -3560,8 +3563,10 @@ fn code_search_disk_manifest_json_opens_persisted_index_and_hashes_files() {
     assert!(value["tenant_scope_count"].as_u64().unwrap() >= 1);
     assert!(value["file_count"].as_u64().unwrap() >= 1);
     assert!(value["total_bytes"].as_u64().unwrap() >= 1);
-    assert!(value["manifest_digest"].as_str().unwrap().starts_with("fnv1a64:"));
-    assert!(value["files"].as_array().unwrap().iter().any(|file| file["digest"].as_str().unwrap().starts_with("fnv1a64:")));
+    // every digest is stable_digest (sha256) now, one rule (crate::digest); fnv1a64 is gone
+    assert!(value["manifest_digest"].as_str().unwrap().starts_with("sha256:"));
+    // every digest is stable_digest (sha256) now, one rule (crate::digest); fnv1a64 is gone
+    assert!(value["files"].as_array().unwrap().iter().any(|file| file["digest"].as_str().unwrap().starts_with("sha256:")));
     assert!(value["stored_field_names"].as_array().unwrap().iter().any(|name| name == "tenant_id"));
     let _ = fs::remove_dir_all(index_dir);
     let _ = fs::remove_dir_all(root);
