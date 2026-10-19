@@ -1,9 +1,9 @@
 [package]
 name = "custodian_kit"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
-# tantivy 0.26 needs 1.86; time, globset, ignore and darling in the lock need 1.88
-rust-version = "1.88"
+# tantivy 0.26 needs 1.86; time, globset, ignore and darling in the lock need 1.88; xccute 0.3.1 (std File locks), 1.89
+rust-version = "1.89"
 
 license = "MIT OR Apache-2.0"
 description = "Read a Rust workspace as data: code graph, queries, pins, context windows, Tantivy search receipts, and reading specs that answer one question from klepto's facts into a dated page"
@@ -33,8 +33,8 @@ globset = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # every run a declared command through James's executor: the program declared once (simple_impl_derive), its run a receipt
 xccute_runtime = "0.1.2"
-xccute_contract = "0.1.2"
-simple_impl_derive = "0.2.6"
+xccute_contract = "0.1.3"
+simple_impl_derive = "0.2.7"
 # the folder layout named once
 pathgen = "0.1.2"
 # refusal codes
@@ -44,7 +44,7 @@ stable_digest = "0.1.1"
 # the programs custodian runs that xccute_commands already declares (cargo, git)
 xccute_commands = "0.1.1"
 # the questions a run asks before acting, answered by observation tools
-xccute_decisions = "0.1.1"
+xccute_decisions = "0.2.1"
 # the journal's sequence and the one-writer admission for .custodian/
 uh-tom-mick = "0.1.1"
 # a job or a reading packed into one annotated file

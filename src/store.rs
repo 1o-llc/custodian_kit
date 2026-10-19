@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 /// The initialized folder's name, and pathgen's app name for it.
 pub const FOLDER: &str = ".custodian";
 
+/// How long a write to the journal waits for another writer: the one wait the journal has.
+pub const JOURNAL_BUSY: std::time::Duration = std::time::Duration::from_secs(10);
+
 const fn file(route_id: &'static str, kind: &'static str, endpoint: ArtifactEndpoint, base_role: AppPathRole, relative_template: &'static str, mutability: PathMutability) -> ArtifactOutputDescriptor {
     ArtifactOutputDescriptor {
         route_id,
@@ -359,7 +362,7 @@ impl Journal {
             std::fs::create_dir_all(dir).map_err(|e| write_err(dir, e))?;
         }
         let conn = Connection::open(path).map_err(jerr)?;
-        conn.busy_timeout(std::time::Duration::from_secs(10)).map_err(jerr)?;
+        conn.busy_timeout(JOURNAL_BUSY).map_err(jerr)?;
         conn.execute_batch(JOURNAL_SCHEMA).map_err(jerr)?;
         // a journal from before the runner field gets its column, every older run a line run
         let has_runner: bool = conn.prepare("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'runner'").and_then(|mut s| s.exists([])).map_err(jerr)?;

@@ -844,7 +844,7 @@ pub struct Closing {
 pub const CLOSING_SCHEMA: &str = "custodian.job_closing.v1";
 
 fn previous(store: &Store, name: &str, before: i64, job: &str, root: &Path) -> Option<ReadingReport> {
-    let prev = store.journal().ok()?.readings_of(name).ok()?.into_iter().filter(|r| r.seq < before && r.job.as_deref() != Some(job)).last()?;
+    let prev = store.journal().ok()?.readings_of(name).ok()?.into_iter().rfind(|r| r.seq < before && r.job.as_deref() != Some(job))?;
     prev.outputs.iter().find(|o| o.ends_with(".json")).and_then(|j| load(&root.join(j)).ok())
 }
 
@@ -1136,7 +1136,7 @@ pub const CODE_LANGUAGES: &[&str] = &["Rust", "TOML"];
 /// the lines changed by hand when code_passenger holds a snapshot of the state the hand edit began from.
 fn uncovered_lines(ctx: &Ctx, folder: &Path, transforms: &[crate::transform::TransformRecord]) -> Result<Vec<crate::transform::Uncovered>> {
     let counts = taken(folder);
-    let of = |label: &str| counts.iter().filter(|t| t.route == "*" && t.label == label).last().cloned();
+    let of = |label: &str| counts.iter().rfind(|t| t.route == "*" && t.label == label).cloned();
     let (Some(open), Some(close)) = (of("open"), of("close")) else { return Ok(Vec::new()) };
     let digests = |t: &Taken| -> Result<std::collections::BTreeMap<String, String>> {
         let r = load(&folder.join(&t.reading))?;
@@ -1265,7 +1265,7 @@ pub fn render_closing(c: &Closing) -> String {
         }
     }
     if !any {
-        s.push_str("\n");
+        s.push('\n');
     }
     if !c.lines_touched.is_empty() {
         s.push_str("\n## lines touched\n\n");
