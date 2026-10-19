@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1 (unreleased)
+## 0.1.1 (2026-10-19)
 
 Additive: nothing 0.1.0 does changes.
 
@@ -18,21 +18,37 @@ Additive: nothing 0.1.0 does changes.
   `a_step_that_reads_another_waits_for_it_and_takes_its_receipts_as_targets`
   in tests/count.rs. `Step` and `StepEnv` gain a field: a struct literal of
   either outside the kit must name it (`reads: None`).
+  The field: [src/jobs.rs#L116-L121](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/src/jobs.rs#L116-L121). The wait:
+  [src/jobs_runner.rs#L69-L71](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/src/jobs_runner.rs#L69-L71). The receipts as
+  targets: [src/jobs_runner.rs#L95-L96](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/src/jobs_runner.rs#L95-L96). The test:
+  [tests/count.rs#L439](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/tests/count.rs#L439).
 - `jobs::template(root, kind)` and `jobs::templates(root)` load the job
   templates as the project at or above `root` has them, else as shipped, so
   a consumer reads the kit's templates through the kit instead of parsing
   the files itself. The loader the job code used is the same one
   (`template_in`). Proven by
   `templates_load_through_the_kit_shipped_or_as_the_project_has_them`.
+  [src/jobs.rs#L415](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/src/jobs.rs#L415),
+  [src/jobs.rs#L428](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/src/jobs.rs#L428); the test:
+  [tests/count.rs#L499](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/tests/count.rs#L499).
 - A job's close reads a test's outcome in cargo's words, as the journal's
   `tests` table keeps them (`ok`, `FAILED`, `ignored`; the kit's own test
   runner writes these): `FAILED` is a failed verification and makes the
   result `failed_test`. 0.1.0 matched only `failed`/`fail`, so a failed
   test was recorded `pending` and the job `accepted`. Proven by
   `a_failed_test_in_cargo_s_words_fails_the_jobs_result`.
+  Was: [src/jobs.rs#L725](https://github.com/1o-llc/custodian_kit/blob/9a176fc41648dbbb8da97511321c2b0d89ccaaca/src/jobs.rs#L725) and
+  [src/jobs.rs#L733](https://github.com/1o-llc/custodian_kit/blob/9a176fc41648dbbb8da97511321c2b0d89ccaaca/src/jobs.rs#L733). Now:
+  [src/jobs.rs#L775](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/src/jobs.rs#L775) and
+  [src/jobs.rs#L783-L785](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/src/jobs.rs#L783-L785). The test:
+  [tests/count.rs#L303](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/tests/count.rs#L303).
 - `rust-version` is 1.88 (tantivy 0.26.1 needs 1.86; time, globset, ignore
   and darling in the lock need 1.88), and CI tests stable and 1.88: 0.1.0's
   1.85 job could not build.
+  [Cargo.toml#L5-L6](https://github.com/1o-llc/custodian_kit/blob/77e626f9e29e36ff363b2a2a8be4aa6be766c81d/Cargo.toml#L5-L6).
+- CI publishes: on master, once the tests and clippy pass, a version not yet
+  on crates.io with its dated entry here publishes through crates.io trusted
+  publishing (.github/workflows/ci.yml).
 
 ## 0.1.0 (2026-10-19)
 
