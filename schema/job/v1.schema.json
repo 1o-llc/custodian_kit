@@ -38,6 +38,14 @@
         "routes": {
           "type": "string",
           "description": "A route counted (crate:<name>, decl:<name>, *); the template's count_route, else the workspace. Repeats: one value per line, in order."
+        },
+        "task_id": {
+          "type": "string",
+          "description": "The task this run writes its history records into (.custodian/data/history/<task_id>/), given when it starts."
+        },
+        "revision": {
+          "type": "string",
+          "description": "The revision of the task this run is: base, fix1, ..."
         }
       }
     }

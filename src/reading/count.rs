@@ -71,6 +71,10 @@ pub struct FileCount {
     pub language: String,
     pub lines: Lines,
     pub tests: Lines,
+    /// sha256 of the file's bytes (an inline block's: of its text), so a
+    /// change that keeps the line counts still shows, and a task's change
+    /// records carry the digest before.
+    pub digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -299,7 +303,8 @@ pub fn count(f: &Facts, spec: &ReadingSpec) -> Result<CountReport> {
                 } else {
                     Lines::default()
                 };
-                files.push((krate(&r.name), FileCount { path: rel, language: ty.name().to_string(), lines: whole, tests }));
+                let digest = std::fs::read(&r.name).map(|b| crate::digest::of(b)).unwrap_or_default();
+                files.push((krate(&r.name), FileCount { path: rel, language: ty.name().to_string(), lines: whole, tests, digest }));
             }
         }
     }
@@ -309,7 +314,8 @@ pub fn count(f: &Facts, spec: &ReadingSpec) -> Result<CountReport> {
         let part: String = lines.get(s.saturating_sub(1)..(*e).min(lines.len())).map(|l| l.concat()).unwrap_or_default();
         let whole = Lines::of(&LanguageType::Rust.parse_from_str(&part, &config));
         let tests = if requires_test(&f.k.modules.get(module).map(|m| m.cfg.clone()).unwrap_or_default()) { whole } else { Lines::default() };
-        files.push((krate(file), FileCount { path: format!("{}#{module}", f.rel(file)), language: LanguageType::Rust.name().to_string(), lines: whole, tests }));
+        let digest = crate::digest::of(part.as_bytes());
+        files.push((krate(file), FileCount { path: format!("{}#{module}", f.rel(file)), language: LanguageType::Rust.name().to_string(), lines: whole, tests, digest }));
     }
     let index_key = crate::api::IndexKey::of_root(&f.root, &spec.scope).ok().map(|k| k.0);
     Ok(CountReport::from_files(plan.route, index_key, commit_at(&f.root), files))
@@ -487,14 +493,14 @@ pub fn compare_counts(a: &CountReport, b: &CountReport) -> CountDiff {
         match (before, after) {
             (None, Some(_)) => e.2.push(p.clone()),
             (Some(_), None) => e.3.push(p.clone()),
-            (Some(_), Some(_)) if m != Moved::default() => e.4.push(p.clone()),
+            (Some(x), Some(y)) if m != Moved::default() || x.1.digest != y.1.digest => e.4.push(p.clone()),
             _ => {}
         }
     }
     let share_of = |c: &CountReport, name: &str| c.crates.iter().find(|k| k.name == name).map(|k| share(&k.tests, &k.lines)).unwrap_or(0);
     let crates: Vec<CrateMoved> = crates
         .into_iter()
-        .filter(|(_, (m, ..))| *m != Moved::default())
+        .filter(|(_, (m, _, added, removed, changed))| *m != Moved::default() || !added.is_empty() || !removed.is_empty() || !changed.is_empty())
         .map(|(name, (moved, langs, added, removed, changed))| CrateMoved {
             test_share_before: share_of(a, &name),
             test_share_after: share_of(b, &name),

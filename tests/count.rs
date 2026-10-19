@@ -255,3 +255,46 @@ fn the_triage_and_features_templates_count() {
         assert!(t.step.iter().all(|s| ReadingSpec::from_toml(&format!("name = \"s\"\nquestion = \"q\"\nkind = \"{}\"\ntarget = \"x\"\n", s.kind)).is_ok()), "{kind}: every step is a reading");
     }
 }
+
+#[test]
+fn a_job_is_a_task_history_that_round_trips_and_holds_against_the_tree() {
+    use custodian_kit::task_records;
+    use task_history::{find_records_by_kind, load_task_history, verify_terminal_tree_changes, DiffRecordKind};
+    let root = copy_fixture("task-history");
+    let (store, _) = custodian_kit::store::Store::init(&root, custodian_kit::store::Mode::Agent).unwrap();
+    // job start: task and intent; the open count
+    let task = task_records::open(&store, "2026-10-19-first-reading", "specs", "job-1", "read the job's specs").unwrap();
+    assert_eq!((task.task_id.as_str(), task.revision.as_str()), ("2026-10-19-first-reading", "base"));
+    let before = count_at(&store.root, "*");
+    task_records::solution(&task, "use-sites (use_sites serve_metrics): run #3").unwrap();
+    // a step that changes code: one file modified, one added
+    let lib = store.root.join("crates/copy_a/src/lib.rs");
+    let mut t = std::fs::read_to_string(&lib).unwrap();
+    t.push_str("pub fn three() -> u32 {\n    3\n}\n");
+    std::fs::write(&lib, t).unwrap();
+    std::fs::write(store.root.join("crates/copy_a/src/more.rs"), "pub fn four() -> u32 {\n    4\n}\n").unwrap();
+    let after = count_at(&store.root, "*");
+    let changes = task_records::changes(&task, &store.root, &before, &after).unwrap();
+    let ops: Vec<(String, String)> = changes.iter().map(|d| (d.one("path").unwrap().to_string(), d.one("operation").unwrap().to_string())).collect();
+    assert_eq!(ops, vec![("crates/copy_a/src/lib.rs".to_string(), "modify".to_string()), ("crates/copy_a/src/more.rs".to_string(), "add".to_string())]);
+    task_records::verification(&task, "cargo test -p copy_a", Some(true), None).unwrap();
+    let key = custodian_kit::api::IndexKey::of_root(&store.root, &Default::default()).unwrap();
+    task_records::close(&task, "accepted", Some(&key.0)).unwrap();
+
+    // read back through load_task_history
+    let index = load_task_history(task_records::root(&store).unwrap()).unwrap();
+    assert_eq!((index.task_count, index.revision_count, index.change_count, index.accepted_revision_count), (1, 1, 2, 1));
+    let kinds: Vec<&str> = index.tasks[0].revisions[0].documents.iter().map(|d| d.one("record_kind").unwrap()).collect();
+    assert_eq!(kinds, vec!["task", "intent", "solution", "change", "change", "verification", "result"]);
+    let result = find_records_by_kind(&index, DiffRecordKind::Result)[0];
+    assert_eq!(result.one("resulting_tree_digest").unwrap(), key.0.trim_start_matches("sha256:"));
+    // the history's last changes hold in the tree
+    assert_eq!(verify_terminal_tree_changes(&index, &store.root).unwrap(), 2);
+    // the brief reads them
+    let lines = task_records::brief_lines(&task_records::read(&store, &task.task_id).unwrap().unwrap()).join("\n");
+    assert!(lines.contains("add crates/copy_a/src/more.rs") && lines.contains("result accepted"), "{lines}");
+    // a second run of the job is its next revision
+    let again = task_records::open(&store, "2026-10-19-first-reading", "specs", "job-2", "again").unwrap();
+    assert_eq!(again.revision, "fix1");
+    assert_eq!(load_task_history(task_records::root(&store).unwrap()).unwrap().revision_count, 2);
+}

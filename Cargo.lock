@@ -505,6 +505,7 @@ dependencies = [
  "stable_digest",
  "syn 2.0.118",
  "tantivy",
+ "task_history",
  "thiserror 1.0.69",
  "tokei",
  "toml 0.8.23",
@@ -2204,6 +2205,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eac258c2c6390673f2685813afeeafcb8c4e0ee7de8dd3fc46838dcc37263f98"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "task_history"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "stable_digest",
 ]
 
 [[package]]

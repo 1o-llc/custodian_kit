@@ -4,11 +4,11 @@
 //! initialized folder every run is journaled and its files kept; without one
 //! (free mode) the reading is printed and nothing is stored.
 
-use crate::exec::{self, at, Custodian, Plan, Walked, Watch};
+use crate::exec::{self, at, Custodian, Plan, Watch};
 use crate::reading::refusal::ReadingRefusal;
 use crate::reading::spec::{ReadingKind, ReadingSpec};
 use crate::reading::{ReadingSummary, CHANGE_FILES_ENV};
-use crate::store::{named, write_whole, Receipt, Store, RECEIPT_SCHEMA};
+use crate::store::{named, write_whole, Receipt, Store};
 use crate::{code_digest, Result};
 use std::path::{Path, PathBuf};
 
@@ -76,45 +76,7 @@ pub fn spec_hash(spec: &ReadingSpec) -> String {
     crate::digest::of_value(spec)
 }
 
-/// The receipt of a walked line.
-#[allow(clippy::too_many_arguments)]
-pub fn receipt_of(plan: &Plan, w: &Walked, command: &str, name: &str, spec: Option<String>, spec_hash: Option<String>, code_digest: Option<String>, index_key: Option<String>, outputs: Vec<String>, job: Option<&InJob>) -> Receipt {
-    Receipt {
-        schema: RECEIPT_SCHEMA.to_string(),
-        seq: 0,
-        utc: now_utc(),
-        command: command.to_string(),
-        name: name.to_string(),
-        spec,
-        spec_hash,
-        code_digest,
-        index_key,
-        plan_id: plan.plan.plan_id.clone(),
-        // xccute's canonical forms of the plan, the line and the decision, digested one way
-        plan_digest: crate::digest::tagged(plan.plan.stable_material()),
-        operation_digest: crate::digest::tagged(w.operation.stable_material()),
-        receipt_digest: crate::digest::tagged(w.receipt.stable_material()),
-        line: w.operation.display.clone(),
-        exit_code: w.code,
-        accepted: w.decision.status.accepted,
-        disposition: format!("{:?}", w.decision.disposition),
-        reason: w.decision.reason.clone(),
-        outputs,
-        job: job.map(|j| j.id.clone()),
-        reused_seq: None,
-        millis: w.millis,
-    }
-}
-
-/// Journals a receipt and writes `receipts/<seq>.json`; the inventory follows.
-pub fn keep(store: &Store, r: Receipt) -> Result<(Receipt, PathBuf)> {
-    let journal = store.journal()?;
-    let r = journal.record(r)?;
-    let file = store.path(&named::RECEIPT, &[("seq", &r.seq.to_string())])?;
-    write_whole(&file, (serde_json::to_string_pretty(&r)? + "\n").as_bytes())?;
-    inventory(store)?;
-    Ok((r, file))
-}
+pub use crate::receipts::{keep, receipt_of};
 
 /// The summary line a reading line printed last.
 fn summary_of(stdout: &str) -> Option<ReadingSummary> {

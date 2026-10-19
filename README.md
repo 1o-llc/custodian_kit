@@ -120,6 +120,18 @@ entry = "id"                   # the field naming the entry each value sits in
 Both tables are generated from the enums (`cargo run --example vocabulary`),
 and a test fails when this README and the enums differ.
 
+## Jobs are task histories
+
+A job writes its history in `task_history`'s format (`nodeplan.1o.diff.v1`)
+under `.custodian/data/history/<job name>/<revision>/`, one revision per run
+(`base`, `fix1`, ...): the task and intent at `job start`, a solution per
+step, a change record for every file that differs between the job's open
+and close counts (path, operation, the digests before and after), a
+verification per test or check, and the result at `job close` (status, and
+the code's index key as the tree digest), then the history's index.
+`job brief` reads them back through `load_task_history`. The receipts and
+the journal stay beside them.
+
 ## Counts
 
 `count` counts a route with tokei, as a library: files, lines, code,

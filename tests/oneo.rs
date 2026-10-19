@@ -192,7 +192,7 @@ fn the_schemas_name_exactly_the_fields_of_the_rust_forms() {
     declared.sort();
     assert_eq!(have, declared);
 
-    let job = custodian_kit::jobs::JobFile { id: Some("1".into()), name: Some("n".into()), kind: Some("specs".into()), target: Some("t".into()), origin: Some("o".into()), count: Some(true), routes: vec!["*".into()] };
+    let job = custodian_kit::jobs::JobFile { id: Some("1".into()), name: Some("n".into()), kind: Some("specs".into()), target: Some("t".into()), origin: Some("o".into()), count: Some(true), routes: vec!["*".into()], task_id: Some("t".into()), revision: Some("base".into()) };
     let mut have = Vec::new();
     keys(&serde_json::to_value(&job).unwrap(), "", &mut have);
     let mut declared = Vec::new();
@@ -255,6 +255,8 @@ fn init_puts_the_schemas_where_the_language_server_looks() {
     for d in Doc::ALL {
         assert_eq!(ws.schema_for_file(d.modifier(), "v1"), Some(d.schema()), "{}", d.modifier());
     }
+    let diff: Value = serde_json::from_str(task_history::DIFF_SCHEMA_JSON).unwrap();
+    assert_eq!(ws.schema_for_file("diff", "v1"), Some(diff), "the task-history records' schema is found too");
     // and validates a spec live, as an editor would see it
     let bad = core_1o::engine::diagnostics_for_text_workspace(&ws, "reading", "v1", "{ reading { name \"m\" question \"q\" kind \"nope\" target \"x\" } }");
     assert!(bad.iter().any(|d| d.message.contains("allowed enum values")), "{bad:?}");

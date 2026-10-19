@@ -34,6 +34,8 @@ pub use graph::*;
 
 pub mod reading;
 pub mod digest;
+pub mod receipts;
+pub mod task_records;
 pub mod store;
 pub mod exec;
 pub mod paths;

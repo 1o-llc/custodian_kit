@@ -150,6 +150,12 @@ pub struct JobFile {
     /// The routes counted; the template's `count_route`, else the workspace.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routes: Vec<String>,
+    /// The task this run writes its history records into (`.custodian/data/history/<task_id>/`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    /// The revision of it this run is (`base`, `fix1`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
 }
 
 /// One count a job took: when (`open`, `step 3 apply`, `close`), of which route, its reading.
@@ -400,6 +406,16 @@ fn step_spec(folder: &Path, n: usize, step: &Step, target: &str, items: &[String
     Ok(p)
 }
 
+/// A step's solution record: the spec run, its run number, its reading.
+fn solution_text(ctx: &Ctx, spec: &Path, ran: &Ran) -> String {
+    let s = ReadingSpec::from_path(spec).ok();
+    let what = s.map(|s| format!("{} ({} {})", s.name, s.kind.as_str(), s.target)).unwrap_or_else(|| ctx.rel(spec));
+    match &ran.receipt {
+        Some(r) => format!("{what}: run #{}{}, reading {}", r.seq, r.reused_seq.map(|p| format!(" (reuse of #{p})")).unwrap_or_default(), r.outputs.first().cloned().unwrap_or_default()),
+        None => what,
+    }
+}
+
 /// `job start`: the queued folder moved to running and its readings run.
 pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
     let store = ctx.store()?;
@@ -427,6 +443,16 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
     let in_job = InJob { id: id.clone(), readings: running.join("readings") };
     let mut runs = Vec::new();
     let t = if kind == "specs" { None } else { Some(template(store, &kind)?) };
+    // the task history: a new revision of the job's task, its task and intent records
+    let intent = match &t {
+        Some(t) => format!("{} ({} {})", t.summary, t.kind, jf.target.clone().unwrap_or_default()),
+        None => format!("read the job's specs: {name}"),
+    };
+    let task = crate::task_records::open(store, &name, &kind, &id, &intent)?;
+    jf.task_id = Some(task.task_id.clone());
+    jf.revision = Some(task.revision.clone());
+    write_job_file(&running, &jf)?;
+    said.push(format!("task history: {}/{} (task, intent)", task.task_id, task.revision));
     let routes = count_routes(&jf, t.as_ref());
     take_counts(ctx, &running, &in_job, "open", &routes, &mut said, &mut runs)?;
     if kind == "specs" {
@@ -435,6 +461,7 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
         for s in specs {
             let ran = run_reading(ctx, &s, again, Some(&in_job))?;
             said.extend(ran.said.iter().cloned());
+            crate::task_records::solution(&task, &solution_text(ctx, &s, &ran))?;
             runs.push(ran);
         }
     } else {
@@ -470,6 +497,7 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
                     let spec = step_spec(&running, n, step, tgt, &items, &question)?;
                     let ran = run_reading(ctx, &spec, again, Some(&in_job))?;
                     said.extend(ran.said.iter().cloned());
+                    crate::task_records::solution(&task, &solution_text(ctx, &spec, &ran))?;
                     if let Some(j) = ran.receipt.as_ref().and_then(|r| r.outputs.iter().find(|o| o.ends_with(".json"))) {
                         reports.push(load(&ctx.root.join(j))?);
                     }
@@ -598,6 +626,46 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
     }
     let test_seqs: Vec<i64> = runs.iter().filter(|r| r.command == "test").map(|r| r.seq).collect();
     let tests = journal.tests_of_runs(&test_seqs)?;
+    // the task history: changes (from the open and close counts), verifications, the result
+    let mut history_said = Vec::new();
+    if let Some(task) = crate::task_records::of_job(store, jf.task_id.as_deref(), jf.revision.as_deref())? {
+        let counts = taken(&running);
+        let mut seen_paths = BTreeSet::new();
+        let mut routes: Vec<&String> = counts.iter().map(|c| &c.route).collect();
+        routes.sort();
+        routes.dedup();
+        let mut changes = 0;
+        for route in routes {
+            let of: Vec<&Taken> = counts.iter().filter(|c| &c.route == route).collect();
+            if let (Some(first), Some(last)) = (of.first(), of.last()) {
+                if first.reading != last.reading {
+                    let (a, b) = (load(&running.join(&first.reading))?, load(&running.join(&last.reading))?);
+                    if let (Some(a), Some(b)) = (&a.count, &b.count) {
+                        for d in crate::task_records::changes(&task, &ctx.root, a, b)? {
+                            if seen_paths.insert(d.one("path").unwrap_or_default().to_string()) {
+                                changes += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for t in &tests {
+            let passed = match t.outcome.as_str() {
+                "ok" | "passed" | "pass" => Some(true),
+                "failed" | "fail" => Some(false),
+                _ => None,
+            };
+            crate::task_records::verification(&task, &format!("cargo test -p {} {} {}", t.package, t.target, t.test), passed, t.millis.map(|m| format!("{m} ms")).as_deref())?;
+        }
+        for r in runs.iter().filter(|r| r.command == "check") {
+            crate::task_records::verification(&task, &format!("custodian check {}", r.name), Some(r.accepted), Some(&r.reason))?;
+        }
+        let failed = tests.iter().any(|t| matches!(t.outcome.as_str(), "failed" | "fail")) || runs.iter().any(|r| r.command == "check" && !r.accepted);
+        let tree = crate::api::IndexKey::of_root(&ctx.root, &Default::default()).ok().map(|k| k.0);
+        crate::task_records::close(&task, if failed { "failed_test" } else { "accepted" }, tree.as_deref())?;
+        history_said.push(format!("task history: {}/{} ({} changes, {} verifications, result)", task.task_id, task.revision, changes, tests.len() + runs.iter().filter(|r| r.command == "check").count()));
+    }
     let kind = jf.kind.clone().unwrap_or_else(|| "specs".into());
     let guidance = (kind != "specs").then(|| template(store, &kind).ok().map(|t| t.summary)).flatten();
     let closing = Closing {
@@ -651,6 +719,7 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
     };
     let (r, f) = keep(store, r)?;
     let mut said = count_said;
+    said.extend(history_said);
     said.extend(closing.lines_touched.iter().map(|t| format!("lines touched: {} ({})", t.line, t.route)));
     said.extend(vec![
         format!("job {id} closed: {} → {}", ctx.rel(&running), ctx.rel(&done)),
@@ -742,6 +811,11 @@ pub fn brief(ctx: &Ctx, which: &str) -> Result<String> {
     if !c.sensitive.is_empty() {
         s.push_str(&format!("sensitive items touched: {}\n", c.sensitive.iter().map(|(i, l)| format!("{i} ({l})")).collect::<Vec<_>>().join(", ")));
     }
+    if let Some(task) = job_file(&done).task_id.as_deref().map(|t| crate::task_records::read(store, t)).transpose()?.flatten() {
+        for l in crate::task_records::brief_lines(&task) {
+            s.push_str(&format!("{l}\n"));
+        }
+    }
     s.push_str(&format!("closing receipt: {}\n", ctx.rel(&done.join("closing.md"))));
     Ok(s)
 }
@@ -752,7 +826,7 @@ pub fn run_template(ctx: &Ctx, kind: &str, target: &str, again: bool) -> Result<
     let store = ctx.store()?;
     let name = format!("{kind}-{}", crate::runs::stamp());
     let dir = store.job_dir(JobState::Queued, &name)?;
-    let jf = JobFile { id: None, name: Some(name.clone()), kind: Some(kind.to_string()), target: Some(target.to_string()), origin: None, count: None, routes: Vec::new() };
+    let jf = JobFile { id: None, name: Some(name.clone()), kind: Some(kind.to_string()), target: Some(target.to_string()), origin: None, count: None, routes: Vec::new(), task_id: None, revision: None };
     write_job_file(&dir, &jf)?;
     let started = start(ctx, Some(&name), again)?;
     let (closing, done, said) = close(ctx, &started.id)?;

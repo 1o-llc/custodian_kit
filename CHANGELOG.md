@@ -25,6 +25,9 @@ one klepto scan.
 - `count`: a route counted by tokei, its tests' share by klepto, a digest
   the same tree reproduces, `compare` and `history`, and lines touched in a
   job's closing receipt per step and for the job.
+- Jobs are task histories: a job writes task, intent, solution, change,
+  verification and result records (task_history) for each run, and its brief
+  reads them back. Receipts have a module of their own (`receipts`).
 - Reading specs, job files and the paths table are 1o documents with shipped
   schemas, read by core-1o into the same form TOML reads into.
 

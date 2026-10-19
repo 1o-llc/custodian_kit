@@ -47,6 +47,8 @@ pub mod named {
     pub const JOURNAL: ArtifactOutputDescriptor = file("custodian.journal", "journal", ArtifactEndpoint::FileTxt, AppPathRole::State, "journal.sqlite", PathMutability::Writable);
     pub const JOB_FILE: ArtifactOutputDescriptor = file("custodian.job", "job", ArtifactEndpoint::FileToml, AppPathRole::State, "jobs/{state}/{job}/v1.job.1o.job", PathMutability::Writable);
     pub const WRITER: ArtifactOutputDescriptor = file("custodian.writer", "writer", ArtifactEndpoint::FileTxt, AppPathRole::State, "writer.sqlite", PathMutability::Writable);
+    /// The task-history root's index (`task_history`'s format); the root holds a task per job name.
+    pub const HISTORY_INDEX: ArtifactOutputDescriptor = file("custodian.history", "history", ArtifactEndpoint::FileTxt, AppPathRole::Data, "history/v1.history_index.1o.diff", PathMutability::Writable);
     /// The paths table, in 1o (`paths.toml` beside it is read when this is missing).
     pub const PATHS: ArtifactOutputDescriptor = file("custodian.paths", "paths", ArtifactEndpoint::FileTxt, AppPathRole::Config, "v1.paths.1o.paths", PathMutability::Writable);
     /// The 1o schemas, in core-1o's layout, listed in the project's oneo.project.json.
@@ -162,6 +164,10 @@ impl Store {
         // the 1o schemas where the language server finds them, and an empty paths table in 1o
         let schema_dir = store.dir_of(&named::SCHEMA, &[("modifier", "x")])?.parent().map(Path::to_path_buf).unwrap_or_default();
         made.extend(crate::oneo::write_schemas(&schema_dir)?);
+        // the task-history records' `diff` modifier, declared once in task_history
+        let diff = schema_dir.join(task_history::ONE_O_DIFF_MODIFIER).join("v1.schema.json");
+        write_whole(&diff, task_history::DIFF_SCHEMA_JSON.as_bytes())?;
+        made.push(diff);
         let rel = schema_dir.strip_prefix(&store.root).unwrap_or(&schema_dir).to_string_lossy().replace('\\', "/");
         made.push(crate::oneo::declare_schema_dir(&store.root, &rel)?);
         let paths = store.path(&named::PATHS, &[])?;
@@ -250,41 +256,7 @@ impl JobState {
     }
 }
 
-/// One run, as the journal keeps it and as `receipts/<seq>.json` holds it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Receipt {
-    pub schema: String,
-    pub seq: i64,
-    pub utc: String,
-    /// What ran: `reading`, `test`, `check`, `git`, `gate`, `job-close`.
-    pub command: String,
-    /// The spec, the crate, the check.
-    pub name: String,
-    pub spec: Option<String>,
-    pub spec_hash: Option<String>,
-    /// klepto's fingerprint of the files the scan read.
-    pub code_digest: Option<String>,
-    /// The registry's polymorphic index key of the reading (`kidx_...`).
-    pub index_key: Option<String>,
-    pub plan_id: String,
-    pub plan_digest: String,
-    pub operation_digest: String,
-    /// xccute's receipt digest over plan, operation and decision.
-    pub receipt_digest: String,
-    /// The line as it ran.
-    pub line: String,
-    pub exit_code: Option<i32>,
-    pub accepted: bool,
-    pub disposition: String,
-    pub reason: String,
-    pub outputs: Vec<String>,
-    pub job: Option<String>,
-    /// For a reuse: the run whose reading answered.
-    pub reused_seq: Option<i64>,
-    pub millis: i64,
-}
-
-pub const RECEIPT_SCHEMA: &str = "custodian.receipt.v1";
+pub use crate::receipts::{Receipt, RECEIPT_SCHEMA};
 
 /// The journal: receipts, jobs, test results. Its sequence is a checked
 /// counter (uh-tom-mick), seeded from the last receipt, advanced by the one
