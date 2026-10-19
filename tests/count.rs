@@ -298,3 +298,46 @@ fn a_job_is_a_task_history_that_round_trips_and_holds_against_the_tree() {
     assert_eq!(again.revision, "fix1");
     assert_eq!(load_task_history(task_records::root(&store).unwrap()).unwrap().revision_count, 2);
 }
+
+#[test]
+fn a_folder_of_specs_lists_only_its_specs_never_the_jobs_own_data() {
+    let dir = copy_fixture("job-specs").join("job");
+    std::fs::create_dir_all(dir.join("data/counts")).unwrap();
+    for f in ["v1.a.1o.reading", "b.toml", "job.toml", "v1.job.1o.job", "counts.json", "notes.json", "data/counts.json", "data/counts/job-workspace.diff.json"] {
+        std::fs::write(dir.join(f), "{}").unwrap();
+    }
+    let specs: Vec<String> = custodian_kit::jobs::job_specs(&dir).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+    assert_eq!(specs, vec!["b.toml", "v1.a.1o.reading"]);
+}
+
+#[test]
+fn a_reading_kept_in_a_job_resolves_after_the_job_moves_to_done() {
+    use custodian_kit::store::{JobState, Mode, Store};
+    let (store, _) = Store::init(&copy_fixture("job-move"), Mode::Agent).unwrap();
+    let running = store.job_dir(JobState::Running, "j").unwrap();
+    let r = read_at(&store.root, "crate:copy_a");
+    let (_, json, _) = r.write(&running.join("readings")).unwrap();
+    let rel = json.strip_prefix(&store.root).unwrap().to_string_lossy().into_owned();
+    std::fs::write(running.join("closing.md"), format!("reading: {rel}\n")).unwrap();
+    let journal = store.journal().unwrap();
+    let receipt: custodian_kit::api::Receipt = serde_json::from_value(serde_json::json!({
+        "schema": "custodian.receipt.v1", "seq": 0, "utc": "2026-10-19T00:00:00Z", "command": "reading", "name": "count",
+        "spec": null, "spec_hash": "sha256:spec", "code_digest": "sha256:code", "index_key": null, "plan_id": "p", "plan_digest": "d", "operation_digest": "d",
+        "receipt_digest": "d", "line": "custodian exec-reading", "exit_code": 0, "accepted": true, "disposition": "Stop", "reason": "done",
+        "outputs": [rel], "job": "j-1", "reused_seq": null, "millis": 1
+    }))
+    .unwrap();
+    let kept = journal.record(receipt).unwrap();
+    let done = store.job_dir(JobState::Done, "j").unwrap();
+    let moved = custodian_kit::jobs::move_job(&store, &running, &done).unwrap();
+    assert_eq!(moved, vec![kept.seq]);
+    // the same search finds the reading where it now is
+    let prev = journal.same_search("sha256:spec", "sha256:code").unwrap().expect("the earlier search");
+    let out = prev.outputs.first().unwrap();
+    assert!(out.contains("/jobs/done/j/"), "{out}");
+    assert!(store.root.join(out).is_file(), "{out} resolves");
+    // the receipt's file and the closing receipt say the same
+    let file = store.path(&custodian_kit::store::named::RECEIPT, &[("seq", &kept.seq.to_string())]).unwrap();
+    assert!(std::fs::read_to_string(file).unwrap().contains("/jobs/done/j/"));
+    assert!(std::fs::read_to_string(done.join("closing.md")).unwrap().contains("/jobs/done/j/"));
+}

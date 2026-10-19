@@ -429,6 +429,23 @@ impl Journal {
     }
 
     /// Every run, oldest first.
+    /// Every receipt with an output under `old` (a folder, `/`-ended, relative
+    /// to the root) rewritten to sit under `new`; returns them as rewritten.
+    pub fn rehome(&self, old: &str, new: &str) -> Result<Vec<Receipt>> {
+        let mut out = Vec::new();
+        for mut r in self.runs()? {
+            if !r.outputs.iter().any(|o| o.starts_with(old)) {
+                continue;
+            }
+            r.outputs = r.outputs.iter().map(|o| o.strip_prefix(old).map(|rest| format!("{new}{rest}")).unwrap_or_else(|| o.clone())).collect();
+            self.conn
+                .execute("UPDATE runs SET outputs = ?1 WHERE seq = ?2", params![serde_json::to_string(&r.outputs).unwrap_or_default(), r.seq])
+                .map_err(|e| ReadingRefusal::Journal.refuse(e))?;
+            out.push(r);
+        }
+        Ok(out)
+    }
+
     pub fn runs(&self) -> Result<Vec<Receipt>> {
         let mut st = self.conn.prepare("SELECT * FROM runs ORDER BY seq").map_err(jerr)?;
         let rows = st.query_map([], Self::row).map_err(jerr)?;

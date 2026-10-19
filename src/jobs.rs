@@ -186,7 +186,23 @@ pub struct Touched {
 }
 
 /// The counts file in a job folder: every count the job took, in order.
-const COUNTS_FILE: &str = "counts.json";
+const COUNTS_FILE: &str = "data/counts.json";
+
+/// A job folder's own data (counts, count diffs) sits under this sub-folder,
+/// so it is never listed as a spec.
+pub const JOB_DATA: &str = "data";
+
+/// The specs of a folder-of-specs job: the files named as specs
+/// (`v1.<name>.1o.reading`, `<name>.toml`), never the job file and never
+/// the job's own data (which sits under `data/`).
+pub fn job_specs(folder: &Path) -> Vec<PathBuf> {
+    use crate::reading::spec::SpecForm;
+    let mut specs: Vec<PathBuf> = std::fs::read_dir(folder)
+        .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_file() && matches!(SpecForm::of(p), Some(SpecForm::Oneo | SpecForm::Toml)) && !is_job_file(p)).collect())
+        .unwrap_or_default();
+    specs.sort();
+    specs
+}
 
 fn slug(s: &str) -> String {
     let t: String = s.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
@@ -250,7 +266,7 @@ pub fn lines_touched_of(folder: &Path, counts: &[Taken]) -> Result<Vec<Touched>>
         }
         for (label, a, b) in pairs {
             let d = crate::reading::count::compare(&reports[a].1, &reports[b].1)?;
-            let file = folder.join("counts").join(format!("{}-{}.diff.json", slug(&label), if route == "*" { "workspace".to_string() } else { slug(route) }));
+            let file = folder.join(JOB_DATA).join("counts").join(format!("{}-{}.diff.json", slug(&label), if route == "*" { "workspace".to_string() } else { slug(route) }));
             write_whole(&file, (serde_json::to_string_pretty(&d)? + "\n").as_bytes())?;
             out.push(Touched {
                 line: d.line(&label),
@@ -329,6 +345,32 @@ fn find(store: &Store, state: JobState, which: Option<&str>) -> Result<PathBuf> 
         }),
     };
     found.ok_or_else(|| ReadingRefusal::NoJob.refuse(format!("{} in jobs/{}", which.unwrap_or("(the first)"), state.as_str())))
+}
+
+/// Moves a job folder, and rewrites every receipt whose outputs sit in it
+/// (the journal row and `receipts/<seq>.json`) and the folder's closing
+/// receipt to the new place: one rule, so a reading kept in a job resolves
+/// wherever the job is.
+pub fn move_job(store: &Store, from: &Path, to: &Path) -> Result<Vec<i64>> {
+    mv(from, to)?;
+    let rel = |p: &Path| p.strip_prefix(&store.root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+    let (old, new) = (format!("{}/", rel(from)), format!("{}/", rel(to)));
+    let journal = store.journal()?;
+    let mut moved = Vec::new();
+    for r in journal.rehome(&old, &new)? {
+        let file = store.path(&crate::store::named::RECEIPT, &[("seq", &r.seq.to_string())])?;
+        write_whole(&file, (serde_json::to_string_pretty(&r)? + "\n").as_bytes())?;
+        moved.push(r.seq);
+    }
+    for name in ["closing.json", "closing.md"] {
+        let p = to.join(name);
+        if let Ok(text) = std::fs::read_to_string(&p) {
+            if text.contains(&old) {
+                write_whole(&p, text.replace(&old, &new).as_bytes())?;
+            }
+        }
+    }
+    Ok(moved)
 }
 
 fn mv(from: &Path, to: &Path) -> Result<()> {
@@ -411,7 +453,8 @@ fn solution_text(ctx: &Ctx, spec: &Path, ran: &Ran) -> String {
     let s = ReadingSpec::from_path(spec).ok();
     let what = s.map(|s| format!("{} ({} {})", s.name, s.kind.as_str(), s.target)).unwrap_or_else(|| ctx.rel(spec));
     match &ran.receipt {
-        Some(r) => format!("{what}: run #{}{}, reading {}", r.seq, r.reused_seq.map(|p| format!(" (reuse of #{p})")).unwrap_or_default(), r.outputs.first().cloned().unwrap_or_default()),
+        // the reading as the job folder holds it (the folder moves; the record does not)
+        Some(r) => format!("{what}: run #{}{}, reading {}", r.seq, r.reused_seq.map(|p| format!(" (reuse of #{p})")).unwrap_or_default(), r.outputs.first().map(|o| o.split_once("/readings/").map(|(_, rest)| format!("readings/{rest}")).unwrap_or_else(|| o.clone())).unwrap_or_default()),
         None => what,
     }
 }
@@ -456,9 +499,7 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
     let routes = count_routes(&jf, t.as_ref());
     take_counts(ctx, &running, &in_job, "open", &routes, &mut said, &mut runs)?;
     if kind == "specs" {
-        let mut specs: Vec<PathBuf> = std::fs::read_dir(&running).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| crate::reading::spec::SpecForm::of(p).is_some() && !is_job_file(p)).collect()).unwrap_or_default();
-        specs.sort();
-        for s in specs {
+        for s in job_specs(&running) {
             let ran = run_reading(ctx, &s, again, Some(&in_job))?;
             said.extend(ran.said.iter().cloned());
             crate::task_records::solution(&task, &solution_text(ctx, &s, &ran))?;
@@ -690,7 +731,7 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
     write_whole(&running.join("closing.md"), render_closing(&closing).as_bytes())?;
     let folder_name = running.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let done = store.job_dir(JobState::Done, &folder_name)?;
-    mv(&running, &done)?;
+    move_job(store, &running, &done)?;
     journal.put_job(&JobRow { id: id.clone(), name: closing.name.clone(), kind: closing.kind.clone(), state: "done".into(), folder: ctx.rel(&done), opened_utc: closing.opened_utc.clone(), closed_utc: Some(closing.closed_utc.clone()) })?;
     let digest = crate::digest::tagged(&json);
     let r = Receipt {
