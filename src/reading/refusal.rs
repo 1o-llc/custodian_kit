@@ -84,6 +84,8 @@ pub enum ReadingRefusal {
     NoWriter,
     #[liaise(code = 38, msg = "the plan has no step of that number")]
     NoPlanStep,
+    #[liaise(code = 39, msg = "the reading reads declarations and none are named: no declared_in source in the spec, and no default in .custodian/config/declared.toml")]
+    NoDeclaredSource,
     #[liaise(code = 101, msg = "the bundle filters break the word's own rules")]
     FiltersRefused,
     #[liaise(code = 102, msg = "the route holds no file the filters keep")]

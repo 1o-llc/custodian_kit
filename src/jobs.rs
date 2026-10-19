@@ -1128,6 +1128,10 @@ fn verified(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], specs
     }
 }
 
+/// The languages a bounded job may not write by hand: code (Rust) and its manifests (TOML). Documentation is not
+/// code, and is written as the agent writes it.
+pub const CODE_LANGUAGES: &[&str] = &["Rust", "TOML"];
+
 /// A bounded job's files that no transform of it covers, from its open and close counts of the workspace, each with
 /// the lines changed by hand when code_passenger holds a snapshot of the state the hand edit began from.
 fn uncovered_lines(ctx: &Ctx, folder: &Path, transforms: &[crate::transform::TransformRecord]) -> Result<Vec<crate::transform::Uncovered>> {
@@ -1136,7 +1140,7 @@ fn uncovered_lines(ctx: &Ctx, folder: &Path, transforms: &[crate::transform::Tra
     let (Some(open), Some(close)) = (of("open"), of("close")) else { return Ok(Vec::new()) };
     let digests = |t: &Taken| -> Result<std::collections::BTreeMap<String, String>> {
         let r = load(&folder.join(&t.reading))?;
-        Ok(r.count.map(|c| c.crates.iter().flat_map(|k| k.file_counts.iter()).filter(|f| !f.path.contains('#')).map(|f| (f.path.clone(), f.digest.clone())).collect()).unwrap_or_default())
+        Ok(r.count.map(|c| c.crates.iter().flat_map(|k| k.file_counts.iter()).filter(|f| !f.path.contains('#') && CODE_LANGUAGES.contains(&f.language.as_str())).map(|f| (f.path.clone(), f.digest.clone())).collect()).unwrap_or_default())
     };
     let mut out = crate::transform::coverage(&digests(&open)?, &digests(&close)?, transforms);
     if crate::exec::on_path("code-passenger") {

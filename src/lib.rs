@@ -57,6 +57,8 @@ pub mod linkage;
 pub mod preflight;
 pub mod questions;
 pub mod transform;
+pub mod plan;
+pub mod tasks;
 
 #[cfg(test)]
 mod tests;

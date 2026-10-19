@@ -248,6 +248,8 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
     let land = landing(&f.k, &f.root, spec);
     let resolved = land.is_ok();
     pre.push(Check { what: "the target resolves".into(), holds: resolved, detail: match &land { Ok(l) => l.line(), Err(e) => e.clone() } });
+    let todo = crate::plan::has_todo(spec);
+    pre.push(Check { what: "no TODO is left in the spec".into(), holds: !todo, detail: if todo { "a plan's approval left TODO where the operation's details go: fill them in".into() } else { "filled".into() } });
     let rows = impact.as_ref().map(|(_, _, r)| r.clone()).unwrap_or_default();
     let kind_rows = |k: &str| rows.iter().filter(move |r| r.kind == k).cloned().collect::<Vec<_>>();
     let preserve = spec.compatibility != Some(Compatibility::Break);

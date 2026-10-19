@@ -70,6 +70,9 @@ pub struct ReadingReport {
     /// A `count` reading's count (`custodian.count.v1`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count: Option<count::CountReport>,
+    /// The finding in a few lines (the duplicates' top crate pairs, an impact's record line).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headline: Vec<String>,
 }
 
 /// What a kind found, before it becomes a report.
@@ -82,6 +85,10 @@ pub struct Answer {
     pub artifact: Option<Vec<u8>>,
     /// The `count` kind's count.
     pub count: Option<count::CountReport>,
+    /// The finding in a few lines, for a one-line summary (the duplicates' top crate pairs).
+    pub headline: Vec<String>,
+    /// What the kind did not read, and why.
+    pub not_read: Vec<String>,
 }
 
 impl Answer {
@@ -117,6 +124,7 @@ pub fn read_facts(facts: &Facts, spec_path: &Path, spec: &ReadingSpec, stamp: &s
     if let Some(n) = &facts.k.dep_macro_note {
         not_read.push(n.clone());
     }
+    not_read.extend(answer.not_read.iter().cloned());
     let summary = CodeGraphSummary {
         crate_count: facts.packages.len(),
         file_count: facts.k.files.len(),
@@ -169,6 +177,7 @@ pub fn read_facts(facts: &Facts, spec_path: &Path, spec: &ReadingSpec, stamp: &s
         items,
         artifact: answer.artifact,
         count: answer.count,
+        headline: answer.headline,
     })
 }
 
@@ -231,6 +240,7 @@ fn read_sweep(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, ho
         items: Vec::new(),
         artifact: None,
         count: None,
+        headline: Vec::new(),
     })
 }
 
@@ -268,6 +278,9 @@ pub struct ReadingSummary {
     /// The bundle file a `bundle` reading wrote beside its page.
     #[serde(default)]
     pub bundle: Option<PathBuf>,
+    /// The finding in a few lines.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headline: Vec<String>,
 }
 
 /// The env key a reading line takes extra changed files from (affected_tests
@@ -331,7 +344,7 @@ pub fn answer(spec_path: &Path, root: &Path, out: &str, stamp: &str, how: crate:
         (Some(p), Some(j), Some(l))
     };
     let bundle = page.as_ref().filter(|_| report.artifact.is_some()).map(|p| p.with_extension("bundle"));
-    Ok(ReadingSummary { name: report.name, kind: report.kind, target: report.target, stamp: report.stamp, counts: report.counts, page, json, latest, index_key: report.index_key, items: report.items, bundle })
+    Ok(ReadingSummary { name: report.name, kind: report.kind, target: report.target, stamp: report.stamp, counts: report.counts, page, json, latest, index_key: report.index_key, items: report.items, bundle, headline: report.headline })
 }
 
 /// A reading written before, read back.

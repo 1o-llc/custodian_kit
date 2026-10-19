@@ -476,7 +476,39 @@ fn env_reads(f: &Facts, spec: &ReadingSpec, target: &str, prefix: &str) -> EnvRe
 }
 
 pub(crate) fn declared(f: &Facts, spec: &ReadingSpec) -> Result<Vec<Declared>> {
-    read_declared(&f.root, &spec.declared_in, &f.paths, f.how)
+    match sources(f, spec)? {
+        Some(s) => read_declared(&f.root, &s, &f.paths, f.how),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// The declaration sources a reading reads: the spec's own `declared_in`, else the workspace's one declared
+/// default (`.custodian/config/declared.toml`), else none (the reading says so; it never counts zeros as if it had
+/// read declarations).
+pub(crate) fn sources(f: &Facts, spec: &ReadingSpec) -> Result<Option<Vec<super::spec::DeclaredSource>>> {
+    if !spec.declared_in.is_empty() {
+        return Ok(Some(spec.declared_in.clone()));
+    }
+    let Some(store) = crate::store::Store::find(&f.root) else { return Ok(None) };
+    let file = store.path(&crate::store::named::THRESHOLDS, &[("name", DECLARED_DEFAULT)])?;
+    let Ok(text) = std::fs::read_to_string(&file) else { return Ok(None) };
+    let d: DeclaredDefault = toml::from_str(&text).map_err(|e| ReadingRefusal::SpecInvalid.refuse(format!("{}: {e}", file.display())))?;
+    Ok((!d.declared_in.is_empty()).then_some(d.declared_in))
+}
+
+/// The workspace's default declaration sources: `config/declared.toml`, `[[declared_in]]` blocks as a spec writes them.
+pub const DECLARED_DEFAULT: &str = "declared";
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeclaredDefault {
+    #[serde(default)]
+    pub declared_in: Vec<super::spec::DeclaredSource>,
+}
+
+/// The note a reading carries when it read no declarations.
+fn no_sources_note() -> String {
+    format!("declarations were not read: the spec names no declared_in source and the workspace declares no default (.custodian/config/{DECLARED_DEFAULT}.toml)")
 }
 
 fn readers_of_env(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
@@ -534,7 +566,11 @@ fn readers_of_env(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     ans.count("constants holding a key", const_rows.len());
     ans.count("places naming a key without reading it", named_rows.len());
     if !spec.declared_in.is_empty() {
-        ans.count("declarations", decl_rows.len());
+        if sources(f, spec)?.is_some() {
+            ans.count("declarations", decl_rows.len());
+        } else {
+            ans.not_read.push(no_sources_note());
+        }
         ans.count("keys read but declared nowhere", read_undeclared);
         ans.count("keys declared but read nowhere", declared_unread);
     }
@@ -621,6 +657,8 @@ fn duplicates(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     ans.count("functions in them", members_n);
     ans.count("crate pairs sharing bodies", pair_rows.len());
     ans.count("functions shaped", report.shapes.len());
+    // the finding in one line: the crate pairs sharing the most bodies
+    ans.headline = pair_rows.iter().take(3).map(|(n, r)| format!("{} ({n} shared bodies)", r.label)).collect();
     ans.rows = pair_rows.into_iter().map(|(_, r)| r).chain(rows).collect();
     Ok(ans)
 }
@@ -696,6 +734,9 @@ fn declared_in(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 
 fn sockets(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     let target = spec.target.trim();
+    if sources(f, spec)?.is_none() {
+        return Err(ReadingRefusal::NoDeclaredSource.refuse(format!("sockets {target}: a binary's sockets are declared in its entries; name a [[declared_in]] source (binary, socket, socket_env roles) in the spec or in .custodian/config/{DECLARED_DEFAULT}.toml")));
+    }
     let decls = declared(f, spec)?;
     let own: BTreeSet<(&str, &str)> = decls.iter().filter(|d| d.role == DeclaredRole::Binary && d.value == target).map(|d| (d.file.as_str(), d.entry.as_str())).collect();
     let is_own = |d: &Declared| own.contains(&(d.file.as_str(), d.entry.as_str()));
@@ -898,8 +939,13 @@ pub(crate) fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     ans.count("files", files.len());
     ans.count("crates", crates.len());
     ans.count("binaries", bins.len());
-    ans.count("entries naming those binaries", entry_names.len());
-    ans.count("declarations naming those binaries", entries.len());
+    let read_sources = sources(f, spec)?.is_some();
+    if read_sources {
+        ans.count("entries naming those binaries", entry_names.len());
+        ans.count("declarations naming those binaries", entries.len());
+    } else {
+        ans.not_read.push(no_sources_note());
+    }
     ans.count("items at level confidential or above", sensitive.len());
     ans.count("liaise codes raised there", codes.len());
     ans.count("env keys read there (reads_env)", env.len());

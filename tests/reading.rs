@@ -345,3 +345,51 @@ fn reach_of_a_crate_says_how_deep_it_sits_in_each_user() {
     assert_eq!(count(&r, "callers in other crates losing items"), 1);
     assert!(rows(&r, "loses").iter().any(|x| x.label == "layered_user::user"));
 }
+
+/// A reading that reads declarations and has none named refuses (sockets), or says it read none (reach, readers of
+/// an env key): never zeros as if it had read them. The workspace's one default (`config/declared.toml`) is read
+/// when a spec names none.
+#[test]
+fn a_reading_with_no_declaration_source_refuses_or_says_so_never_zeros() {
+    let e = {
+        let s = spec("sockets", "appd", "");
+        let ws = Workspace::open_for(&fixture(), &s, Resolving::Free).unwrap();
+        api::run(&ws, &s).unwrap_err()
+    };
+    assert_eq!(e.code, "CUST0039", "{e}");
+    let r = read("reach", "crate:core_lib", "");
+    assert!(r.counts().iter().all(|c| !c.what.starts_with("entries naming")), "no entries count without a source: {:?}", r.counts());
+    assert!(r.report.not_read.iter().any(|n| n.contains("declarations were not read")), "{:?}", r.report.not_read);
+    // the workspace's default source, in an initialized copy
+    let dir = std::env::temp_dir().join(format!("custodian-kit-declared-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    copy_tree(&fixture(), &dir);
+    let (store, _) = custodian_kit::store::Store::init(&dir, custodian_kit::store::Mode::Plain).unwrap();
+    let decl = store.path(&custodian_kit::store::named::THRESHOLDS, &[("name", "declared")]).unwrap();
+    std::fs::write(&decl, MARKET).unwrap();
+    let s = spec("sockets", "appd", "");
+    let ws = Workspace::open_for(&store.root, &s, Resolving::Free).unwrap();
+    let r = api::run(&ws, &s).unwrap();
+    assert!(r.counts().iter().find(|c| c.what == "entries running the binary").unwrap().n >= 1, "{:?}", r.counts());
+}
+
+#[test]
+fn the_duplicates_summary_names_the_top_crate_pairs() {
+    let r = read("duplicates", "*", "[duplicates]\nmin_tokens = 8\n");
+    assert!(!r.report.headline.is_empty());
+    assert!(r.report.headline[0].contains("copy_a ↔ copy_b") && r.report.headline[0].contains("shared bodies"), "{:?}", r.report.headline);
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap() {
+        let e = e.unwrap();
+        if e.file_name() == "target" {
+            continue;
+        }
+        if e.path().is_dir() {
+            copy_tree(&e.path(), &to.join(e.file_name()));
+        } else {
+            std::fs::copy(e.path(), to.join(e.file_name())).unwrap();
+        }
+    }
+}

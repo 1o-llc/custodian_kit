@@ -287,6 +287,7 @@ pub fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     ans.count("feature gates", gated_items.len());
     ans.count("feature configurations to check", configurations);
     ans.count("linkage records", naming.len());
+    ans.headline = vec![format!("{} definitions, {uses} use sites, {files} files in {crates} packages, {} tests, {} feature gates, risk {}", defs, cases.len(), gated_items.len(), risk.0)];
     ans.rows = rows;
     ans.unresolved = unresolved;
     Ok(ans)
