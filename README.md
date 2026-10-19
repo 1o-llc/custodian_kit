@@ -315,10 +315,29 @@ line satisfied by the job's own runs; with none the result is `pending`.
 The task states (`tasks::TaskState`: proposed, ready, running, blocked,
 paused, verifying, completed, failed) are derived from the records.
 
+## The histories
+
+What a project keeps over time is five crates of their own, and this crate calls them where it held the code
+itself; each is re-exported where it was, so nothing moved out of this crate's API:
+
+| crate | what | here |
+|---|---|---|
+| [receipt_history](https://crates.io/crates/receipt_history) | the receipts journal: the receipt, the journal's tables, its sequence, the rebuild from the receipt files, the digests | `store::Journal`, `receipts::Receipt`, `digest` |
+| [revision_history](https://crates.io/crates/revision_history) | a job's revisions (`base`, `fix1`, ...): the records a run writes, read back, the chain compared | `task_records` |
+| [tree_history](https://crates.io/crates/tree_history) | the count model, two counts compared, a route's counts over commits; and the tree itself, as a declared `tree` line | `reading::count` |
+| [change_history](https://crates.io/crates/change_history) | the lines each job touched, summed across jobs; the change records two counts give | `jobs::Touched`, `jobs::lines_touched_of`, `task_records::changes` |
+| [diff_history](https://crates.io/crates/diff_history) | two readings of one question compared | `diff` |
+
+[differences_kit](https://crates.io/crates/differences_kit) composes them, one call per kind, and the
+[differences](https://crates.io/crates/differences) command line shows any of them side by side.
+
 ## Refusals
 
 A refusal is a liaise code (`CUST0001`…`CUST0039`, `ReadingRefusal`) and one
-sentence. `api::Refusal` carries both.
+sentence. `api::Refusal` carries both. A history crate's refusal arrives as the
+kit's own code where the kit refused the same thing before the code moved (the
+journal `CUST0012`, a write `CUST0009`, a reading that cannot be read back
+`CUST0017`, a missing input `CUST0021`), else with the history crate's code.
 
 ## Releasing
 

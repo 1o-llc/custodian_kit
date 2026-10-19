@@ -29,148 +29,22 @@ use super::{Answer, ReadingReport};
 use crate::bundle::{place_of, requires_test, walk, Place};
 use crate::store::Store;
 use crate::{CodeQueryResult, Result};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tokei::{Config, LanguageType, Languages};
 
-pub const COUNT_SCHEMA: &str = "custodian.count.v1";
-pub const COUNT_DIFF_SCHEMA: &str = "custodian.count_diff.v1";
+/// What a count is (files by crate, then language, each with its digest, and a
+/// digest over the whole), two counts compared, a run of diffs summed and a
+/// route's counts listed: tree_history's.
+pub use tree_history::count::{compare_counts, share, within, CountDiff, CountReport, CountSummary, CrateCount, CrateMoved, FileCount, LanguageCount, LanguageMoved, Lines, Moved, Side, Within, COUNT_DIFF_SCHEMA, COUNT_SCHEMA};
+
 /// The commit a reading line was started at (the reading line's caller runs
 /// the declared git line and passes it); without it the count runs that line itself.
 pub const COMMIT_ENV: &str = "CUSTODIAN_COMMIT";
 
-/// Lines as tokei counts them.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct Lines {
-    pub lines: usize,
-    pub code: usize,
-    pub comments: usize,
-    pub blanks: usize,
-}
-
-impl Lines {
-    fn of(s: &tokei::CodeStats) -> Lines {
-        let s = s.summarise();
-        Lines { lines: s.code + s.comments + s.blanks, code: s.code, comments: s.comments, blanks: s.blanks }
-    }
-
-    fn add(&mut self, o: Lines) {
-        self.lines += o.lines;
-        self.code += o.code;
-        self.comments += o.comments;
-        self.blanks += o.blanks;
-    }
-}
-
-/// One file: its language, its lines, the part of them that is tests.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct FileCount {
-    /// Relative to the root; a module's inline block is `<file>#<module>`.
-    pub path: String,
-    pub language: String,
-    pub lines: Lines,
-    pub tests: Lines,
-    /// sha256 of the file's bytes (an inline block's: of its text), so a
-    /// change that keeps the line counts still shows, and a task's change
-    /// records carry the digest before.
-    pub digest: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LanguageCount {
-    pub language: String,
-    pub files: usize,
-    pub lines: Lines,
-    pub tests: Lines,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CrateCount {
-    /// The crate's name; `-` for files in no crate.
-    pub name: String,
-    pub files: usize,
-    pub lines: Lines,
-    pub tests: Lines,
-    pub languages: Vec<LanguageCount>,
-    pub file_counts: Vec<FileCount>,
-}
-
-/// A count of a route.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CountReport {
-    pub schema: String,
-    /// The route as resolved: `*`, `crate:core_lib`, `decl:market`, `module:core_lib::wide`.
-    pub route: String,
-    pub index_key: Option<String>,
-    pub commit: Option<String>,
-    /// `sha256:` over the canonical counts (schema and crates; no route, key, commit or time).
-    pub digest: String,
-    pub files: usize,
-    pub lines: Lines,
-    pub tests: Lines,
-    /// Test lines per thousand lines.
-    pub test_share: usize,
-    pub languages: Vec<LanguageCount>,
-    pub crates: Vec<CrateCount>,
-}
-
-fn share(tests: &Lines, all: &Lines) -> usize {
-    (tests.lines * 1000).checked_div(all.lines).unwrap_or(0)
-}
-
-fn languages_of<'a>(files: impl Iterator<Item = &'a FileCount>) -> Vec<LanguageCount> {
-    let mut by: BTreeMap<String, LanguageCount> = BTreeMap::new();
-    for f in files {
-        let l = by.entry(f.language.clone()).or_insert_with(|| LanguageCount { language: f.language.clone(), files: 0, lines: Lines::default(), tests: Lines::default() });
-        l.files += 1;
-        l.lines.add(f.lines);
-        l.tests.add(f.tests);
-    }
-    by.into_values().collect()
-}
-
-impl CountReport {
-    /// Files grouped by crate, then language, sorted; the digest over that form.
-    pub fn from_files(route: String, index_key: Option<String>, commit: Option<String>, files: Vec<(String, FileCount)>) -> CountReport {
-        let mut by: BTreeMap<String, Vec<FileCount>> = BTreeMap::new();
-        for (krate, f) in files {
-            by.entry(krate).or_default().push(f);
-        }
-        let crates: Vec<CrateCount> = by
-            .into_iter()
-            .map(|(name, mut file_counts)| {
-                file_counts.sort();
-                let mut lines = Lines::default();
-                let mut tests = Lines::default();
-                for f in &file_counts {
-                    lines.add(f.lines);
-                    tests.add(f.tests);
-                }
-                CrateCount { name, files: file_counts.len(), lines, tests, languages: languages_of(file_counts.iter()), file_counts }
-            })
-            .collect();
-        let digest = crate::digest::of_value(&(COUNT_SCHEMA, &crates));
-        let mut lines = Lines::default();
-        let mut tests = Lines::default();
-        for c in &crates {
-            lines.add(c.lines);
-            tests.add(c.tests);
-        }
-        CountReport {
-            schema: COUNT_SCHEMA.into(),
-            route,
-            index_key,
-            commit,
-            digest,
-            files: crates.iter().map(|c| c.files).sum(),
-            test_share: share(&tests, &lines),
-            lines,
-            tests,
-            languages: languages_of(crates.iter().flat_map(|c| c.file_counts.iter())),
-            crates,
-        }
-    }
+/// tokei's lines of a file or a block.
+fn lines_of(s: &tokei::CodeStats) -> Lines {
+    let s = s.summarise();
+    Lines { lines: s.code + s.comments + s.blanks, code: s.code, comments: s.comments, blanks: s.blanks }
 }
 
 /// The git commit at `root`, by the declared `git rev-parse HEAD` line; `None` outside git.
@@ -273,7 +147,7 @@ fn test_lines(f: &Facts, file: &Path, rel: &str, text: &str, whole: Lines, confi
     walk(&parsed.ast.items, &mut |s, e, cfg| {
         if requires_test(cfg) {
             let part: String = lines.get(s.saturating_sub(1)..e.min(lines.len())).map(|l| l.concat()).unwrap_or_default();
-            out.add(Lines::of(&LanguageType::Rust.parse_from_str(part, config)));
+            out.add(lines_of(&LanguageType::Rust.parse_from_str(part, config)));
             return false;
         }
         true
@@ -296,7 +170,7 @@ pub fn count(f: &Facts, spec: &ReadingSpec) -> Result<CountReport> {
         for (ty, lang) in &langs {
             for r in &lang.reports {
                 let rel = f.rel(&r.name);
-                let whole = Lines::of(&r.stats);
+                let whole = lines_of(&r.stats);
                 let tests = if *ty == LanguageType::Rust {
                     let text = f.k.files.iter().find(|x| x.path == r.name).map(|x| x.source.clone()).or_else(|| std::fs::read_to_string(&r.name).ok()).unwrap_or_default();
                     test_lines(f, &r.name, &rel, &text, whole, &config)
@@ -312,7 +186,7 @@ pub fn count(f: &Facts, spec: &ReadingSpec) -> Result<CountReport> {
         let text = f.k.files.iter().find(|x| &x.path == file).map(|x| x.source.clone()).unwrap_or_default();
         let lines: Vec<&str> = text.split_inclusive('\n').collect();
         let part: String = lines.get(s.saturating_sub(1)..(*e).min(lines.len())).map(|l| l.concat()).unwrap_or_default();
-        let whole = Lines::of(&LanguageType::Rust.parse_from_str(&part, &config));
+        let whole = lines_of(&LanguageType::Rust.parse_from_str(&part, &config));
         let tests = if requires_test(&f.k.modules.get(module).map(|m| m.cfg.clone()).unwrap_or_default()) { whole } else { Lines::default() };
         let digest = crate::digest::of(part.as_bytes());
         files.push((krate(file), FileCount { path: format!("{}#{module}", f.rel(file)), language: LanguageType::Rust.name().to_string(), lines: whole, tests, digest }));
@@ -350,193 +224,7 @@ pub fn rows(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 }
 
 // ---------------------------------------------------------------------------
-// compare and history
-
-/// Lines that came and went.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Moved {
-    pub added: Lines,
-    pub removed: Lines,
-}
-
-impl Moved {
-    fn between(before: Lines, after: Lines) -> Moved {
-        let mut m = Moved::default();
-        for (b, a, add, rem) in [
-            (before.lines, after.lines, &mut m.added.lines, &mut m.removed.lines),
-            (before.code, after.code, &mut m.added.code, &mut m.removed.code),
-            (before.comments, after.comments, &mut m.added.comments, &mut m.removed.comments),
-            (before.blanks, after.blanks, &mut m.added.blanks, &mut m.removed.blanks),
-        ] {
-            if a > b {
-                *add = a - b;
-            } else {
-                *rem = b - a;
-            }
-        }
-        m
-    }
-
-    fn add(&mut self, o: Moved) {
-        self.added.add(o.added);
-        self.removed.add(o.removed);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Side {
-    pub digest: String,
-    pub commit: Option<String>,
-    pub index_key: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LanguageMoved {
-    pub language: String,
-    pub moved: Moved,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CrateMoved {
-    pub name: String,
-    pub moved: Moved,
-    pub languages: Vec<LanguageMoved>,
-    pub files_added: Vec<String>,
-    pub files_removed: Vec<String>,
-    /// Files in both whose lines moved.
-    pub files_changed: Vec<String>,
-    pub test_share_before: usize,
-    pub test_share_after: usize,
-}
-
-/// What moved between two counts, file by file: a line count that grew is
-/// added, one that shrank is removed; a file only after is added whole, only
-/// before is removed whole.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CountDiff {
-    pub schema: String,
-    pub route: String,
-    pub before: Side,
-    pub after: Side,
-    /// `sha256:` over the canonical diff (the two digests and what moved; no commits).
-    pub digest: String,
-    pub moved: Moved,
-    pub files_added: Vec<String>,
-    pub files_removed: Vec<String>,
-    pub files_changed: Vec<String>,
-    pub test_share_before: usize,
-    pub test_share_after: usize,
-    /// After minus before, per thousand lines.
-    pub test_share_delta: i64,
-    pub crates: Vec<CrateMoved>,
-}
-
-impl CountDiff {
-    pub fn is_empty(&self) -> bool {
-        self.before.digest == self.after.digest
-    }
-
-    /// Every file the diff names: added, removed, changed.
-    pub fn files(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.files_added.iter().chain(&self.files_removed).chain(&self.files_changed).cloned().collect();
-        v.sort();
-        v
-    }
-
-    /// `step 3 apply: +412 −38 across 6 files in 2 crates`.
-    pub fn line(&self, label: &str) -> String {
-        format!("{label}: +{} \u{2212}{} across {} files in {} crates", self.moved.added.lines, self.moved.removed.lines, self.files().len(), self.crates.len())
-    }
-}
-
-/// What a run of diffs moved together: lines added and removed, the files and crates touched.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Within {
-    pub diffs: usize,
-    pub moved: Moved,
-    pub files: Vec<String>,
-    pub crates: Vec<String>,
-}
-
-/// The diffs summed (a range of steps, or of jobs).
-pub fn within<'a>(diffs: impl IntoIterator<Item = &'a CountDiff>) -> Within {
-    let mut w = Within::default();
-    let mut files = std::collections::BTreeSet::new();
-    let mut crates = std::collections::BTreeSet::new();
-    for d in diffs {
-        w.diffs += 1;
-        w.moved.add(d.moved);
-        files.extend(d.files());
-        crates.extend(d.crates.iter().map(|c| c.name.clone()));
-    }
-    w.files = files.into_iter().collect();
-    w.crates = crates.into_iter().collect();
-    w
-}
-
-/// Two counts compared.
-pub fn compare_counts(a: &CountReport, b: &CountReport) -> CountDiff {
-    let files_of = |c: &CountReport| -> BTreeMap<String, (String, FileCount)> { c.crates.iter().flat_map(|k| k.file_counts.iter().map(move |f| (f.path.clone(), (k.name.clone(), f.clone())))).collect() };
-    let (fa, fb) = (files_of(a), files_of(b));
-    #[allow(clippy::type_complexity)]
-    let mut crates: BTreeMap<String, (Moved, BTreeMap<String, Moved>, Vec<String>, Vec<String>, Vec<String>)> = BTreeMap::new();
-    let mut paths: Vec<&String> = fa.keys().chain(fb.keys()).collect();
-    paths.sort();
-    paths.dedup();
-    for p in paths {
-        let (before, after) = (fa.get(p), fb.get(p));
-        let (krate, language) = after.or(before).map(|(k, f)| (k.clone(), f.language.clone())).unwrap_or_default();
-        let m = Moved::between(before.map(|x| x.1.lines).unwrap_or_default(), after.map(|x| x.1.lines).unwrap_or_default());
-        let e = crates.entry(krate).or_default();
-        e.0.add(m);
-        e.1.entry(language).or_default().add(m);
-        match (before, after) {
-            (None, Some(_)) => e.2.push(p.clone()),
-            (Some(_), None) => e.3.push(p.clone()),
-            (Some(x), Some(y)) if m != Moved::default() || x.1.digest != y.1.digest => e.4.push(p.clone()),
-            _ => {}
-        }
-    }
-    let share_of = |c: &CountReport, name: &str| c.crates.iter().find(|k| k.name == name).map(|k| share(&k.tests, &k.lines)).unwrap_or(0);
-    let crates: Vec<CrateMoved> = crates
-        .into_iter()
-        .filter(|(_, (m, _, added, removed, changed))| *m != Moved::default() || !added.is_empty() || !removed.is_empty() || !changed.is_empty())
-        .map(|(name, (moved, langs, added, removed, changed))| CrateMoved {
-            test_share_before: share_of(a, &name),
-            test_share_after: share_of(b, &name),
-            languages: langs.into_iter().filter(|(_, m)| *m != Moved::default()).map(|(language, moved)| LanguageMoved { language, moved }).collect(),
-            files_added: added,
-            files_removed: removed,
-            files_changed: changed,
-            moved,
-            name,
-        })
-        .collect();
-    let mut moved = Moved::default();
-    for c in &crates {
-        moved.add(c.moved);
-    }
-    let files_added: Vec<String> = crates.iter().flat_map(|c| c.files_added.iter().cloned()).collect();
-    let files_removed: Vec<String> = crates.iter().flat_map(|c| c.files_removed.iter().cloned()).collect();
-    let files_changed: Vec<String> = crates.iter().flat_map(|c| c.files_changed.iter().cloned()).collect();
-    let test_share_delta = b.test_share as i64 - a.test_share as i64;
-    let digest = crate::digest::of_value(&(COUNT_DIFF_SCHEMA, &a.digest, &b.digest, &moved, &files_added, &files_removed, &files_changed, a.test_share, b.test_share, &crates));
-    CountDiff {
-        schema: COUNT_DIFF_SCHEMA.into(),
-        route: b.route.clone(),
-        before: Side { digest: a.digest.clone(), commit: a.commit.clone(), index_key: a.index_key.clone() },
-        after: Side { digest: b.digest.clone(), commit: b.commit.clone(), index_key: b.index_key.clone() },
-        digest,
-        moved,
-        files_added,
-        files_removed,
-        files_changed,
-        test_share_before: a.test_share,
-        test_share_after: b.test_share,
-        test_share_delta,
-        crates,
-    }
-}
+// compare and history (tree_history's, over the kit's readings and journal)
 
 /// Two count readings compared; a reading that is not a count is refused.
 pub fn compare(a: &ReadingReport, b: &ReadingReport) -> Result<CountDiff> {
@@ -546,33 +234,8 @@ pub fn compare(a: &ReadingReport, b: &ReadingReport) -> Result<CountDiff> {
     Ok(compare_counts(x, y))
 }
 
-/// One count of a route, as the journal keeps it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CountSummary {
-    pub seq: i64,
-    pub utc: String,
-    pub name: String,
-    pub commit: Option<String>,
-    pub digest: String,
-    pub files: usize,
-    pub lines: Lines,
-    pub tests: Lines,
-    pub test_share: usize,
-}
-
 /// Every count of `route` the journal holds (reuses left out), oldest first.
 /// `route` is spelled as the count resolves it: `*`, `crate:core_lib`, `module:core_lib::wide`.
 pub fn history(store: &Store, route: &str) -> Result<Vec<CountSummary>> {
-    let mut out = Vec::new();
-    for r in store.journal()?.runs()? {
-        if r.command != "reading" || r.reused_seq.is_some() {
-            continue;
-        }
-        let Some(json) = r.outputs.iter().find(|o| o.ends_with(".json")) else { continue };
-        let Ok(rep) = super::load(&store.root.join(json)) else { continue };
-        let Some(c) = rep.count.filter(|c| c.route == route) else { continue };
-        out.push(CountSummary { seq: r.seq, utc: r.utc.clone(), name: r.name.clone(), commit: c.commit, digest: c.digest, files: c.files, lines: c.lines, tests: c.tests, test_share: c.test_share });
-    }
-    out.sort_by_key(|s| s.seq);
-    Ok(out)
+    Ok(tree_history::count::history(&store.root, &store.journal()?.runs()?, route))
 }

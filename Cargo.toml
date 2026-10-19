@@ -1,6 +1,6 @@
 [package]
 name = "custodian_kit"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 # tantivy 0.26 needs 1.86; time, globset, ignore and darling in the lock need 1.88; xccute 0.3.1 (std File locks), 1.89
 rust-version = "1.89"
@@ -54,6 +54,13 @@ core-1o = "0.1.1"
 tokei = { version = "15.0.0", default-features = false }
 scope = "0.3.1"
 task_history = "0.1.0"
+# the histories, each its own crate: receipts and the journal, a task's revisions, the tree and the counts over
+# time, the lines each job touched, two readings of one question
+receipt_history = "0.1.0"
+revision_history = "0.1.0"
+tree_history = "0.1.0"
+change_history = "0.1.0"
+diff_history = "0.1.0"
 # context windows of secret items held redacted
 classified = "0.2.1"
 # level and boundary rules stated as constraints

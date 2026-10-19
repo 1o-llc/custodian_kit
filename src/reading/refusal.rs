@@ -113,3 +113,39 @@ impl ReadingRefusal {
         self.refuse(detail).into()
     }
 }
+
+/// A history crate's refusal as the kit's: where the kit refused the same thing before the machinery moved out
+/// (the journal, a write, a reading that cannot be read back, a missing input), the kit's own code and sentence
+/// with the history's detail, so its refusals read as they did; any other keeps the history's own code.
+macro_rules! from_history {
+    ($($e:ty => { $($from:path => $to:ident),* $(,)? })*) => {$(
+        impl From<$e> for CustodianError {
+            fn from(e: $e) -> Self {
+                #[allow(unreachable_patterns)]
+                match e.refusal {
+                    $($from => ReadingRefusal::$to.refuse(e.detail),)*
+                    other => CustodianError::Reading { code: other.code(), message: format!("{}: {}", other.message(), e.detail) },
+                }
+            }
+        }
+
+        impl From<$e> for crate::api::Refusal {
+            fn from(e: $e) -> Self {
+                CustodianError::from(e).into()
+            }
+        }
+    )*};
+}
+
+from_history! {
+    receipt_history::Error => { receipt_history::Refusal::Journal => Journal, receipt_history::Refusal::Write => Write }
+    revision_history::Error => { revision_history::Refusal::Write => Write, revision_history::Refusal::Unreadable => ReadingUnreadable }
+    tree_history::Error => { tree_history::Refusal::Write => Write, tree_history::Refusal::Unreadable => ReadingUnreadable, tree_history::Refusal::NotCounts => MissingInput }
+    change_history::Error => {
+        change_history::Refusal::Unreadable => ReadingUnreadable,
+        change_history::Refusal::NotCounts => MissingInput,
+        change_history::Refusal::MissingInput => MissingInput,
+        change_history::Refusal::Write => Write,
+    }
+    diff_history::Error => { diff_history::Refusal::Unreadable => ReadingUnreadable }
+}

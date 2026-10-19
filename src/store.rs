@@ -3,22 +3,22 @@
 //! base is the project root and whose app is `.custodian`, so every path is a
 //! role directory under it), files written whole by write-then-rename, and the
 //! journal: one SQLite file holding a receipt per run, the jobs and the test
-//! results.
+//! results (receipt_history's journal, opened at the path named here).
 
 use crate::reading::refusal::ReadingRefusal;
 use crate::Result;
 use pathgen::{AppPathRole, ArtifactEndpoint, ArtifactOutputDescriptor, PathMutability, PathOwner, PathPolicy, PathSensitivity, PathTemplateVars};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use std::sync::OnceLock;
-use uh_tom_mick::{AdmissionGuard, AtomicAdmission, AtomicCounter};
+use uh_tom_mick::{AdmissionGuard, AtomicAdmission};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// The initialized folder's name, and pathgen's app name for it.
 pub const FOLDER: &str = ".custodian";
 
-/// How long a write to the journal waits for another writer: the one wait the journal has.
-pub const JOURNAL_BUSY: std::time::Duration = std::time::Duration::from_secs(10);
+/// How long a write to the journal waits for another writer: the one wait the journal has (receipt_history's).
+pub use receipt_history::JOURNAL_BUSY;
 
 const fn file(route_id: &'static str, kind: &'static str, endpoint: ArtifactEndpoint, base_role: AppPathRole, relative_template: &'static str, mutability: PathMutability) -> ArtifactOutputDescriptor {
     ArtifactOutputDescriptor {
@@ -110,19 +110,18 @@ pub struct Store {
     policy: PathPolicy,
 }
 
+fn jerr(e: impl std::fmt::Display) -> crate::CustodianError {
+    ReadingRefusal::Journal.refuse(e)
+}
+
 fn write_err(path: &Path, e: impl std::fmt::Display) -> crate::CustodianError {
     ReadingRefusal::Write.refuse(format!("{}: {e}", path.display()))
 }
 
 /// Writes `bytes` to `path` whole: to a sibling temporary file, then a rename,
-/// so a reader never sees half a file.
+/// so a reader never sees half a file (receipt_history's, refused as the kit's `Write`).
 pub fn write_whole(path: &Path, bytes: &[u8]) -> Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| write_err(dir, e))?;
-    }
-    let tmp = path.with_file_name(format!(".{}.{}.tmp", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), std::process::id()));
-    std::fs::write(&tmp, bytes).map_err(|e| write_err(&tmp, e))?;
-    std::fs::rename(&tmp, path).map_err(|e| write_err(path, e))
+    Ok(receipt_history::write_whole(path, bytes)?)
 }
 
 impl Store {
@@ -231,7 +230,7 @@ impl Store {
     }
 
     pub fn journal(&self) -> Result<Journal> {
-        Journal::open(&self.path(&named::JOURNAL, &[])?)
+        Ok(Journal::open(&self.path(&named::JOURNAL, &[])?)?)
     }
 
     /// The project's writer, or the refusal: another run (in this process or
@@ -274,258 +273,7 @@ impl JobState {
 
 pub use crate::receipts::{Receipt, RECEIPT_SCHEMA};
 
-/// The journal: receipts, jobs, test results. Its sequence is a checked
-/// counter (uh-tom-mick), seeded from the last receipt, advanced by the one
-/// writer.
-pub struct Journal {
-    pub path: PathBuf,
-    conn: Connection,
-    seq: AtomicCounter,
-}
-
-fn jerr(e: impl std::fmt::Display) -> crate::CustodianError {
-    ReadingRefusal::Journal.refuse(e)
-}
-
-/// The journal's tables, declared once.
-pub const JOURNAL_SCHEMA: &str = "
-CREATE TABLE IF NOT EXISTS runs (
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,
-  utc TEXT NOT NULL,
-  command TEXT NOT NULL,
-  name TEXT NOT NULL,
-  spec TEXT,
-  spec_hash TEXT,
-  code_digest TEXT,
-  index_key TEXT,
-  plan_id TEXT NOT NULL,
-  plan_digest TEXT NOT NULL,
-  operation_digest TEXT NOT NULL,
-  receipt_digest TEXT NOT NULL,
-  line TEXT NOT NULL,
-  exit_code INTEGER,
-  accepted INTEGER NOT NULL,
-  disposition TEXT NOT NULL,
-  reason TEXT NOT NULL,
-  outputs TEXT NOT NULL,
-  job TEXT,
-  reused_seq INTEGER,
-  millis INTEGER NOT NULL,
-  runner TEXT NOT NULL DEFAULT 'line'
-);
-CREATE INDEX IF NOT EXISTS runs_same_search ON runs (command, spec_hash, code_digest);
-CREATE TABLE IF NOT EXISTS jobs (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  state TEXT NOT NULL,
-  folder TEXT NOT NULL,
-  opened_utc TEXT,
-  closed_utc TEXT
-);
-CREATE TABLE IF NOT EXISTS tests (
-  seq INTEGER NOT NULL,
-  package TEXT NOT NULL,
-  target TEXT NOT NULL,
-  test TEXT NOT NULL,
-  outcome TEXT NOT NULL,
-  millis INTEGER
-);
-";
-
-/// A job as the journal keeps it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct JobRow {
-    pub id: String,
-    pub name: String,
-    pub kind: String,
-    pub state: String,
-    pub folder: String,
-    pub opened_utc: Option<String>,
-    pub closed_utc: Option<String>,
-}
-
-/// One test's outcome in one run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TestRow {
-    pub seq: i64,
-    pub package: String,
-    pub target: String,
-    pub test: String,
-    pub outcome: String,
-    pub millis: Option<i64>,
-}
-
-impl Journal {
-    pub fn open(path: &Path) -> Result<Journal> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).map_err(|e| write_err(dir, e))?;
-        }
-        let conn = Connection::open(path).map_err(jerr)?;
-        conn.busy_timeout(JOURNAL_BUSY).map_err(jerr)?;
-        conn.execute_batch(JOURNAL_SCHEMA).map_err(jerr)?;
-        // a journal from before the runner field gets its column, every older run a line run
-        let has_runner: bool = conn.prepare("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'runner'").and_then(|mut s| s.exists([])).map_err(jerr)?;
-        if !has_runner {
-            conn.execute_batch("ALTER TABLE runs ADD COLUMN runner TEXT NOT NULL DEFAULT 'line';").map_err(jerr)?;
-        }
-        let last: i64 = conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM runs", [], |r| r.get(0)).map_err(jerr)?;
-        Ok(Journal { path: path.to_path_buf(), conn, seq: AtomicCounter::new(last.max(0) as u64) })
-    }
-
-    /// Records a run; the receipt comes back with its sequence number.
-    pub fn record(&self, mut r: Receipt) -> Result<Receipt> {
-        let seq = self.seq.increment().map_err(|e| jerr(format!("{e:?}")))? as i64;
-        self.conn
-            .execute(
-                "INSERT INTO runs (seq, utc, command, name, spec, spec_hash, code_digest, index_key, plan_id, plan_digest, operation_digest, receipt_digest, line, exit_code, accepted, disposition, reason, outputs, job, reused_seq, millis, runner)
-                 VALUES (?21, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?22)",
-                params![
-                    r.utc,
-                    r.command,
-                    r.name,
-                    r.spec,
-                    r.spec_hash,
-                    r.code_digest,
-                    r.index_key,
-                    r.plan_id,
-                    r.plan_digest,
-                    r.operation_digest,
-                    r.receipt_digest,
-                    r.line,
-                    r.exit_code,
-                    r.accepted,
-                    r.disposition,
-                    r.reason,
-                    serde_json::to_string(&r.outputs).unwrap_or_default(),
-                    r.job,
-                    r.reused_seq,
-                    r.millis,
-                    seq,
-                    r.runner
-                ],
-            )
-            .map_err(jerr)?;
-        r.seq = seq;
-        Ok(r)
-    }
-
-    fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Receipt> {
-        let outputs: String = row.get("outputs")?;
-        Ok(Receipt {
-            schema: RECEIPT_SCHEMA.to_string(),
-            seq: row.get("seq")?,
-            utc: row.get("utc")?,
-            command: row.get("command")?,
-            name: row.get("name")?,
-            spec: row.get("spec")?,
-            spec_hash: row.get("spec_hash")?,
-            code_digest: row.get("code_digest")?,
-            index_key: row.get("index_key")?,
-            plan_id: row.get("plan_id")?,
-            plan_digest: row.get("plan_digest")?,
-            operation_digest: row.get("operation_digest")?,
-            receipt_digest: row.get("receipt_digest")?,
-            line: row.get("line")?,
-            exit_code: row.get("exit_code")?,
-            accepted: row.get("accepted")?,
-            disposition: row.get("disposition")?,
-            reason: row.get("reason")?,
-            outputs: serde_json::from_str(&outputs).unwrap_or_default(),
-            job: row.get("job")?,
-            reused_seq: row.get("reused_seq")?,
-            millis: row.get("millis")?,
-            runner: row.get("runner")?,
-        })
-    }
-
-    /// The same search answered before: the newest accepted reading of this
-    /// spec hash over this code, not itself a reuse.
-    pub fn same_search(&self, spec_hash: &str, code_digest: &str) -> Result<Option<Receipt>> {
-        self.conn
-            .query_row(
-                "SELECT * FROM runs WHERE command = 'reading' AND spec_hash = ?1 AND code_digest = ?2 AND accepted = 1 AND reused_seq IS NULL ORDER BY seq DESC LIMIT 1",
-                params![spec_hash, code_digest],
-                Self::row,
-            )
-            .optional()
-            .map_err(jerr)
-    }
-
-    /// Every run, oldest first.
-    /// Every receipt with an output under `old` (a folder, `/`-ended, relative
-    /// to the root) rewritten to sit under `new`; returns them as rewritten.
-    pub fn rehome(&self, old: &str, new: &str) -> Result<Vec<Receipt>> {
-        let mut out = Vec::new();
-        for mut r in self.runs()? {
-            if !r.outputs.iter().any(|o| o.starts_with(old)) {
-                continue;
-            }
-            r.outputs = r.outputs.iter().map(|o| o.strip_prefix(old).map(|rest| format!("{new}{rest}")).unwrap_or_else(|| o.clone())).collect();
-            self.conn
-                .execute("UPDATE runs SET outputs = ?1 WHERE seq = ?2", params![serde_json::to_string(&r.outputs).unwrap_or_default(), r.seq])
-                .map_err(|e| ReadingRefusal::Journal.refuse(e))?;
-            out.push(r);
-        }
-        Ok(out)
-    }
-
-    pub fn runs(&self) -> Result<Vec<Receipt>> {
-        let mut st = self.conn.prepare("SELECT * FROM runs ORDER BY seq").map_err(jerr)?;
-        let rows = st.query_map([], Self::row).map_err(jerr)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(jerr)
-    }
-
-    /// The runs of one job, in order.
-    pub fn runs_of_job(&self, job: &str) -> Result<Vec<Receipt>> {
-        let mut st = self.conn.prepare("SELECT * FROM runs WHERE job = ?1 ORDER BY seq").map_err(jerr)?;
-        let rows = st.query_map(params![job], Self::row).map_err(jerr)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(jerr)
-    }
-
-    /// The readings of one spec name, oldest first (reuses left out).
-    pub fn readings_of(&self, name: &str) -> Result<Vec<Receipt>> {
-        let mut st = self.conn.prepare("SELECT * FROM runs WHERE command = 'reading' AND name = ?1 AND reused_seq IS NULL AND accepted = 1 ORDER BY seq").map_err(jerr)?;
-        let rows = st.query_map(params![name], Self::row).map_err(jerr)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(jerr)
-    }
-
-    pub fn put_job(&self, j: &JobRow) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT INTO jobs (id, name, kind, state, folder, opened_utc, closed_utc) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(id) DO UPDATE SET name = ?2, kind = ?3, state = ?4, folder = ?5, opened_utc = ?6, closed_utc = ?7",
-                params![j.id, j.name, j.kind, j.state, j.folder, j.opened_utc, j.closed_utc],
-            )
-            .map(|_| ())
-            .map_err(jerr)
-    }
-
-    pub fn job(&self, id_or_name: &str) -> Result<Option<JobRow>> {
-        self.conn
-            .query_row("SELECT id, name, kind, state, folder, opened_utc, closed_utc FROM jobs WHERE id = ?1 OR name = ?1 ORDER BY opened_utc DESC LIMIT 1", params![id_or_name], |r| {
-                Ok(JobRow { id: r.get(0)?, name: r.get(1)?, kind: r.get(2)?, state: r.get(3)?, folder: r.get(4)?, opened_utc: r.get(5)?, closed_utc: r.get(6)? })
-            })
-            .optional()
-            .map_err(jerr)
-    }
-
-    pub fn put_test(&self, t: &TestRow) -> Result<()> {
-        self.conn
-            .execute("INSERT INTO tests (seq, package, target, test, outcome, millis) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![t.seq, t.package, t.target, t.test, t.outcome, t.millis])
-            .map(|_| ())
-            .map_err(jerr)
-    }
-
-    pub fn tests(&self) -> Result<Vec<TestRow>> {
-        let mut st = self.conn.prepare("SELECT seq, package, target, test, outcome, millis FROM tests ORDER BY seq").map_err(jerr)?;
-        let rows = st
-            .query_map([], |r| Ok(TestRow { seq: r.get(0)?, package: r.get(1)?, target: r.get(2)?, test: r.get(3)?, outcome: r.get(4)?, millis: r.get(5)? }))
-            .map_err(jerr)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(jerr)
-    }
-
-    pub fn tests_of_runs(&self, seqs: &[i64]) -> Result<Vec<TestRow>> {
-        Ok(self.tests()?.into_iter().filter(|t| seqs.contains(&t.seq)).collect())
-    }
-}
+/// The journal: receipts, jobs, test results, in one SQLite file; its tables,
+/// its sequence (uh-tom-mick's checked counter) and its rows are
+/// receipt_history's.
+pub use receipt_history::{JobRow, Journal, TestRow, JOURNAL_SCHEMA};

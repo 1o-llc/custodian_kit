@@ -203,39 +203,9 @@ pub struct JobFile {
     pub outcome_known: Option<bool>,
 }
 
-/// One count a job took: when (`open`, `step 3 apply`, `close`), of which route, its reading.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Taken {
-    pub label: String,
-    pub route: String,
-    /// The count reading's JSON, relative to the job folder.
-    pub reading: String,
-}
-
-/// Lines touched between two counts of a route, as the closing receipt lists them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Touched {
-    /// `job` (open to close) or the step (`step 3 apply`).
-    pub label: String,
-    pub route: String,
-    pub before_digest: String,
-    pub after_digest: String,
-    pub diff_digest: String,
-    pub moved: crate::reading::count::Moved,
-    pub files: usize,
-    pub crates: usize,
-    /// `step 3 apply: +412 −38 across 6 files in 2 crates`.
-    pub line: String,
-    /// The count diff's file, relative to the job folder.
-    pub diff: String,
-}
-
-/// The counts file in a job folder: every count the job took, in order.
-const COUNTS_FILE: &str = "data/counts.json";
-
-/// A job folder's own data (counts, count diffs) sits under this sub-folder,
-/// so it is never listed as a spec.
-pub const JOB_DATA: &str = "data";
+/// A count a job took, the lines it touched between two counts, the counts
+/// file and the job's own data folder: change_history's.
+pub use change_history::{Taken, Touched, COUNTS_FILE, JOB_DATA};
 
 /// The specs of a folder-of-specs job: the files named as specs
 /// (`v1.<name>.1o.reading`, `<name>.toml`), never the job file and never
@@ -249,14 +219,7 @@ pub fn job_specs(folder: &Path) -> Vec<PathBuf> {
     specs
 }
 
-fn slug(s: &str) -> String {
-    let t: String = s.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
-    t.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-")
-}
-
-fn taken(folder: &Path) -> Vec<Taken> {
-    std::fs::read_to_string(folder.join(COUNTS_FILE)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
-}
+use change_history::{slug, taken};
 
 /// The routes a job counts, when it counts: the job file's, else the template's, else the workspace.
 fn count_routes(jf: &JobFile, t: Option<&Template>) -> Vec<String> {
@@ -298,59 +261,19 @@ fn take_counts(ctx: &Ctx, folder: &Path, in_job: &InJob, label: &str, routes: &[
 
 /// Lines touched from a job's counts: per route, each count against the one
 /// before it (a step's own delta), and `job` from the first to the last. The
-/// count diffs are written beside them under `counts/`.
-pub fn lines_touched_of(folder: &Path, counts: &[Taken]) -> Result<Vec<Touched>> {
-    let mut out = Vec::new();
-    let mut routes: Vec<&String> = counts.iter().map(|t| &t.route).collect();
-    routes.dedup();
-    let mut seen = BTreeSet::new();
-    for route in routes.into_iter().filter(|r| seen.insert(r.to_string())) {
-        let of: Vec<&Taken> = counts.iter().filter(|t| &t.route == route).collect();
-        let mut reports = Vec::new();
-        for t in &of {
-            reports.push((t.label.clone(), load(&folder.join(&t.reading))?));
-        }
-        let mut pairs: Vec<(String, usize, usize)> = (1..reports.len()).filter(|&i| reports[i].0 != "close").map(|i| (reports[i].0.clone(), i - 1, i)).collect();
-        if reports.len() >= 2 {
-            pairs.push(("job".to_string(), 0, reports.len() - 1));
-        }
-        for (label, a, b) in pairs {
-            let d = crate::reading::count::compare(&reports[a].1, &reports[b].1)?;
-            let file = folder.join(JOB_DATA).join("counts").join(format!("{}-{}.diff.json", slug(&label), if route == "*" { "workspace".to_string() } else { slug(route) }));
-            write_whole(&file, (serde_json::to_string_pretty(&d)? + "\n").as_bytes())?;
-            out.push(Touched {
-                line: d.line(&label),
-                label,
-                route: route.clone(),
-                before_digest: d.before.digest.clone(),
-                after_digest: d.after.digest.clone(),
-                diff_digest: d.digest.clone(),
-                moved: d.moved,
-                files: d.files().len(),
-                crates: d.crates.len(),
-                diff: file.strip_prefix(folder).unwrap_or(&file).to_string_lossy().into_owned(),
-            });
-        }
-    }
-    Ok(out)
-}
+/// count diffs are written beside them under `counts/` (change_history's).
+pub use change_history::lines_touched_of;
 
 /// What a set of jobs (ids or names) changed together, from their closing
 /// receipts' `job` lines touched.
 pub fn lines_within(store: &Store, jobs: &[&str]) -> Result<crate::reading::count::Within> {
     let journal = store.journal()?;
-    let mut diffs = Vec::new();
+    let mut folders = Vec::new();
     for j in jobs {
         let row = journal.job(j)?.ok_or_else(|| ReadingRefusal::NoJob.refuse(*j))?;
-        let folder = store.root.join(&row.folder);
-        let closing = folder.join("closing.json");
-        let c: Closing = serde_json::from_str(&std::fs::read_to_string(&closing).map_err(|e| ReadingRefusal::MissingInput.refuse(format!("{}: {e}", closing.display())))?)?;
-        for t in c.lines_touched.iter().filter(|t| t.label == "job") {
-            let d: crate::reading::count::CountDiff = serde_json::from_str(&std::fs::read_to_string(folder.join(&t.diff)).map_err(|e| ReadingRefusal::MissingInput.refuse(format!("{}: {e}", t.diff)))?)?;
-            diffs.push(d);
-        }
+        folders.push(store.root.join(&row.folder));
     }
-    Ok(crate::reading::count::within(diffs.iter()))
+    Ok(change_history::lines_within(&folders.iter().map(PathBuf::as_path).collect::<Vec<_>>())?)
 }
 
 /// The job file's name in 1o: `v1.job.1o.job`.
