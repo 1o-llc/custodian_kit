@@ -1,6 +1,75 @@
 # Changelog
 
-## 0.2.0 (2026-10-19)
+## 0.3.0 (2026-10-19)
+
+The history machinery leaves this crate. Each kind of history is now a crate
+of its own, and this crate calls them where it held the code itself. Every
+item it exported before is still exported at the same path, so a program
+built against 0.2.0 builds against 0.3.0: custodian 0.2.0's source, with only
+its custodian_kit requirement raised, builds against it and its 55 tests
+pass. One kind of signature change comes with the move, named below.
+Every link is pinned to cc483ae; the
+earlier lines are pinned to b17adf7 (0.2.0).
+
+- The receipts journal is receipt_history's. `store::Journal`,
+  `store::JobRow`, `store::TestRow`, `store::JOURNAL_SCHEMA` and
+  `store::JOURNAL_BUSY` re-export it ([src/store.rs#L279](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/store.rs#L279),
+  [src/store.rs#L21](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/store.rs#L21)). So do `receipts::Receipt`, `RECEIPT_SCHEMA`, the
+  runners ([src/receipts.rs#L13](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/receipts.rs#L13)) and `digest` ([src/digest.rs#L9](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/digest.rs#L9)).
+  These were [src/store.rs#L280](https://github.com/1o-llc/custodian_kit/blob/b17adf76375f72bebfb5ae1d1d93de3826369aac/src/store.rs#L280), [src/receipts.rs#L15](https://github.com/1o-llc/custodian_kit/blob/b17adf76375f72bebfb5ae1d1d93de3826369aac/src/receipts.rs#L15) and
+  [src/digest.rs#L30](https://github.com/1o-llc/custodian_kit/blob/b17adf76375f72bebfb5ae1d1d93de3826369aac/src/digest.rs#L30).
+  One behaviour changes. `Journal::record` now takes its number inside the
+  writing transaction, above every row. Before, a second journal open on the
+  same file could insert a number that was already taken.
+  `store::write_whole` keeps its signature and calls receipt_history's
+  ([src/store.rs#L123](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/store.rs#L123)).
+- A job's revisions are revision_history's. `task_records` keeps `root`,
+  `open`, `of_job` and `read`, which name the project's history root, and
+  re-exports `TaskRef`, `task_id`, `solution`, `verification`, `close`,
+  `close_noted` and `brief_lines` ([src/task_records.rs#L28](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/task_records.rs#L28)).
+- The count model is tree_history's. `reading::count` re-exports
+  `Lines`, `FileCount`, `CountReport`, `Moved`, `CountDiff`,
+  `compare_counts`, `Within`, `within` and `CountSummary`
+  ([src/reading/count.rs#L38](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/reading/count.rs#L38)). This crate still counts, with tokei and
+  klepto. `count::compare` reads two of the kit's readings as counts
+  ([src/reading/count.rs#L230](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/reading/count.rs#L230)). `count::history` reads the journal's
+  receipts through tree_history ([src/reading/count.rs#L239](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/reading/count.rs#L239)). Before, these
+  were [src/reading/count.rs#L45](https://github.com/1o-llc/custodian_kit/blob/b17adf76375f72bebfb5ae1d1d93de3826369aac/src/reading/count.rs#L45) to [src/reading/count.rs#L565](https://github.com/1o-llc/custodian_kit/blob/b17adf76375f72bebfb5ae1d1d93de3826369aac/src/reading/count.rs#L565).
+  `count::share` is now public.
+- Lines touched are change_history's. `jobs::Taken`, `jobs::Touched`,
+  `jobs::JOB_DATA` and the new public `jobs::COUNTS_FILE`
+  ([src/jobs.rs#L208](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/jobs.rs#L208)) and `jobs::lines_touched_of` ([src/jobs.rs#L265](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/jobs.rs#L265))
+  re-export it. `jobs::lines_within` resolves the jobs through the journal
+  and sums their closing receipts there ([src/jobs.rs#L269](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/jobs.rs#L269)).
+  `task_records::changes` re-exports its change records
+  ([src/task_records.rs#L27](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/task_records.rs#L27)). Before, these were [src/jobs.rs#L208](https://github.com/1o-llc/custodian_kit/blob/b17adf76375f72bebfb5ae1d1d93de3826369aac/src/jobs.rs#L208) to
+  [src/jobs.rs#L340](https://github.com/1o-llc/custodian_kit/blob/b17adf76375f72bebfb5ae1d1d93de3826369aac/src/jobs.rs#L340) and [src/task_records.rs#L88](https://github.com/1o-llc/custodian_kit/blob/b17adf76375f72bebfb5ae1d1d93de3826369aac/src/task_records.rs#L88).
+- The reading diff is diff_history's. `diff` re-exports `RowKey`,
+  `CountChange`, `ReadingDiff` and `render` ([src/diff.rs#L13](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/diff.rs#L13)). New:
+  `diff::reading_of` reads a `ReadingReport` as diff_history reads a
+  reading ([src/diff.rs#L20](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/diff.rs#L20)). `diff::compare` keeps its signature
+  ([src/diff.rs#L29](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/diff.rs#L29)). Before, it was [src/diff.rs#L56](https://github.com/1o-llc/custodian_kit/blob/b17adf76375f72bebfb5ae1d1d93de3826369aac/src/diff.rs#L56).
+- The signature change: a re-exported function or method returns its history
+  crate's error, not `CustodianError`. This crate converts each of them
+  into `CustodianError` and into `api::Refusal` ([src/reading/refusal.rs#L120](https://github.com/1o-llc/custodian_kit/blob/cc483ae5e69b3874c90ea20503692aae833e599b/src/reading/refusal.rs#L120)),
+  so `?` reads them as before. Where this crate refused the same thing
+  before the move, the refusal keeps the kit's own code: the journal
+  `CUST0012`, a write `CUST0009`, a reading that cannot be read back
+  `CUST0017`, a missing input `CUST0021`. Any other refusal keeps the
+  history crate's code.
+- New dependencies: receipt_history, revision_history, tree_history,
+  change_history and diff_history, each 0.1.0. tree_history brings xccute
+  0.3.1 (`LineChain`).
+
+Proof: the rustdoc JSON of 0.2.0 compared with this release. Of 5,493 public
+items in 0.2.0, 5,120 are at the same path. The other 373 are re-exports whose
+item, with its fields, methods and trait impls, is in its history crate.
+None is removed. Three items are added: `diff::reading_of`,
+`jobs::COUNTS_FILE` and `reading::count::share`. `cargo test` runs 213
+tests, every test of 0.2.0 but one: `digest::tests::canonical_forms_do_not_depend_on_field_order`
+moved with the digest to receipt_history, where it passes. custodian 0.2.0's
+source builds against this release, its custodian_kit requirement raised to
+0.3.0, and its 55 tests pass.## 0.2.0 (2026-10-19)
 
 The bounded and unbounded increment of the 2026-10-19 specification. An agent
 can now ask, before it changes anything, what a change to one item entails and
