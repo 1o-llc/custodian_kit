@@ -28,6 +28,10 @@ one klepto scan.
 - Jobs are task histories: a job writes task, intent, solution, change,
   verification and result records (task_history) for each run, and its brief
   reads them back. Receipts have a module of their own (`receipts`).
+- A template job's steps run on `scope`: steps that read nothing of each
+  other run together in the scope's fixed order, a step that reads another's
+  readings waits for it, and the open workspace is borrowed from the scope's
+  environment. Receipts and task-history records are as before.
 - Reading specs, job files and the paths table are 1o documents with shipped
   schemas, read by core-1o into the same form TOML reads into.
 

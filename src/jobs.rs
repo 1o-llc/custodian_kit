@@ -23,6 +23,9 @@ use std::path::{Path, PathBuf};
 
 /// The job templates custodian ships; `agent init` writes each to
 /// `config/jobs/<kind>.toml`, where they are the user's to edit.
+#[path = "jobs_runner.rs"]
+pub mod runner;
+
 pub const SHIPPED_TEMPLATES: &[(&str, &str)] = &[("triage", TRIAGE), ("features", FEATURES)];
 
 /// Step kinds that change code (a count is taken after each, when the job counts).
@@ -448,6 +451,34 @@ fn step_spec(folder: &Path, n: usize, step: &Step, target: &str, items: &[String
     Ok(p)
 }
 
+/// The step executor `job start` uses: the declared reading line, through the
+/// executor, with its receipt and its task-history solution record, as before.
+struct ExecSteps<'a> {
+    ctx: &'a Ctx,
+    folder: &'a Path,
+    in_job: &'a InJob,
+    task: &'a crate::task_records::TaskRef,
+    again: bool,
+    question: String,
+    runs: Vec<Ran>,
+}
+
+impl runner::RunStep for ExecSteps<'_> {
+    fn run(&mut self, _ws: Option<&crate::api::Workspace>, step: &Step, n: usize, target: &str, items: &[String], said: &mut Vec<String>) -> Result<Option<ReadingReport>> {
+        let question = self.question.replace("a step", &format!("step {}", step.name));
+        let spec = step_spec(self.folder, n, step, target, items, &question)?;
+        let ran = run_reading(self.ctx, &spec, self.again, Some(self.in_job))?;
+        said.extend(ran.said.iter().cloned());
+        crate::task_records::solution(self.task, &solution_text(self.ctx, &spec, &ran))?;
+        let report = match ran.receipt.as_ref().and_then(|r| r.outputs.iter().find(|o| o.ends_with(".json"))) {
+            Some(j) => Some(load(&self.ctx.root.join(j))?),
+            None => None,
+        };
+        self.runs.push(ran);
+        Ok(report)
+    }
+}
+
 /// A step's solution record: the spec run, its run number, its reading.
 fn solution_text(ctx: &Ctx, spec: &Path, ran: &Ran) -> String {
     let s = ReadingSpec::from_path(spec).ok();
@@ -508,45 +539,17 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
     } else {
         let t = t.expect("a template job has its template");
         let target = jf.target.clone().unwrap_or_default();
-        let mut done: Vec<(String, Vec<ReadingReport>)> = Vec::new();
-        for (i, step) in t.step.iter().enumerate() {
-            if CHANGES_CODE.contains(&step.kind.as_str()) {
-                // a step that changes code runs through code_passenger's line for it, then is counted;
-                // no such line exists yet, so the job is refused here rather than counted as if it ran
-                return Err(ReadingRefusal::NoWriterLine.refuse(format!("step {} {} ({}): no code_passenger line runs it yet", i + 1, step.name, step.kind)));
-            }
-            let question = format!("{} — step {} of the {} job for {target}", t.summary, step.name, t.kind);
-            let items = step.change_items.as_ref().map(|f| values(&done, f)).unwrap_or_default();
-            let targets: Vec<String> = match (&step.for_each, &step.target) {
-                (Some(f), _) => values(&done, f),
-                (None, Some(tt)) => vec![tt.replace("{target}", &target)],
-                (None, None) => vec![target.clone()],
-            };
-            let mut reports = Vec::new();
-            let gate = match (&step.change_items, &step.for_each) {
-                (Some(f), _) => Some(crate::decisions::step_input(&step.name, &f.step, &items)),
-                (None, Some(f)) => Some(crate::decisions::step_input(&step.name, &f.step, &targets)),
-                _ => None,
-            };
-            if let Some(g) = &gate {
-                said.push(g.said());
-            }
-            if gate.as_ref().is_some_and(|g| !g.go) {
-                // the decision said there is nothing to read: the step is not run
-            } else {
-                for (n, tgt) in targets.iter().enumerate() {
-                    let spec = step_spec(&running, n, step, tgt, &items, &question)?;
-                    let ran = run_reading(ctx, &spec, again, Some(&in_job))?;
-                    said.extend(ran.said.iter().cloned());
-                    crate::task_records::solution(&task, &solution_text(ctx, &spec, &ran))?;
-                    if let Some(j) = ran.receipt.as_ref().and_then(|r| r.outputs.iter().find(|o| o.ends_with(".json"))) {
-                        reports.push(load(&ctx.root.join(j))?);
-                    }
-                    runs.push(ran);
-                }
-            }
-            done.push((step.name.clone(), reports));
+        if let Some((i, step)) = t.step.iter().enumerate().find(|(_, s)| CHANGES_CODE.contains(&s.kind.as_str())) {
+            // a step that changes code runs through code_passenger's line for it, then is counted;
+            // no such line exists yet, so the job is refused here rather than counted as if it ran
+            return Err(ReadingRefusal::NoWriterLine.refuse(format!("step {} {} ({}): no code_passenger line runs it yet", i + 1, step.name, step.kind)));
         }
+        // the steps on scope: independent ones together, dependent ones after what they read
+        let mut exec = ExecSteps { ctx, folder: &running, in_job: &in_job, task: &task, again, question: format!("{} — a step of the {} job for {target}", t.summary, t.kind), runs: Vec::new() };
+        let (_, events, step_said) = runner::run_steps(&t.step, &target, None, &mut exec)?;
+        said.extend(step_said);
+        said.push(format!("steps: {}", events.join(" · ")));
+        runs.extend(exec.runs);
     }
     Ok(Started { id, folder: running, runs, said })
 }

@@ -51,6 +51,7 @@ bundles = { version = "0.2.3", path = "../bundles", default-features = false }
 big-bad-bool = "0.1.1"
 core-1o = "0.1.1"
 tokei = { version = "15.0.0", default-features = false }
+scope = "0.3.1"
 task_history = { version = "0.1.0", path = "../task_history" }
 # context windows of secret items held redacted
 classified = "0.2.1"

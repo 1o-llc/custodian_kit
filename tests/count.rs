@@ -341,3 +341,42 @@ fn a_reading_kept_in_a_job_resolves_after_the_job_moves_to_done() {
     assert!(std::fs::read_to_string(file).unwrap().contains("/jobs/done/j/"));
     assert!(std::fs::read_to_string(done.join("closing.md")).unwrap().contains("/jobs/done/j/"));
 }
+
+#[test]
+fn the_steps_run_on_scope_independent_ones_together_a_dependent_one_after() {
+    use custodian_kit::jobs::runner::{run_steps, InProcess};
+    use custodian_kit::jobs::{From, Step};
+    let step = |name: &str, kind: &str, target: Option<&str>, for_each: Option<From>| Step { name: name.into(), kind: kind.into(), target: target.map(str::to_string), for_each, change_items: None, with: None };
+    let steps = vec![
+        // c reads a's use sites: it waits for a
+        step("c", "dependents", None, Some(From { step: "a".into(), row: "use-site".into(), field: "full_path".into() })),
+        step("a", "use_sites", Some("serve_metrics"), None),
+        step("b", "dependents", Some("{target}"), None),
+    ];
+    // one workspace, opened once and borrowed by every step
+    let ws = Workspace::open(&fixture()).unwrap();
+    let run = || {
+        let mut exec = InProcess { question: "what the steps read".into() };
+        run_steps(&steps, "core_lib", Some(&ws), &mut exec).unwrap()
+    };
+    let (done, events, _) = run();
+    assert_eq!(
+        events,
+        vec!["start a", "start b", "read a serve_metrics", "read b core_lib", "done a", "done b", "start c", "read c core_lib::serve_metrics", "done c"],
+        "a and b interleave; c starts only when a is done"
+    );
+    let order: Vec<&str> = done.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(order, vec!["a", "b", "c"]);
+    assert!(done[2].1[0].query.results.iter().any(|r| r.kind == "dependent"), "c read what a found");
+    // the same job runs the same way every time
+    assert_eq!(run().1, events);
+}
+
+#[test]
+fn a_step_reading_a_step_the_job_lacks_is_refused() {
+    use custodian_kit::jobs::runner::{run_steps, InProcess};
+    use custodian_kit::jobs::{From, Step};
+    let steps = vec![Step { name: "c".into(), kind: "reach".into(), target: None, for_each: Some(From { step: "nope".into(), row: "x".into(), field: "label".into() }), change_items: None, with: None }];
+    let mut exec = InProcess { question: "q".into() };
+    assert!(run_steps(&steps, "x", None, &mut exec).is_err());
+}
