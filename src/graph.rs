@@ -195,7 +195,8 @@ fn scope_of(k: &Klepto, loc: &klepto::FileLocation) -> String {
 }
 
 fn fill_graph(graph: &mut CodeGraph, k: &Klepto) {
-    let pkg_of = file_packages(k);
+    // a file's cargo package: a bin's crate root belongs to its package
+    let pkg_of: HashMap<PathBuf, String> = file_packages(k).into_iter().map(|(f, p)| (f, k.crate_roots.get(&p).cloned().unwrap_or(p))).collect();
     let mut crate_ids: BTreeMap<String, (String, String, PathBuf)> = BTreeMap::new(); // package → (id, cargo name, root)
     for p in k.packages.values() {
         let id = stable_id("crate", &display_path(&p.root));

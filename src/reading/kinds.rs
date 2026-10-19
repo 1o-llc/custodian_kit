@@ -799,6 +799,9 @@ fn codes_touched(f: &Facts, items: &BTreeSet<String>) -> Vec<(String, String)> {
 fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     let target = spec.target.trim();
     let mut rows = Vec::new();
+    // a changed crate reaches every binary linking it; changed items reach the
+    // binaries whose own crate root holds an item that reaches them
+    let mut item_bins: Option<BTreeSet<String>> = None;
     let (crates, items): (BTreeSet<String>, BTreeSet<String>) = match changed(f, target)? {
         Changed::Crate(c) => {
             let items: BTreeSet<String> = f.k.items.iter().filter(|d| d.package == c).map(|d| d.id.clone()).collect();
@@ -830,10 +833,14 @@ fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
             }
             let mut all = seeds;
             all.extend(reached);
+            item_bins = Some(f.packages.values().flat_map(|p| p.bins.iter()).filter(|b| {
+                let root = format!("{}::", b.replace('-', "_"));
+                all.iter().any(|id| id.starts_with(&root))
+            }).cloned().collect());
             (crates, all)
         }
     };
-    let bins: BTreeSet<String> = crates.iter().flat_map(|c| f.bins_of(c)).collect();
+    let bins: BTreeSet<String> = item_bins.unwrap_or_else(|| crates.iter().flat_map(|c| f.bins_of(c)).collect());
     for b in &bins {
         let from: Vec<&str> = f.packages.values().filter(|q| q.bins.contains(b)).map(|q| q.name.as_str()).collect();
         rows.push(named("reach-binary", b.clone(), from.first().map(|s| s.to_string()), "a binary linking what changed", vec![("built_by", from.join(", "))]));
@@ -1032,8 +1039,8 @@ fn public_api(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TestCase {
     pub package: String,
-    /// `--test <name>` for an integration test file; `None` for the lib / bin unit tests.
-    pub test_target: Option<String>,
+    /// `lib`, `bin:<name>` or `test:<name>`: the target that holds it.
+    pub target: String,
     /// The test's path inside its target, as libtest names it.
     pub filter: String,
     pub id: String,
@@ -1041,32 +1048,43 @@ pub struct TestCase {
 
 /// The cargo test lines that run exactly `cases`: one per package and
 /// target, filters exact.
-pub fn test_lines(cases: &[TestCase]) -> Vec<(String, Option<String>, Vec<String>)> {
-    let mut by: BTreeMap<(String, Option<String>), Vec<String>> = BTreeMap::new();
+pub fn test_lines(cases: &[TestCase]) -> Vec<(String, String, Vec<String>)> {
+    let mut by: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
     for c in cases {
-        by.entry((c.package.clone(), c.test_target.clone())).or_default().push(c.filter.clone());
+        by.entry((c.package.clone(), c.target.clone())).or_default().push(c.filter.clone());
     }
     by.into_iter().map(|((p, t), fs)| (p, t, fs)).collect()
 }
 
+/// The cargo flag that selects a target.
+pub fn target_flag(target: &str) -> String {
+    match target.split_once(':') {
+        Some(("bin", n)) => format!("--bin {n}"),
+        Some(("test", n)) => format!("--test {n}"),
+        _ => "--lib".to_string(),
+    }
+}
+
 fn test_case(f: &Facts, id: &str) -> Option<TestCase> {
     let d = f.item(id)?;
-    let pkg = f.packages.get(&d.package)?;
-    let tests_dir = f.root.join(&pkg.dir).join("tests");
+    let pkg = f.k.packages.get(&d.package)?;
     let mut segs: Vec<&str> = id.split("::").collect();
-    if segs.first() == Some(&d.package.as_str()) {
-        segs.remove(0);
-    }
-    let test_target = d.location.path.strip_prefix(&tests_dir).ok().and_then(|rel| rel.components().next()).map(|c| {
-        let s = c.as_os_str().to_string_lossy().into_owned();
-        s.strip_suffix(".rs").map(str::to_string).unwrap_or(s)
-    });
-    if let Some(t) = &test_target {
-        if segs.first() == Some(&t.as_str()) {
-            segs.remove(0);
+    let root = segs.remove(0).to_string();
+    let target = if root == d.package {
+        "lib".to_string()
+    } else {
+        // the target whose crate-root name this is (klepto names a root after its target)
+        let t = pkg.targets.iter().find(|t| {
+            let n = t.name.replace('-', "_");
+            n == root || format!("{}_{}", d.package, t.kind) == root
+        })?;
+        match t.kind.as_str() {
+            "test" => format!("test:{}", t.name),
+            "bin" => format!("bin:{}", t.name),
+            other => format!("{other}:{}", t.name),
         }
-    }
-    Some(TestCase { package: d.package.clone(), test_target, filter: segs.join("::"), id: id.to_string() })
+    };
+    Some(TestCase { package: d.package.clone(), target, filter: segs.join("::"), id: id.to_string() })
 }
 
 fn tests_reaching(f: &Facts, seeds: &BTreeSet<String>) -> Vec<TestCase> {
@@ -1078,13 +1096,10 @@ fn tests_reaching(f: &Facts, seeds: &BTreeSet<String>) -> Vec<TestCase> {
 }
 
 fn test_rows(f: &Facts, cases: &[TestCase], reason: &str) -> Vec<CodeQueryResult> {
-    let mut rows: Vec<CodeQueryResult> = cases.iter().map(|c| item_row(f, "test", &c.id, reason, vec![("filter", c.filter.clone()), ("test_target", c.test_target.clone().unwrap_or_else(|| "unit".into()))])).collect();
+    let mut rows: Vec<CodeQueryResult> = cases.iter().map(|c| item_row(f, "test", &c.id, reason, vec![("filter", c.filter.clone()), ("test_target", c.target.clone())])).collect();
     for (p, t, filters) in test_lines(cases) {
-        let line = match &t {
-            Some(t) => format!("cargo test -p {p} --test {t} -- {} --exact", filters.join(" ")),
-            None => format!("cargo test -p {p} --lib --bins -- {} --exact", filters.join(" ")),
-        };
-        rows.push(named("test-line", line, Some(p), "runs exactly these tests", vec![("tests", filters.len().to_string())]));
+        let line = format!("cargo test -p {p} {} -- {} --exact", target_flag(&t), filters.join(" "));
+        rows.push(named("test-line", line, Some(p), "runs exactly these tests", vec![("tests", filters.len().to_string()), ("test_target", t)]));
     }
     rows
 }

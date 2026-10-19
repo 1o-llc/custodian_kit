@@ -1,0 +1,32 @@
+# Tests every push and pull request on the newest Rust and on the oldest one
+# this crate supports (rust-version in Cargo.toml). Nothing publishes: klepto
+# and maintenance are path dependencies until their next releases are out.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test on Rust ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, "1.85"]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - name: Test
+        run: cargo test --all-features
+      - name: The README's vocabulary tables are the enums
+        run: cargo test --test reading the_vocabulary_table_in_the_readme_is_the_enum

@@ -1,0 +1,126 @@
+# custodian_kit
+
+custodian_kit reads a Rust workspace as data and answers one question about it
+at a time. The facts come from [klepto](../klepto): every file, path, call,
+literal, match, attribute and item, with what each path names. A question is a
+small declared file, a *reading spec*. Its answer is a *reading*: counts, rows
+and the places nothing resolved, written as a dated page and a JSON record.
+The `custodian` binary runs readings, keeps their receipts in a journal and
+groups them into jobs; this crate is the reading half.
+
+It never edits source or a manifest, and it never guesses. A path klepto
+cannot resolve is a row of its own, with its reason; it is not dropped and it
+is not counted as a use.
+
+## Quick start
+
+```rust,no_run
+use custodian_kit::api::{self, ReadingSpec, Workspace};
+
+let ws = Workspace::open("path/to/workspace".as_ref())?;     // one scan
+let spec = ReadingSpec::from_toml(r#"
+name = "serve-metrics-use-sites"
+question = "Who calls serve_metrics?"
+kind = "use_sites"
+target = "serve_metrics"
+"#)?;
+let reading = api::run(&ws, &spec)?;                           // many readings
+for c in reading.counts() {
+    println!("{}: {}", c.what, c.n);
+}
+# Ok::<(), api::Refusal>(())
+```
+
+`Workspace::open` scans once; `api::run` answers any number of specs over it.
+A spec whose scope (tests read, globs left out) differs from the open
+workspace's is refused with `CUST0002`; open one for it with
+`Workspace::open_for`.
+
+## Reading kinds
+
+| kind | what it reads |
+|---|---|
+| `use_sites` | every place a path, fn, type, const or macro is used, as klepto resolves it, with its definitions |
+| `readers_of_env` | every read of an env key (a literal or a constant holding it) by a reader fn or macro, the places that only name it, and the declarations of it |
+| `duplicates` | function bodies repeated across crates (klepto's repeated code), grouped by the crate pairs that share them |
+| `dependents` | what depends on a crate (the workspace's dependency graph) or on an item (klepto's item graph), direct then transitive |
+| `declared_in` | which declaration files (TOML matching a glob) name the target at a key path |
+| `sockets` | a binary's declared sockets, and who dials them: env reads of the socket keys, literals of the path, other declarations naming it |
+| `reach` | what a change at a crate, a file or an item touches: the items that reach it, their files, crates and binaries, and the declarations naming those binaries |
+| `constructs` | every place a type is built: a struct literal, a tuple-struct or variant constructor, or a call of its own associated fn returning Self or the type |
+| `matches_on` | every match with an arm naming one of an enum's variants: the arms that name them, the variants never named there, whether a catch-all arm takes the rest |
+| `public_api` | a crate's public items and, for each, the uses from other crates |
+| `tests_covering` | the test functions whose calls reach an item (klepto's item graph), by crate, with the cargo test line that runs exactly them |
+| `affected_tests` | from a change (files, a git ref's diff, or a job's touched items): the tests whose closure reaches what changed, and the cargo test lines that run exactly them |
+| `sensitivity` | items by their #[sensitivity] level, with owners, and every use of a more sensitive item from a less sensitive one |
+| `diagnostics` | every liaise code table (liaise_codes! and #[derive(LiaiseCodes)]): each code's meaning and declaration, and the sites that raise it; a code or a log's text as the target narrows it |
+| `bundle` | a crate, a declared set or a file as one annotated bundles file beside the reading, items at secret or above redacted |
+| `sweep` | a read-only walk of an undeclared tree (the one walk custodian makes): files by extension, crates, TOML directories, the routes to declare; never in a job |
+
+## Declaration roles
+
+A `[[declared_in]]` table reads TOML files at a key path. Its `role` says what
+the value is, so the kinds that join code to declarations know where to look.
+
+| role | what it reads |
+|---|---|
+| `name` | a name, matched against the target as it is |
+| `binary` | a binary an entry runs; `reach` and `sockets` find entries by it |
+| `env` | an env key an entry sets; `readers_of_env` joins reads to it |
+| `socket` | a socket path an entry binds or names; `sockets` reads it |
+| `socket_env` | the env key that carries a socket path; `sockets` follows its readers |
+
+```toml
+[[declared_in]]
+files = ["decl:marketplace"]   # a declared route; a glob in free mode
+key = "env.*"                  # a key path: dotted, `*` for every key at a level
+role = "env"
+entry = "id"                   # the field naming the entry each value sits in
+```
+
+Both tables are generated from the enums (`cargo run --example vocabulary`),
+and a test fails when this README and the enums differ.
+
+## Routes
+
+Every path a spec names goes through the declared paths table,
+`.custodian/config/paths.toml`, read through pathgen:
+
+- `crate:<name>` and `crate:<name>/src/x.rs`: a workspace member, as cargo names it
+- `decl:<name>`: a declared set of files (globs listed under `[decl]`)
+- `custodian:<part>`: a part of the initialized folder (readings, jobs, journal)
+- `path:<raw>`: a raw path, in free mode only
+
+Inside a job only declared routes resolve; a raw or walked path is refused
+(`CUST0023`). The one walk custodian makes is the `sweep` kind, which lists an
+undeclared tree and offers the routes to declare; a job cannot run it.
+
+## What a reading keeps
+
+A reading is a `custodian.reading.v1` record holding the
+`code_passenger.query.v1` receipt of its rows. The journal (SQLite, under
+`.custodian/`) keeps one `custodian.receipt.v1` row per run:
+
+| field | what it is |
+|---|---|
+| `seq`, `utc` | the run's number in the journal and when it ran |
+| `command`, `name`, `spec` | what ran: `reading`, `test`, `check`, `git`, `gate`, `job-close`, and its spec |
+| `spec_hash` | the digest of the spec's canonical form |
+| `code_digest` | the digest of the canonical form of the files the scan read (klepto's fingerprint) |
+| `index_key` | the registry's index key of the reading |
+| `plan_id`, `plan_digest`, `operation_digest`, `receipt_digest` | the xccute plan, operation and receipt the line ran under |
+| `line`, `exit_code`, `accepted`, `disposition`, `reason` | the line as it ran, and what came of it |
+| `outputs`, `job`, `reused_seq`, `millis` | the files written, the job, the run reused when the same search had already answered |
+
+Two runs with the same `spec_hash` and `code_digest` are the same search: the
+second reuses the first's reading and says so. Every digest is
+`stable_digest`'s sha256 over a declared canonical form, written `sha256:<hex>`.
+
+## Refusals
+
+A refusal is a liaise code (`CUST0001`…`CUST0028`, `ReadingRefusal`) and one
+sentence. `api::Refusal` carries both.
+
+## License
+
+MIT OR Apache-2.0

@@ -114,7 +114,14 @@ impl Facts {
         Self::from_klepto(root, k, how)
     }
 
-    pub fn from_klepto(root: PathBuf, k: Klepto, how: Resolving) -> Result<Facts> {
+    pub fn from_klepto(root: PathBuf, mut k: Klepto, how: Resolving) -> Result<Facts> {
+        // an item's package is its cargo package: a bin's crate root (`appd`) belongs to its package (`app`)
+        let roots = k.crate_roots.clone();
+        for d in &mut k.items {
+            if let Some(p) = roots.get(&d.package) {
+                d.package = p.clone();
+            }
+        }
         let paths = PathsTable::from_packages(&root, &k.packages, crate::store::Store::find(&root).as_ref())?;
         let members: BTreeSet<&String> = k.packages.keys().collect();
         let mut packages = BTreeMap::new();
@@ -144,7 +151,7 @@ impl Facts {
         }
         let links = link_closure(&packages);
         let file_index = k.files.iter().enumerate().map(|(i, f)| (f.path.clone(), i)).collect();
-        let file_package = crate::file_packages(&k);
+        let file_package: HashMap<PathBuf, String> = crate::file_packages(&k).into_iter().map(|(f, p)| (f, roots.get(&p).cloned().unwrap_or(p))).collect();
         let items_by_id = k.items.iter().enumerate().map(|(i, d)| (d.id.clone(), i)).collect();
         let mut referrers: HashMap<String, Vec<String>> = HashMap::new();
         let mut references: HashMap<String, Vec<String>> = HashMap::new();
