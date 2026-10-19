@@ -223,6 +223,7 @@ fn the_schemas_name_exactly_the_fields_of_the_rust_forms() {
         "item": {"name": "S", "vis": "pub", "doc": "d", "generics": "<T>", "derives": ["Debug"], "attrs": ["#[x]"], "fields": [field.clone()], "tuple": ["u8"], "variants": [variant.clone()], "generator": piece("shell_command_builder")},
         "function": f.clone(), "functions": [f.clone()], "field": field.clone(), "variant": variant.clone(), "derive": ["Clone"], "attribute": "#[x]", "trait": "Display", "assoc": ["type O = u8;"],
         "generator": piece("impl_std_error"), "module": {"name": "m", "vis": "pub", "doc": "d"}, "dependency": {"name": "d", "version": "1", "path": "p", "features": ["f"]},
+        "dependencies": [{"name": "d", "version": "1", "path": "p", "features": ["f"]}],
         "new_name": "n", "to": "crate:x/src/y.rs", "items": ["x::a"], "feature": "f", "linkage": "l", "call_sites": {"pass": "0"}, "compatibility": "preserve",
         "scope": {"read": ["crate:x"], "write": ["crate:x"]}, "features": ["default"], "validate": ["check"], "postconditions": ["exists x::S"], "decisions": [{"question": "q", "options": ["a"], "why": "w"}]
     });

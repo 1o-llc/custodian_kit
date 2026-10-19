@@ -47,7 +47,7 @@ vocabulary! {
         AddAttribute = "add_attribute" : "one attribute line placed on an item (target: the item)",
         AddModule = "add_module" : "a new module: its own file and its `mod` line in the parent (target: the parent route)",
         AddDependency = "add_dependency" : "a dependency line in a crate's Cargo.toml (target: crate:<name>)",
-        AddTest = "add_test" : "a test function (target: the function it proves): in the file's tests module, its body from toolkit pieces",
+        AddTest = "add_test" : "a test function (target: the function it proves): in the file's tests module (`to`: another inline test module of the file, by name), its body from toolkit pieces",
         AddConstructor = "add_constructor" : "a constructor for a type (target: the type): `Self { field: param, .. }`, or a toolkit constructor generator",
         AddTraitImpl = "add_trait_impl" : "`impl Trait for Type` (target: the type): a toolkit impl generator, or the trait's functions",
         ChangeSignature = "change_signature" : "a function's signature changed (target: the function): a new parameter with the expression its call sites pass, or a new name",
@@ -56,6 +56,8 @@ vocabulary! {
         Extract = "extract" : "items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were",
         Gate = "gate" : "an item put behind a crate feature the crate declares (target: the item, `feature`)",
         Anchor = "anchor" : "a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name)",
+        ReplaceBody = "replace_body" : "a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched",
+        ChangeDependency = "change_dependency" : "a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features",
     }
 }
 
@@ -80,7 +82,7 @@ impl Operation {
             AddDerive => &["derive"],
             AddAttribute => &["attribute"],
             AddModule => &["module"],
-            AddDependency => &["dependency"],
+            AddDependency | ChangeDependency => &["dependency"],
             AddTraitImpl => &["trait"],
             ChangeSignature => &["function"],
             Rename => &["new_name"],
@@ -88,13 +90,14 @@ impl Operation {
             Extract => &["items", "module"],
             Gate => &["feature"],
             Anchor => &["linkage"],
+            ReplaceBody => &["function"],
         }
     }
 
     /// Whether the operation's target is an existing item (else a place: a module route, a crate).
     pub fn targets_an_item(self) -> bool {
         use Operation::*;
-        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | Extract)
+        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | ChangeDependency | Extract)
     }
 
     /// The name the operation makes, which must be free where it lands.
@@ -442,9 +445,12 @@ pub struct ChangeSpec {
     pub module: Option<ModuleSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dependency: Option<DependencySpec>,
+    /// `change_dependency`: several dependencies changed in one spec (a family that must move together).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<DependencySpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub new_name: Option<String>,
-    /// `move`: the module route the item goes to.
+    /// `move`: the module route the item goes to; `add_test`: the inline test module's name (`tests` when unset).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     /// `extract`: the items moved out.
@@ -527,7 +533,7 @@ impl ChangeSpec {
             "derive" => !self.derive.is_empty(),
             "attribute" => self.attribute.is_some(),
             "module" => self.module.is_some(),
-            "dependency" => self.dependency.is_some(),
+            "dependency" => self.dependency.is_some() || !self.dependencies.is_empty(),
             "trait" => self.trait_name.is_some() || self.generator.is_some(),
             "new_name" => self.new_name.is_some(),
             "to" => self.to.is_some(),
@@ -555,6 +561,11 @@ impl ChangeSpec {
             check_piece(p).map_err(|e| ReadingRefusal::ChangeInvalid.refuse(format!("{}: {e}", self.name)))?;
         }
         Ok(self)
+    }
+
+    /// The dependencies the spec names: `dependency`, then `dependencies`.
+    pub fn dependencies_named(&self) -> Vec<&DependencySpec> {
+        self.dependency.iter().chain(self.dependencies.iter()).collect()
     }
 
     /// Every piece the spec writes: bodies, generators.
@@ -1064,7 +1075,15 @@ pub fn render_fn(f: &FnSpec, indent: &str) -> std::result::Result<String, String
     for a in &f.attrs {
         out.push_str(&format!("{indent}{a}\n"));
     }
-    out.push_str(&format!("{indent}{} {{\n", signature(f)));
+    out.push_str(&format!("{indent}{} {}\n", signature(f), render_body(f, indent)?));
+    Ok(out)
+}
+
+/// A function's body as source, from its opening brace to its closing one (no newline after it), the steps
+/// indented one level inside `indent`: what `replace_body` puts in place of a body, and what [`render_fn`] writes
+/// after the signature.
+pub fn render_body(f: &FnSpec, indent: &str) -> std::result::Result<String, String> {
+    let mut out = String::from("{\n");
     let inner = format!("{indent}    ");
     if f.body.is_empty() {
         out.push_str(&format!("{inner}todo!({:?})\n", f.doc.clone().unwrap_or_else(|| f.name.clone())));
@@ -1080,7 +1099,7 @@ pub fn render_fn(f: &FnSpec, indent: &str) -> std::result::Result<String, String
             out.push_str(&format!("{inner}{l}\n"));
         }
     }
-    out.push_str(&format!("{indent}}}\n"));
+    out.push_str(&format!("{indent}}}"));
     Ok(out)
 }
 
@@ -1278,6 +1297,49 @@ pub fn route_file(k: &klepto::Klepto, root: &Path, route: &str) -> Option<(Strin
     path.is_file().then(|| (p.name.clone(), path))
 }
 
+/// The route that names every crate of the workspace (`change_dependency`'s `*`).
+pub const WORKSPACE: &str = "*";
+
+/// One dependency line a `change_dependency` spec changes: the crate, its manifest (relative to the root), the
+/// dependency's name as the manifest's key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyChange {
+    pub package: String,
+    pub manifest: String,
+    pub name: String,
+}
+
+/// Every line a `change_dependency` spec changes, one rule for the preflight and the writer: for a crate target,
+/// each named dependency of that crate (refused when the crate does not name one); for `*`, each crate of the
+/// workspace naming one of them, in the scan's package order.
+pub fn dependency_changes(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::result::Result<Vec<DependencyChange>, String> {
+    let names: Vec<String> = spec.dependencies_named().iter().map(|d| d.name.replace('-', "_")).collect();
+    let names_it = |pkg: &str, name: &str| k.features.get(pkg).is_some_and(|m| m.dependencies.iter().any(|d| d.name.replace('-', "_") == name || d.package.replace('-', "_") == name));
+    let manifest = |pkg: &str| k.packages.get(pkg).map(|p| rel(root, &p.manifest_path));
+    let target = spec.target.trim();
+    let packages: Vec<String> = if target == WORKSPACE {
+        k.packages.keys().cloned().collect()
+    } else {
+        let name = target.strip_prefix("crate:").filter(|n| !n.contains('/')).ok_or_else(|| format!("`{target}` is not a crate:<name> route or `*`"))?;
+        let p = k.packages.get(&name.replace('-', "_")).ok_or_else(|| format!("`{target}` is no crate of the workspace"))?;
+        if let Some(n) = names.iter().find(|n| !names_it(&p.name, n)) {
+            return Err(format!("{} does not name the dependency {n}: add_dependency adds it", p.name));
+        }
+        vec![p.name.clone()]
+    };
+    let mut out = Vec::new();
+    for pkg in &packages {
+        for n in &names {
+            if names_it(pkg, n) {
+                if let Some(m) = manifest(pkg) {
+                    out.push(DependencyChange { package: pkg.clone(), manifest: m, name: n.clone() });
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Where `spec`'s operation lands in the scan, or why it cannot.
 pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::result::Result<Landing, String> {
     use Operation::*;
@@ -1287,6 +1349,18 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
         Landing { file: rel(root, &d.location.path), module: d.module.clone(), package: d.package.clone(), item: Some(d.id.clone()), at: at(line) }
     };
     match op {
+        ChangeDependency => {
+            let changes = dependency_changes(k, root, spec)?;
+            let one = changes.first().ok_or_else(|| format!("no crate of `{}` names {}", spec.target, spec.dependencies_named().iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")))?;
+            let every = spec.target.trim() == WORKSPACE;
+            Ok(Landing {
+                file: one.manifest.clone(),
+                module: if every { WORKSPACE.into() } else { one.package.clone() },
+                package: if every { WORKSPACE.into() } else { one.package.clone() },
+                item: None,
+                at: At::Manifest,
+            })
+        }
         MakeStruct | MakeEnum | MakeFn | AddModule | Extract | AddDependency => {
             let (package, file) = route_file(k, root, &spec.target).ok_or_else(|| format!("`{}` is not a crate:<name> or crate:<name>/<file>.rs route of the workspace", spec.target))?;
             if op == AddDependency {
@@ -1315,6 +1389,7 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
                 AddDerive | AddAttribute | Gate | Anchor => at_item(d, |l| At::Above { line: l }),
                 ChangeSignature | Rename | Move => at_item(d, |l| At::At { line: l }),
                 AddTest => at_item(d, |l| At::After { line: l }),
+                ReplaceBody => at_item(d, |l| At::At { line: l }),
                 _ => unreachable!("the place-targeting operations are matched above"),
             })
         }

@@ -336,3 +336,38 @@ fn a_preflight_finds_the_impact_the_command_line_already_read() {
     let ran = preflight::run_preflight(&ctx, &s, None, Runner::InProcess(&w)).unwrap();
     assert!(ran.said.iter().any(|l| l.contains("reused, not read again") && l.contains(&format!("#{n}"))), "{:?}", ran.said);
 }
+
+/// A dependency a family of crates names, changed in every crate naming it (`*`): each manifest is in the write set;
+/// a crate target that does not name it is refused, so `add_dependency` stays the one way to add one.
+#[test]
+fn a_dependency_changes_in_every_crate_naming_it_and_never_where_it_is_not_named() {
+    let (store, ctx) = project("change-dep");
+    let w = ws(&store.root);
+    let every = spec(&store.root, "helpers-from-registry", "name = \"helpers-from-registry\"\nobjective = \"the helpers from the registry\"\noperation = \"change_dependency\"\ntarget = \"*\"\n\n[[dependencies]]\nname = \"helper_a\"\nversion = \"0.1.0\"\n\n[[dependencies]]\nname = \"helper_c\"\nversion = \"0.1.0\"\n");
+    let ran = preflight::run_preflight(&ctx, &every, None, Runner::InProcess(&w)).unwrap();
+    let p = &ran.preflight;
+    assert!(p.authorized, "{:?} {:?}", p.reasons, p.preconditions);
+    assert_eq!(p.write_set, ["crates/consumer/Cargo.toml", "crates/layered/Cargo.toml"]);
+    assert!(p.preconditions.iter().any(|c| c.holds && c.detail == "3 lines in 2 manifests"), "{:?}", p.preconditions);
+    let one = spec(&store.root, "core-helper", "name = \"core-helper\"\nobjective = \"o\"\noperation = \"change_dependency\"\ntarget = \"crate:core_lib\"\n\n[dependency]\nname = \"helper_a\"\nversion = \"0.1.0\"\n");
+    let ran = preflight::run_preflight(&ctx, &one, None, Runner::InProcess(&w)).unwrap();
+    assert!(!ran.preflight.authorized);
+    assert!(ran.preflight.reasons.iter().chain(ran.preflight.preconditions.iter().map(|c| &c.detail)).any(|r| r.contains("core_lib does not name the dependency helper_a")), "{:?} {:?}", ran.preflight.reasons, ran.preflight.preconditions);
+}
+
+/// A function's body replaced: authorized when the spec's function is the target's own name (its signature, docs and
+/// attributes kept), refused when it names another; the body renders from its pieces.
+#[test]
+fn a_body_is_replaced_only_on_its_own_function() {
+    let (store, ctx) = project("replace-body");
+    let w = ws(&store.root);
+    let own = spec(&store.root, "token-guarded", "name = \"token-guarded\"\nobjective = \"o\"\noperation = \"replace_body\"\ntarget = \"core_lib::token\"\n\n[function]\nname = \"token\"\n\n[[function.body]]\npiece = \"value\"\nvalue = \"std::env::var(\\\"FIX_TOKEN\\\").ok().filter(|t| !t.is_empty())\"\n");
+    let ran = preflight::run_preflight(&ctx, &own, None, Runner::InProcess(&w)).unwrap();
+    assert!(ran.preflight.authorized, "{:?} {:?}", ran.preflight.reasons, ran.preflight.preconditions);
+    assert_eq!(ran.preflight.write_set, ["crates/core_lib/src/lib.rs"]);
+    let other = spec(&store.root, "token-other", "name = \"token-other\"\nobjective = \"o\"\noperation = \"replace_body\"\ntarget = \"core_lib::token\"\n\n[function]\nname = \"socket\"\n\n[[function.body]]\npiece = \"value\"\nvalue = \"None\"\n");
+    let ran = preflight::run_preflight(&ctx, &other, None, Runner::InProcess(&w)).unwrap();
+    assert!(!ran.preflight.authorized);
+    let f = custodian_kit::change::FnSpec { name: "token".into(), body: vec![custodian_kit::change::Piece { piece: "value".into(), value: Some("None".into()), ..Default::default() }], ..Default::default() };
+    assert_eq!(custodian_kit::change::render_body(&f, "    ").unwrap(), "{\n        None\n    }");
+}

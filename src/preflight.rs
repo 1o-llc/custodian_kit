@@ -393,7 +393,35 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                     write.insert(p.strip_prefix(&f.root).unwrap_or(&p).to_string_lossy().into_owned());
                 }
             }
-            Operation::AddTest | Operation::AddAttribute => {}
+            Operation::ChangeDependency => {
+                match crate::change::dependency_changes(&f.k, &f.root, spec) {
+                    Ok(changes) => {
+                        for c in &changes {
+                            write.insert(c.manifest.clone());
+                        }
+                        let named: Vec<&str> = spec.dependencies_named().iter().map(|d| d.name.as_str()).collect();
+                        let unnamed: Vec<&str> = named.iter().copied().filter(|n| !changes.iter().any(|c| c.name == n.replace('-', "_"))).collect();
+                        pre.push(Check { what: format!("a crate names each of {}", named.join(", ")), holds: unnamed.is_empty(), detail: if unnamed.is_empty() { format!("{} lines in {} manifests", changes.len(), changes.iter().map(|c| c.manifest.as_str()).collect::<BTreeSet<_>>().len()) } else { format!("no crate names {}", unnamed.join(", ")) } });
+                    }
+                    Err(e) => pre.push(Check { what: "each crate names the dependency it changes".into(), holds: false, detail: e }),
+                }
+            }
+            Operation::ReplaceBody => {
+                let item = l.item.clone().unwrap_or_default();
+                let found = f.k.functions.iter().find(|x| x.fq_name == item);
+                pre.push(Check { what: "the target is a function".into(), holds: found.is_some(), detail: found.map(|x| x.fq_name.clone()).unwrap_or_else(|| format!("{item}: not a function the scan captured")) });
+                let name = spec.function.as_ref().map(|x| x.name.clone()).unwrap_or_default();
+                let same = item.rsplit("::").next() == Some(name.as_str());
+                pre.push(Check { what: "the body is the target's own".into(), holds: same, detail: if same { "its signature, docs and attributes are kept: no caller changes".into() } else { format!("the spec's function is {name}, the target {item}") } });
+            }
+            Operation::AddTest => {
+                if let Some(m) = &spec.to {
+                    let module = format!("{}::{m}", l.module);
+                    let there = f.k.modules.get(&module).is_some();
+                    pre.push(Check { what: format!("the test module {m} is in {}", l.file), holds: there, detail: if there { module } else { format!("no module {module}") } });
+                }
+            }
+            Operation::AddAttribute => {}
         }
         if crate::change::uses_toolkit(spec) {
             let has = f.k.features.get(&l.package).is_some_and(|m| m.dependencies.iter().any(|d| d.name == crate::change::TOOLKIT.0));
@@ -409,6 +437,8 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
     let (scope_routes, prefixes): (Vec<String>, Vec<String>) = if spec.scope.write.is_empty() {
         let own: Vec<String> = land.as_ref().map(|l| match &l.at {
             At::NewFile { parent } => vec![l.file.clone(), parent.clone()],
+            // a changed dependency's own files are the manifests that name it (every crate's, for `*`)
+            At::Manifest if op == Operation::ChangeDependency => crate::change::dependency_changes(&f.k, &f.root, spec).map(|c| c.into_iter().map(|c| c.manifest).collect::<BTreeSet<_>>().into_iter().collect()).unwrap_or_else(|_| vec![l.file.clone()]),
             _ => vec![l.file.clone()],
         }).unwrap_or_default();
         (own.iter().map(|o| format!("the target's own file {o}")).collect(), own)

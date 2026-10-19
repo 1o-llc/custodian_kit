@@ -41,7 +41,9 @@
             "move",
             "extract",
             "gate",
-            "anchor"
+            "anchor",
+            "replace_body",
+            "change_dependency"
           ],
           "description": "What the writer does (the operations table in custodian_kit's README)."
         },
@@ -2545,7 +2547,33 @@
           "required": [
             "name"
           ],
-          "description": "add_dependency: the dependency."
+          "description": "add_dependency, change_dependency: the dependency."
+        },
+        "dependencies": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "The crate."
+            },
+            "version": {
+              "type": "string",
+              "description": "Its version."
+            },
+            "path": {
+              "type": "string",
+              "description": "Or its path."
+            },
+            "features": {
+              "type": "string",
+              "description": "A feature. Repeats: one value per line, in order."
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "description": "change_dependency: a dependency changed with the others, so a family moves together. Repeats: one block per value, in order."
         },
         "new_name": {
           "type": "string",
@@ -2553,7 +2581,7 @@
         },
         "to": {
           "type": "string",
-          "description": "move: the module route the item goes to."
+          "description": "move: the module route the item goes to; add_test: the inline test module (tests when unset)."
         },
         "items": {
           "type": "string",

@@ -246,7 +246,7 @@ transform are bound to.
 | `add_attribute` | one attribute line placed on an item (target: the item) |
 | `add_module` | a new module: its own file and its `mod` line in the parent (target: the parent route) |
 | `add_dependency` | a dependency line in a crate's Cargo.toml (target: crate:<name>) |
-| `add_test` | a test function (target: the function it proves): in the file's tests module, its body from toolkit pieces |
+| `add_test` | a test function (target: the function it proves): in the file's tests module (`to`: another inline test module of the file, by name), its body from toolkit pieces |
 | `add_constructor` | a constructor for a type (target: the type): `Self { field: param, .. }`, or a toolkit constructor generator |
 | `add_trait_impl` | `impl Trait for Type` (target: the type): a toolkit impl generator, or the trait's functions |
 | `change_signature` | a function's signature changed (target: the function): a new parameter with the expression its call sites pass, or a new name |
@@ -255,6 +255,8 @@ transform are bound to.
 | `extract` | items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were |
 | `gate` | an item put behind a crate feature the crate declares (target: the item, `feature`) |
 | `anchor` | a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name) |
+| `replace_body` | a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched |
+| `change_dependency` | a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features |
 
 A function body is never free text the tool trusts. It is a list of pieces,
 each one of simple_impl 0.1.11's toolkit macros (123 of them, the table is
