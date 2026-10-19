@@ -344,7 +344,7 @@ fn a_reading_kept_in_a_job_resolves_after_the_job_moves_to_done() {
 
 #[test]
 fn the_steps_run_on_scope_independent_ones_together_a_dependent_one_after() {
-    use custodian_kit::jobs::runner::{run_steps, InProcess};
+    use custodian_kit::jobs::runner::run_steps;
     use custodian_kit::jobs::{From, Step};
     let step = |name: &str, kind: &str, target: Option<&str>, for_each: Option<From>| Step { name: name.into(), kind: kind.into(), target: target.map(str::to_string), for_each, change_items: None, with: None };
     let steps = vec![
@@ -356,7 +356,7 @@ fn the_steps_run_on_scope_independent_ones_together_a_dependent_one_after() {
     // one workspace, opened once and borrowed by every step
     let ws = Workspace::open(&fixture()).unwrap();
     let run = || {
-        let mut exec = InProcess { question: "what the steps read".into() };
+        let mut exec = Answer;
         run_steps(&steps, "core_lib", Some(&ws), &mut exec).unwrap()
     };
     let (done, events, _) = run();
@@ -374,9 +374,107 @@ fn the_steps_run_on_scope_independent_ones_together_a_dependent_one_after() {
 
 #[test]
 fn a_step_reading_a_step_the_job_lacks_is_refused() {
-    use custodian_kit::jobs::runner::{run_steps, InProcess};
+    use custodian_kit::jobs::runner::run_steps;
     use custodian_kit::jobs::{From, Step};
     let steps = vec![Step { name: "c".into(), kind: "reach".into(), target: None, for_each: Some(From { step: "nope".into(), row: "x".into(), field: "label".into() }), change_items: None, with: None }];
-    let mut exec = InProcess { question: "q".into() };
+    let mut exec = Answer;
     assert!(run_steps(&steps, "x", None, &mut exec).is_err());
+}
+
+/// A step executor for the runner's own tests: each step answered over the
+/// scope's workspace with `api::run`, nothing kept.
+struct Answer;
+
+impl custodian_kit::jobs::runner::RunStep for Answer {
+    fn run(&mut self, ws: Option<&Workspace>, step: &custodian_kit::jobs::Step, _n: usize, target: &str, _items: &[String], _said: &mut Vec<String>) -> custodian_kit::Result<Option<custodian_kit::reading::ReadingReport>> {
+        let ws = ws.expect("the scope's workspace");
+        let s = ReadingSpec::from_toml(&format!("name = \"{}\"\nquestion = \"q\"\nkind = \"{}\"\ntarget = {}\n", step.name, step.kind, toml::Value::String(target.into()))).unwrap();
+        Ok(Some(api::run(ws, &s).map_err(custodian_kit::CustodianError::from)?.report))
+    }
+}
+
+/// The line runner's program: the `exec_reading_line` example cargo builds beside the tests.
+fn line_program() -> PathBuf {
+    let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    deps.parent().unwrap().join("examples").join("exec_reading_line")
+}
+
+fn queue_specs_job(root: &Path) -> custodian_kit::store::Store {
+    use custodian_kit::store::{JobState, Mode, Store};
+    let (store, _) = Store::init(root, Mode::Agent).unwrap();
+    let dir = store.job_dir(JobState::Queued, "j").unwrap();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("v1.job.1o.job"), "{ job { name \"j\" kind \"specs\" } }\n").unwrap();
+    std::fs::write(dir.join("v1.a-use-sites.1o.reading"), "{ reading { name \"a-use-sites\" question \"who calls serve_metrics\" kind \"use_sites\" target \"serve_metrics\" } }\n").unwrap();
+    std::fs::write(dir.join("v1.b-dependents.1o.reading"), "{ reading { name \"b-dependents\" question \"what depends on core_lib\" kind \"dependents\" target \"crate:core_lib\" } }\n").unwrap();
+    store
+}
+
+/// A receipt without what differs by when and how it ran: seq, time, runner,
+/// the job's id, and the digests of a line that carries the stamp.
+fn comparable(r: &custodian_kit::api::Receipt, root: &Path, job: &str) -> serde_json::Value {
+    let stamp = regex_free_stamp;
+    let norm = |s: &str| stamp(&s.replace(&root.display().to_string(), "<root>").replace(job, "<job>"));
+    serde_json::json!({
+        "command": r.command, "name": r.name, "spec": r.spec, "spec_hash": r.spec_hash, "code_digest": r.code_digest, "index_key": r.index_key,
+        "plan_id": r.plan_id, "line": norm(&r.line), "exit_code": r.exit_code, "accepted": r.accepted, "disposition": r.disposition, "reason": r.reason,
+        "outputs": r.outputs.iter().map(|o| norm(o)).collect::<Vec<_>>(), "schema": r.schema,
+    })
+}
+
+/// `20261019T083829Z` (and `-2`) as `<stamp>`, without a regex crate.
+fn regex_free_stamp(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < b.len() {
+        let is_stamp = i + 16 <= b.len() && b[i..i + 8].iter().all(u8::is_ascii_digit) && b[i + 8] == b'T' && b[i + 9..i + 15].iter().all(u8::is_ascii_digit) && b[i + 15] == b'Z';
+        if is_stamp {
+            out.push_str("<stamp>");
+            i += 16;
+        } else {
+            out.push(b[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+#[test]
+fn a_job_leaves_the_same_receipts_and_records_whichever_runner_answers() {
+    use custodian_kit::runs::Ctx;
+    let exe = line_program();
+    assert!(exe.is_file(), "{} (cargo test builds the examples)", exe.display());
+    let mut left = Vec::new();
+    // both runs at one path (the registry's index key carries the root): the line run's tree is moved aside after
+    let root = copy_fixture("runner");
+    for in_process in [false, true] {
+        if in_process {
+            std::fs::rename(&root, root.with_extension("line-run")).unwrap();
+            let fresh = copy_fixture("runner-second");
+            std::fs::rename(&fresh, &root).unwrap();
+        }
+        let store = queue_specs_job(&root);
+        let ctx = Ctx { root: store.root.clone(), store: Some(store.clone()), exe: exe.clone() };
+        let ws = in_process.then(|| Workspace::open_with(&store.root, &Default::default(), Resolving::Job).unwrap());
+        let started = custodian_kit::jobs::start_with(&ctx, Some("j"), true, ws.as_ref()).unwrap();
+        custodian_kit::jobs::close_with(&ctx, &started.id, ws.as_ref()).unwrap();
+        let runs = store.journal().unwrap().runs().unwrap();
+        let readings: Vec<&custodian_kit::api::Receipt> = runs.iter().filter(|r| r.command == "reading").collect();
+        assert_eq!(readings.len(), 2);
+        assert!(readings.iter().all(|r| r.runner == if in_process { "in_process" } else { "line" }));
+        // the line field holds the line it ran, or would have run
+        assert!(readings.iter().all(|r| r.line.contains("exec-reading --spec")));
+        let receipts: Vec<serde_json::Value> = readings.iter().map(|r| comparable(r, &store.root, &started.id)).collect();
+        let index = task_history::load_task_history(custodian_kit::task_records::root(&store).unwrap()).unwrap();
+        let records: Vec<(String, String)> = index.tasks[0].revisions[0]
+            .documents
+            .iter()
+            .map(|d| (d.one("record_kind").unwrap().to_string(), regex_free_stamp(&d.fields.iter().filter(|(k, _)| !matches!(k.as_str(), "sequence" | "tag" | "resulting_tree_digest")).map(|(k, v)| format!("{k}={}", v.join("|"))).collect::<Vec<_>>().join(";").replace(&started.id, "<job>"))))
+            .collect();
+        left.push((receipts, records, readings.iter().map(|r| r.seq).collect::<Vec<_>>()));
+    }
+    assert_eq!(left[0].0, left[1].0, "receipts");
+    assert_eq!(left[0].1, left[1].1, "solution and other records");
+    assert_eq!(left[0].2, left[1].2, "the journal's counter numbers them alike");
 }

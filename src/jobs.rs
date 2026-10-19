@@ -14,7 +14,7 @@ use crate::diff::{self, ReadingDiff};
 use crate::reading::refusal::ReadingRefusal;
 use crate::reading::spec::ReadingSpec;
 use crate::reading::{load, ReadingReport};
-use crate::runs::{keep, now_utc, run_reading, Ctx, InJob, Ran};
+use crate::runs::{keep, now_utc, run_reading_by, Ctx, InJob, Ran, Runner};
 use crate::store::{write_whole, JobRow, JobState, Receipt, Store, RECEIPT_SCHEMA};
 use crate::Result;
 use serde::{Deserialize, Serialize};
@@ -230,14 +230,15 @@ fn count_routes(jf: &JobFile, t: Option<&Template>) -> Vec<String> {
 }
 
 /// A count of each route, as readings of the job, kept in the folder's counts file.
-fn take_counts(ctx: &Ctx, folder: &Path, in_job: &InJob, label: &str, routes: &[String], said: &mut Vec<String>, runs: &mut Vec<Ran>) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn take_counts(ctx: &Ctx, folder: &Path, in_job: &InJob, label: &str, routes: &[String], said: &mut Vec<String>, runs: &mut Vec<Ran>, by: Runner<'_>) -> Result<()> {
     let mut all = taken(folder);
     for route in routes {
         let name = format!("count-{}-{}", slug(label), if route == "*" { "workspace".to_string() } else { slug(route) });
         let spec = ReadingSpec::from_toml(&format!("name = {}\nquestion = {}\nkind = \"count\"\ntarget = {}\n", toml_str(&name), toml_str(&format!("how much is in {route} at {label}")), toml_str(route)))?;
         let p = folder.join("steps").join(crate::oneo::Doc::Reading.file_name(&name));
         write_whole(&p, spec.to_1o()?.as_bytes())?;
-        let ran = run_reading(ctx, &p, true, Some(in_job))?;
+        let ran = run_reading_by(ctx, &p, true, Some(in_job), by)?;
         said.extend(ran.said.iter().cloned());
         let json = ran.receipt.as_ref().and_then(|r| r.outputs.iter().find(|o| o.ends_with(".json")).cloned()).ok_or_else(|| ReadingRefusal::ReadingUnreadable.refuse(format!("{name}: the count wrote no reading")))?;
         // kept relative to the job folder, which moves to done/ at close
@@ -464,10 +465,14 @@ struct ExecSteps<'a> {
 }
 
 impl runner::RunStep for ExecSteps<'_> {
-    fn run(&mut self, _ws: Option<&crate::api::Workspace>, step: &Step, n: usize, target: &str, items: &[String], said: &mut Vec<String>) -> Result<Option<ReadingReport>> {
+    fn run(&mut self, ws: Option<&crate::api::Workspace>, step: &Step, n: usize, target: &str, items: &[String], said: &mut Vec<String>) -> Result<Option<ReadingReport>> {
         let question = self.question.replace("a step", &format!("step {}", step.name));
         let spec = step_spec(self.folder, n, step, target, items, &question)?;
-        let ran = run_reading(self.ctx, &spec, self.again, Some(self.in_job))?;
+        let by = match ws {
+            Some(ws) => Runner::InProcess(ws),
+            None => Runner::Line,
+        };
+        let ran = run_reading_by(self.ctx, &spec, self.again, Some(self.in_job), by)?;
         said.extend(ran.said.iter().cloned());
         crate::task_records::solution(self.task, &solution_text(self.ctx, &spec, &ran))?;
         let report = match ran.receipt.as_ref().and_then(|r| r.outputs.iter().find(|o| o.ends_with(".json"))) {
@@ -492,6 +497,17 @@ fn solution_text(ctx: &Ctx, spec: &Path, ran: &Ran) -> String {
 
 /// `job start`: the queued folder moved to running and its readings run.
 pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
+    start_with(ctx, which, again, None)
+}
+
+/// `job start`, its readings answered in this process over `ws` when it is
+/// given (the CLI with no resident), else by the declared lines. The receipts
+/// and records are the same either way; each receipt names its runner.
+pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate::api::Workspace>) -> Result<Started> {
+    let by = match ws {
+        Some(ws) => Runner::InProcess(ws),
+        None => Runner::Line,
+    };
     let store = ctx.store()?;
     let running = crate::decisions::job_running(store)?;
     if !running.go {
@@ -528,10 +544,10 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
     write_job_file(&running, &jf)?;
     said.push(format!("task history: {}/{} (task, intent)", task.task_id, task.revision));
     let routes = count_routes(&jf, t.as_ref());
-    take_counts(ctx, &running, &in_job, "open", &routes, &mut said, &mut runs)?;
+    take_counts(ctx, &running, &in_job, "open", &routes, &mut said, &mut runs, by)?;
     if kind == "specs" {
         for s in job_specs(&running) {
-            let ran = run_reading(ctx, &s, again, Some(&in_job))?;
+            let ran = run_reading_by(ctx, &s, again, Some(&in_job), by)?;
             said.extend(ran.said.iter().cloned());
             crate::task_records::solution(&task, &solution_text(ctx, &s, &ran))?;
             runs.push(ran);
@@ -546,7 +562,7 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
         }
         // the steps on scope: independent ones together, dependent ones after what they read
         let mut exec = ExecSteps { ctx, folder: &running, in_job: &in_job, task: &task, again, question: format!("{} — a step of the {} job for {target}", t.summary, t.kind), runs: Vec::new() };
-        let (_, events, step_said) = runner::run_steps(&t.step, &target, None, &mut exec)?;
+        let (_, events, step_said) = runner::run_steps(&t.step, &target, ws, &mut exec)?;
         said.extend(step_said);
         said.push(format!("steps: {}", events.join(" · ")));
         runs.extend(exec.runs);
@@ -601,6 +617,15 @@ fn previous(store: &Store, name: &str, before: i64, job: &str, root: &Path) -> O
 
 /// `job close`: the closing receipt written into the folder, the folder moved to done.
 pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> {
+    close_with(ctx, which, None)
+}
+
+/// `job close`, its closing count answered in this process over `ws` when given.
+pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) -> Result<(Closing, PathBuf, Vec<String>)> {
+    let by = match ws {
+        Some(ws) => Runner::InProcess(ws),
+        None => Runner::Line,
+    };
     let store = ctx.store()?;
     let running = find(store, JobState::Running, Some(which))?;
     let jf = job_file(&running);
@@ -615,7 +640,7 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
     if !routes.is_empty() {
         let in_job = InJob { id: id.clone(), readings: running.join("readings") };
         let mut count_runs = Vec::new();
-        take_counts(ctx, &running, &in_job, "close", &routes, &mut count_said, &mut count_runs)?;
+        take_counts(ctx, &running, &in_job, "close", &routes, &mut count_said, &mut count_runs, by)?;
     }
     let lines_touched = lines_touched_of(&running, &taken(&running))?;
     let runs = journal.runs_of_job(&id)?;
@@ -760,6 +785,8 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
         job: Some(id.clone()),
         reused_seq: None,
         millis: 0,
+        // written by the kit itself: no line ran
+        runner: crate::receipts::RUNNER_IN_PROCESS.into(),
     };
     let (r, f) = keep(store, r)?;
     let mut said = count_said;

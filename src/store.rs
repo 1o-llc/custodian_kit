@@ -294,7 +294,8 @@ CREATE TABLE IF NOT EXISTS runs (
   outputs TEXT NOT NULL,
   job TEXT,
   reused_seq INTEGER,
-  millis INTEGER NOT NULL
+  millis INTEGER NOT NULL,
+  runner TEXT NOT NULL DEFAULT 'line'
 );
 CREATE INDEX IF NOT EXISTS runs_same_search ON runs (command, spec_hash, code_digest);
 CREATE TABLE IF NOT EXISTS jobs (
@@ -347,6 +348,11 @@ impl Journal {
         let conn = Connection::open(path).map_err(jerr)?;
         conn.busy_timeout(std::time::Duration::from_secs(10)).map_err(jerr)?;
         conn.execute_batch(JOURNAL_SCHEMA).map_err(jerr)?;
+        // a journal from before the runner field gets its column, every older run a line run
+        let has_runner: bool = conn.prepare("SELECT 1 FROM pragma_table_info('runs') WHERE name = 'runner'").and_then(|mut s| s.exists([])).map_err(jerr)?;
+        if !has_runner {
+            conn.execute_batch("ALTER TABLE runs ADD COLUMN runner TEXT NOT NULL DEFAULT 'line';").map_err(jerr)?;
+        }
         let last: i64 = conn.query_row("SELECT COALESCE(MAX(seq), 0) FROM runs", [], |r| r.get(0)).map_err(jerr)?;
         Ok(Journal { path: path.to_path_buf(), conn, seq: AtomicCounter::new(last.max(0) as u64) })
     }
@@ -356,8 +362,8 @@ impl Journal {
         let seq = self.seq.increment().map_err(|e| jerr(format!("{e:?}")))? as i64;
         self.conn
             .execute(
-                "INSERT INTO runs (seq, utc, command, name, spec, spec_hash, code_digest, index_key, plan_id, plan_digest, operation_digest, receipt_digest, line, exit_code, accepted, disposition, reason, outputs, job, reused_seq, millis)
-                 VALUES (?21, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                "INSERT INTO runs (seq, utc, command, name, spec, spec_hash, code_digest, index_key, plan_id, plan_digest, operation_digest, receipt_digest, line, exit_code, accepted, disposition, reason, outputs, job, reused_seq, millis, runner)
+                 VALUES (?21, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?22)",
                 params![
                     r.utc,
                     r.command,
@@ -379,7 +385,8 @@ impl Journal {
                     r.job,
                     r.reused_seq,
                     r.millis,
-                    seq
+                    seq,
+                    r.runner
                 ],
             )
             .map_err(jerr)?;
@@ -412,6 +419,7 @@ impl Journal {
             job: row.get("job")?,
             reused_seq: row.get("reused_seq")?,
             millis: row.get("millis")?,
+            runner: row.get("runner")?,
         })
     }
 

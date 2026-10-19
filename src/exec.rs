@@ -274,6 +274,18 @@ impl Plan {
         self.lines.is_empty()
     }
 
+    /// The plan's first line answered without running it, as if it had exited
+    /// `code` with `stdout` (the reading answered in this process): the same
+    /// operation, the same decision by the line's policy, the same receipt.
+    pub fn answered(&self, code: i32, stdout: String, stderr: String, millis: i64) -> Result<Walked> {
+        let op = self.plan.operations.first().cloned().ok_or_else(|| ReadingRefusal::LineNotStarted.refuse(format!("{}: an empty plan", self.plan.plan_id)))?;
+        let l = self.lines.iter().find(|l| l.id == op.logical_id).expect("a plan's line is its own");
+        let accepted = l.ok_codes.contains(&code);
+        let decision = l.policy.decide(RuntimeExitStatus::new(Some(code), accepted));
+        let receipt = RuntimeOperationReceipt::new(&self.plan, &op, decision.clone());
+        Ok(Walked { operation: op, receipt, decision, code: Some(code), stdout, stderr, millis })
+    }
+
     /// The plan walked from its first line; each line's status decided by its
     /// policy, the plan's transition naming the next.
     pub fn walk(&self, watch: Watch, mut on_line: impl FnMut(&str, &str)) -> Result<Vec<Walked>> {

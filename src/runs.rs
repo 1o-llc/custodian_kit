@@ -102,6 +102,21 @@ fn changed_files(ctx: &Ctx, git_ref: &str, job: Option<&InJob>) -> Result<(Vec<S
 /// One reading: the same-search check, the line run through the executor,
 /// the receipt.
 pub fn run_reading(ctx: &Ctx, spec_path: &Path, again: bool, job: Option<&InJob>) -> Result<Ran> {
+    run_reading_by(ctx, spec_path, again, job, Runner::Line)
+}
+
+/// Who answers a reading: the declared line, run through the executor, or
+/// this process over a workspace it holds open. Either way the same line is
+/// built, the same decision taken on its status, the same receipt kept; the
+/// receipt says which (`runner`).
+#[derive(Clone, Copy)]
+pub enum Runner<'w> {
+    Line,
+    InProcess(&'w crate::api::Workspace),
+}
+
+/// [`run_reading`] with the runner named.
+pub fn run_reading_by(ctx: &Ctx, spec_path: &Path, again: bool, job: Option<&InJob>, runner: Runner<'_>) -> Result<Ran> {
     let spec = ReadingSpec::from_path(spec_path)?;
     let mut said = Vec::new();
     let mut env = Vec::new();
@@ -149,9 +164,26 @@ pub fn run_reading(ctx: &Ctx, spec_path: &Path, again: bool, job: Option<&InJob>
         command = command.job(j.id.as_str());
     }
     let mut l = exec::line(format!("read:{}", spec.name), &at(&ctx.exe, command))?;
+    let change_files = env.iter().find(|(k, _)| k == CHANGE_FILES_ENV).map(|(_, v)| v.clone());
     l.env = env;
     let plan = Plan::new(format!("reading:{}", spec.name)).then(l);
-    let walked = plan.walk(Watch::Quiet, |_, _| {})?;
+    let walked = match runner {
+        Runner::Line => plan.walk(Watch::Quiet, |_, _| {})?,
+        Runner::InProcess(ws) => {
+            // the line's own body, here: its summary as its last line, or its refusal as a failed status
+            let started = std::time::Instant::now();
+            let how = if job.is_some() { crate::paths::Resolving::Job } else { crate::paths::Resolving::Free };
+            let w = match crate::reading::answer(spec_path, &ctx.root, &out, &stamp, how, Some(ws), change_files.as_deref()) {
+                Ok(summary) => plan.answered(0, serde_json::to_string(&summary)? + "\n", String::new(), started.elapsed().as_millis() as i64)?,
+                Err(e) => plan.answered(1, String::new(), e.to_string(), started.elapsed().as_millis() as i64)?,
+            };
+            vec![w]
+        }
+    };
+    let runner_word = match runner {
+        Runner::Line => crate::receipts::RUNNER_LINE,
+        Runner::InProcess(_) => crate::receipts::RUNNER_IN_PROCESS,
+    };
     let w = walked.first().ok_or_else(|| ReadingRefusal::LineNotStarted.refuse(&spec.name))?;
     let summary = summary_of(&w.stdout);
     let printed = (ctx.store.is_none() && job.is_none()).then(|| {
@@ -162,7 +194,8 @@ pub fn run_reading(ctx: &Ctx, spec_path: &Path, again: bool, job: Option<&InJob>
         lines.join("\n")
     });
     let outputs: Vec<String> = summary.iter().flat_map(|s| [s.page.as_ref(), s.json.as_ref(), s.bundle.as_ref()]).flatten().map(|p| ctx.rel(p)).collect();
-    let receipt = receipt_of(&plan, w, "reading", &spec.name, Some(spec_rel), Some(hash), Some(digest), summary.as_ref().and_then(|s| s.index_key.clone()), outputs, job);
+    let mut receipt = receipt_of(&plan, w, "reading", &spec.name, Some(spec_rel), Some(hash), Some(digest), summary.as_ref().and_then(|s| s.index_key.clone()), outputs, job);
+    receipt.runner = runner_word.to_string();
     if !w.decision.status.accepted {
         let why = w.stderr.trim().to_string();
         if let Some(store) = &ctx.store {

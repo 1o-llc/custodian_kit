@@ -32,6 +32,12 @@ one klepto scan.
   other run together in the scope's fixed order, a step that reads another's
   readings waits for it, and the open workspace is borrowed from the scope's
   environment. Receipts and task-history records are as before.
+- A receipt for every run, whichever runner answered: a reading answered in
+  this process over an open workspace (`runs::Runner::InProcess`,
+  `jobs::start_with`/`close_with`) builds the same declared line, takes the
+  same decision on its status and keeps the same receipt, its `runner` field
+  saying `in_process` (or `line`). The journal gains the `runner` column; an
+  older journal gets it with every run a line run.
 - Reading specs, job files and the paths table are 1o documents with shipped
   schemas, read by core-1o into the same form TOML reads into.
 

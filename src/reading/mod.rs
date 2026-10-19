@@ -304,12 +304,24 @@ pub fn write(base: &Path, report: &ReadingReport) -> Result<(PathBuf, PathBuf, P
 /// answered; written under `out`, or printed when `out` is `-`; the summary
 /// printed last, as one JSON line.
 pub fn exec_reading(spec_path: &Path, root: &Path, out: &str, stamp: &str, in_job: bool) -> Result<ReadingSummary> {
+    let files = std::env::var(CHANGE_FILES_ENV).ok();
+    let how = if in_job { crate::paths::Resolving::Job } else { crate::paths::Resolving::Free };
+    answer(spec_path, root, out, stamp, how, None, files.as_deref())
+}
+
+/// The reading line's body, whichever runner answers: the spec read (with
+/// the change files a git ref's diff named), answered over `ws` when the
+/// caller holds the workspace open (in process) or over a scan of `root`
+/// (the line), written under `out` or printed when `out` is `-`.
+pub fn answer(spec_path: &Path, root: &Path, out: &str, stamp: &str, how: crate::paths::Resolving, ws: Option<&crate::api::Workspace>, change_files: Option<&str>) -> Result<ReadingSummary> {
     let mut spec = ReadingSpec::from_path(spec_path)?;
-    if let Ok(files) = std::env::var(CHANGE_FILES_ENV) {
+    if let Some(files) = change_files {
         spec.change.files.extend(files.lines().filter(|l| !l.trim().is_empty()).map(str::to_string));
     }
-    let how = if in_job { crate::paths::Resolving::Job } else { crate::paths::Resolving::Free };
-    let report = read(root, spec_path, &spec, stamp, how)?;
+    let report = match ws {
+        Some(ws) if spec.kind != ReadingKind::Sweep && ws.scope == spec.scope => read_facts(ws.facts(), spec_path, &spec, stamp)?,
+        _ => read(root, spec_path, &spec, stamp, how)?,
+    };
     let (page, json, latest) = if out == "-" {
         print!("{}", render::page(&report));
         (None, None, None)

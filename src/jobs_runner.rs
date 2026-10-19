@@ -9,9 +9,11 @@
 //! cloned per step), the step executor, and the readings done so far.
 //!
 //! What a reading is, and what it leaves behind (its receipt, its task-history
-//! solution record), is the executor's: [`RunStep`]. `job start` runs the
-//! declared reading line through it, as before, receipts and records unchanged;
-//! [`InProcess`] answers over the borrowed workspace with no line at all.
+//! solution record), is the executor's: [`RunStep`]. `job start`'s executor
+//! builds the declared reading line for each step and either runs it or, when
+//! the scope holds a workspace, answers it in this process over that
+//! workspace (`runs::Runner`): the same receipt and record either way, the
+//! receipt naming its runner.
 
 use super::{values, Step};
 use crate::api::Workspace;
@@ -149,28 +151,4 @@ pub fn run_steps<'a>(steps: &[Step], target: &str, ws: Option<&'a Workspace>, ex
         return Err(crate::reading::refusal::ReadingRefusal::LineNotStarted.refuse(format!("the job's steps did not all finish: {report:?}")));
     }
     Ok((env.done, env.events, env.said))
-}
-
-/// A step answered over the scope's borrowed workspace, in this process: no
-/// line, no receipt; the reading is returned to the runner.
-pub struct InProcess {
-    pub question: String,
-}
-
-impl RunStep for InProcess {
-    fn run(&mut self, ws: Option<&Workspace>, step: &Step, _n: usize, target: &str, items: &[String], _said: &mut Vec<String>) -> Result<Option<ReadingReport>> {
-        let ws = ws.ok_or_else(|| crate::reading::refusal::ReadingRefusal::NoWorkspace.refuse("an in-process step needs the scope's workspace"))?;
-        let mut t = format!("name = {}\nquestion = {}\nkind = {}\ntarget = {}\n", super::toml_str(&step.name), super::toml_str(&self.question), super::toml_str(&step.kind), super::toml_str(target));
-        if let Some(w) = &step.with {
-            t.push_str(w);
-            t.push('\n');
-        }
-        if !items.is_empty() {
-            t.push_str(&format!("\n[change]\nitems = [{}]\n", items.iter().map(|i| super::toml_str(i)).collect::<Vec<_>>().join(", ")));
-        }
-        let mut spec = crate::reading::spec::ReadingSpec::from_toml(&t)?;
-        // the workspace was opened once, for its scope; a step reads under it
-        spec.scope = ws.scope.clone();
-        Ok(Some(crate::api::run(ws, &spec)?.report))
-    }
 }

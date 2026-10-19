@@ -42,7 +42,20 @@ pub struct Receipt {
     /// For a reuse: the run whose reading answered.
     pub reused_seq: Option<i64>,
     pub millis: i64,
+    /// Which runner answered: `line` (the declared line, run through the
+    /// executor) or `in_process` (the same line's reading answered in this
+    /// process). A receipt for every run, whichever runner answered.
+    #[serde(default = "line_runner")]
+    pub runner: String,
 }
+
+/// The runner a receipt names when none is written (receipts before the field).
+pub fn line_runner() -> String {
+    RUNNER_LINE.to_string()
+}
+
+pub const RUNNER_LINE: &str = "line";
+pub const RUNNER_IN_PROCESS: &str = "in_process";
 
 pub const RECEIPT_SCHEMA: &str = "custodian.receipt.v1";
 
@@ -73,6 +86,7 @@ pub fn receipt_of(plan: &Plan, w: &Walked, command: &str, name: &str, spec: Opti
         job: job.map(|j| j.id.clone()),
         reused_seq: None,
         millis: w.millis,
+        runner: RUNNER_LINE.to_string(),
     }
 }
 
