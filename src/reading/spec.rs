@@ -282,6 +282,21 @@ pub struct ReadingSpec {
     pub duplicates: DuplicateOptions,
     #[serde(default)]
     pub change: Change,
+    #[serde(default)]
+    pub bundle: BundleOptions,
+}
+
+/// bundle: what the bundle leaves out. `filters` are the filters word's flag
+/// names (`no_tests`, `no_benches`, `no_examples`, `only_src`); none means
+/// the default word (items at secret or above redacted). `no_features`
+/// leaves out what each named feature gates.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BundleOptions {
+    #[serde(default)]
+    pub filters: Vec<String>,
+    #[serde(default)]
+    pub no_features: Vec<String>,
 }
 
 impl ReadingSpec {

@@ -60,6 +60,10 @@ pub struct ReadingReport {
     /// Every item the results name (a job's touched items).
     #[serde(default)]
     pub items: Vec<String>,
+    /// A `bundle` reading's bundle bytes, written beside its page (`<stamp>.bundle`);
+    /// not part of the record, so not part of its digest.
+    #[serde(skip)]
+    pub artifact: Option<Vec<u8>>,
 }
 
 /// What a kind found, before it becomes a report.
@@ -68,6 +72,8 @@ pub struct Answer {
     pub counts: Vec<Count>,
     pub rows: Vec<CodeQueryResult>,
     pub unresolved: Vec<CodeQueryResult>,
+    /// The bytes a kind made (the `bundle` kind's bundle).
+    pub artifact: Option<Vec<u8>>,
 }
 
 impl Answer {
@@ -153,6 +159,7 @@ pub fn read_facts(facts: &Facts, spec_path: &Path, spec: &ReadingSpec, stamp: &s
         not_read,
         index_key,
         items,
+        artifact: answer.artifact,
     })
 }
 
@@ -213,6 +220,7 @@ fn read_sweep(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, ho
         not_read: Vec::new(),
         index_key: None,
         items: Vec::new(),
+        artifact: None,
     })
 }
 
@@ -256,7 +264,8 @@ pub struct ReadingSummary {
 /// after a git ref's diff), one path per line.
 pub const CHANGE_FILES_ENV: &str = "CUSTODIAN_CHANGE_FILES";
 
-/// Writes `<base>/<name>/<stamp>.md` and `.json`, and their `latest` copies,
+/// Writes `<base>/<name>/<stamp>.md` and `.json` (and `.bundle`, a bundle
+/// reading's bundle), and their `latest` copies,
 /// each whole. An earlier page is never overwritten: a second reading in the
 /// same second is `<stamp>-2`.
 pub fn write(base: &Path, report: &ReadingReport) -> Result<(PathBuf, PathBuf, PathBuf)> {
@@ -276,6 +285,9 @@ pub fn write(base: &Path, report: &ReadingReport) -> Result<(PathBuf, PathBuf, P
     let latest = dir.join("latest.md");
     crate::store::write_whole(&latest, md.as_bytes())?;
     crate::store::write_whole(&dir.join("latest.json"), text.as_bytes())?;
+    if let Some(bytes) = &report.artifact {
+        crate::store::write_whole(&page.with_extension("bundle"), bytes)?;
+    }
     Ok((page, json, latest))
 }
 
@@ -296,10 +308,7 @@ pub fn exec_reading(spec_path: &Path, root: &Path, out: &str, stamp: &str, in_jo
         let (p, j, l) = write(Path::new(out), &report)?;
         (Some(p), Some(j), Some(l))
     };
-    let bundle = match (report.kind, &page) {
-        (ReadingKind::Bundle, Some(p)) => Some(crate::job_bundle::bundle_reading(root, &report, &p.with_extension("bundle"))?),
-        _ => None,
-    };
+    let bundle = page.as_ref().filter(|_| report.artifact.is_some()).map(|p| p.with_extension("bundle"));
     Ok(ReadingSummary { name: report.name, kind: report.kind, target: report.target, stamp: report.stamp, counts: report.counts, page, json, latest, index_key: report.index_key, items: report.items, bundle })
 }
 

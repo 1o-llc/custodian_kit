@@ -179,7 +179,11 @@ fn sensitivity_lists_marked_items_and_redacts_secrets() {
     assert_eq!(count(&r, "items marked"), 2);
     assert_eq!(count(&r, "at secret"), 1);
     let secret = rows(&r, "sensitive-item").into_iter().find(|x| x.label == "core_lib::vault_key").expect("vault_key");
-    assert!(secret.attributes.get("context").is_some_and(|c| c.starts_with("[REDACTED")), "{:?}", secret.attributes);
+    // the one marker: the bundles redaction line, level and digest of what is held
+    let ctx = secret.attributes.get("context").expect("context");
+    let marker = bundles::redaction::RedactionMarker::parse("#", ctx).unwrap_or_else(|| panic!("not a marker: {ctx}"));
+    assert_eq!(marker.level, "secret");
+    assert_eq!(secret.attributes.get("held").map(String::as_str), Some("true"));
     assert_eq!(secret.attributes.get("mechanism").map(String::as_str), Some("vault keys"));
 }
 
@@ -241,4 +245,44 @@ fn a_workspace_held_open_answers_many_specs() {
     let s = spec("tests_covering", "core_lib::label", "");
     assert_eq!(api::run(&ws, &s).unwrap_err().code, "CUST0002", "tests read: another scope");
     let _ = Scope::default();
+}
+
+#[test]
+fn the_bundle_kind_goes_through_bundle_rs_with_one_marker() {
+    let r = read("bundle", "crate:core_lib", "[scope]\ntests = true\n[bundle]\nfilters = [\"no_tests\"]\n");
+    assert!(count(&r, "files bundled") >= 2, "lib.rs and Cargo.toml");
+    assert_eq!(count(&r, "windows held redacted (secret or above)"), 1, "vault_key");
+    assert!(count(&r, "files left out by the filters") >= 1, "tests/metrics.rs");
+    let lib = rows(&r, "bundled-file").into_iter().find(|x| x.label == "crates/core_lib/src/lib.rs").expect("lib.rs");
+    assert!(lib.attributes.get("held").is_some_and(|h| h.ends_with("@secret")), "{:?}", lib.attributes);
+    let bytes = r.report.artifact.clone().expect("the bundle's bytes");
+    let text = String::from_utf8(bytes).unwrap();
+    let markers = bundles::redaction::markers_in(&text, "#");
+    assert_eq!(markers.len(), 1, "{text}");
+    assert_eq!(markers[0].level, "secret");
+    assert!(!text.contains("let k = 41;"), "the secret body is held");
+    // the artifact is not part of the record
+    assert!(!r.json().contains("artifact"));
+}
+
+#[test]
+fn a_job_bundle_holds_a_secret_window_as_the_marker_and_unbundles() {
+    use custodian_kit::job_bundle::{write_entries, Entry};
+    let entries = vec![
+        Entry { path: "job/job.toml".into(), text: "name = \"j\"\n".into(), held: None },
+        Entry { path: "windows/a.L1-3.txt".into(), text: "// a.rs:1-3 (site x)\nlet k = 41;\nk + 1\n".into(), held: Some("secret".into()) },
+    ];
+    let (bytes, held) = write_entries(&entries, false).unwrap();
+    assert_eq!(held, 1);
+    let text = String::from_utf8(bytes.clone()).unwrap();
+    assert!(!text.contains("let k = 41;") && text.contains("// a.rs:1-3 (site x)"), "{text}");
+    assert_eq!(bundles::redaction::markers_in(&text, "#").len(), 1);
+    let (open, held) = write_entries(&entries, true).unwrap();
+    assert_eq!(held, 0);
+    assert!(String::from_utf8(open).unwrap().contains("let k = 41;"));
+    let dir = std::env::temp_dir().join(format!("custodian-kit-unbundle-{}", std::process::id()));
+    let file = dir.with_extension("bundle");
+    std::fs::write(&file, &bytes).unwrap();
+    bundles::unbundle_files(&file, &dir, "#").unwrap();
+    assert_eq!(std::fs::read_to_string(dir.join("job/job.toml")).unwrap(), "name = \"j\"\n");
 }

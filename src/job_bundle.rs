@@ -1,14 +1,17 @@
-//! `custodian bundle <job|reading>`: one annotated file an agent reads whole
-//! (the `bundles` format: `# start of path`, the content, `# end of path`),
-//! holding a job's closing receipt, its readings, and the bounded source
-//! windows around each site the readings name (five lines either side). A
-//! window in an item at `secret` or above is held through `classified` and
-//! written redacted unless the bundle is asked to reveal it.
+//! `custodian bundle <job>`: one annotated file an agent reads whole (the
+//! `bundles` format: `# start of path`, the content, `# end of path`),
+//! holding a job's own files, its receipts, and the bounded source windows
+//! around each site its readings name (five lines either side). A window of
+//! an item at `secret` or above (a row the reading marked `held`) is held
+//! through `classified` while it is written and goes to bundles as a
+//! redaction, the one marker line, unless the bundle is asked to reveal it.
 
 use crate::reading::refusal::ReadingRefusal;
 use crate::reading::{load, ReadingReport};
 use crate::store::write_whole;
 use crate::Result;
+use bundles::redaction::{LineRedaction, Redact};
+use bundles::{BundleWriter, FileEntry};
 use classified::ClassifiedString;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -16,8 +19,8 @@ use std::path::{Path, PathBuf};
 /// Lines either side of a site.
 pub const WINDOW: u32 = 5;
 
-/// The levels whose windows are held redacted.
-pub const HELD: &[&str] = &["secret", "key_material"];
+/// The largest window held in one classified container.
+const HOLD_LIMIT: usize = 1 << 20;
 
 fn window(root: &Path, file: &str, line: u32) -> Option<(u32, u32, String)> {
     let text = std::fs::read_to_string(root.join(file)).ok()?;
@@ -28,10 +31,18 @@ fn window(root: &Path, file: &str, line: u32) -> Option<(u32, u32, String)> {
     Some((start, end, body))
 }
 
-/// Copies a job folder's own files (job.toml, specs, steps, readings, the
-/// closing receipt) into the stage, whole.
-fn stage_folder(folder: &Path, stage: &Path) -> Result<usize> {
-    let mut n = 0;
+/// One entry of a job bundle: its path in the bundle, its bytes, and the
+/// level its body is held at (its first line, the window's heading, is not).
+pub struct Entry {
+    pub path: String,
+    pub text: String,
+    pub held: Option<String>,
+}
+
+/// A job folder's own files (job.toml, specs, steps, readings, the closing
+/// receipt), whole, under `job/`.
+fn folder_entries(folder: &Path) -> Result<Vec<Entry>> {
+    let mut out = Vec::new();
     let mut stack = vec![folder.to_path_buf()];
     while let Some(d) = stack.pop() {
         let Ok(rd) = std::fs::read_dir(&d) else { continue };
@@ -47,36 +58,57 @@ fn stage_folder(folder: &Path, stage: &Path) -> Result<usize> {
             if name.ends_with(".bundle") || name.starts_with('.') {
                 continue;
             }
-            let rel = p.strip_prefix(folder).unwrap_or(&p);
+            let rel = p.strip_prefix(folder).unwrap_or(&p).to_string_lossy().replace('\\', "/");
             let bytes = std::fs::read(&p).map_err(|e| ReadingRefusal::MissingInput.refuse(format!("{}: {e}", p.display())))?;
-            write_whole(&stage.join("job").join(rel), &bytes)?;
-            n += 1;
+            out.push(Entry { path: format!("job/{rel}"), text: String::from_utf8_lossy(&bytes).into_owned(), held: None });
         }
     }
-    Ok(n)
+    Ok(out)
 }
 
 /// A job folder, its receipts and the windows around its sites, as one
 /// bundle file `<folder>/<title>.bundle`. Returns the file, its digest and
 /// how many windows were held redacted.
 pub fn bundle_job(root: &Path, folder: &Path, title: &str, receipts: &[(i64, String)], reveal: bool) -> Result<(PathBuf, String, usize)> {
-    let stage = folder.join("bundle");
-    stage_folder(folder, &stage)?;
+    let mut entries = folder_entries(folder)?;
     for (seq, json) in receipts {
-        write_whole(&stage.join("receipts").join(format!("{seq}.json")), json.as_bytes())?;
+        entries.push(Entry { path: format!("receipts/{seq}.json"), text: json.clone(), held: None });
     }
     let readings: Vec<ReadingReport> = job_readings(folder).into_iter().map(|(_, r)| r).collect();
-    let held = windows(root, &readings, &stage.join("windows"), reveal)?;
+    let wins = windows(root, &readings);
+    entries.extend(wins);
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    let (bytes, held) = write_entries(&entries, reveal)?;
     let out = folder.join(format!("{title}.bundle"));
-    bundles::bundler::bundle_files(&stage, &out, &bundles::bundler::BundleOptions::default()).map_err(|e| ReadingRefusal::Write.refuse(format!("{}: {e}", out.display())))?;
-    let digest = crate::digest::tagged(std::fs::read(&out).unwrap_or_default());
-    Ok((out, digest, held))
+    write_whole(&out, &bytes)?;
+    Ok((out, crate::digest::tagged(&bytes), held))
 }
 
-/// The bounded windows around every site the readings name, a secret item's
-/// held through classified and written redacted unless `reveal`.
-pub fn windows(root: &Path, readings: &[ReadingReport], dir: &Path, reveal: bool) -> Result<usize> {
-    let mut held = 0;
+/// The entries as one bundle: a held body goes in a classified container and
+/// to bundles as a redaction of its lines, unless `reveal`. Returns the bytes
+/// and how many were held.
+pub fn write_entries(entries: &[Entry], reveal: bool) -> Result<(Vec<u8>, usize)> {
+    let refuse = |e: bundles::BundleError| ReadingRefusal::Entry.refuse(e);
+    let mut w = BundleWriter::new(Vec::new(), crate::bundle::PREFIX).map_err(refuse)?;
+    for e in entries {
+        match (&e.held, reveal) {
+            (Some(level), false) => {
+                let n = e.text.lines().count().max(1);
+                let redact = if n > 1 { Redact::Lines(vec![LineRedaction { start: 2, end: n, level: level.clone() }]) } else { Redact::Whole { level: level.clone() } };
+                let kept = ClassifiedString::try_new(e.text.clone(), HOLD_LIMIT).map_err(|x| ReadingRefusal::Hold.refuse(format!("{}: {x:?}", e.path)))?;
+                kept.expose(|t| w.entry(FileEntry::bytes(e.path.as_str(), t.as_bytes()).with_redact(redact))).map_err(refuse)?;
+            }
+            _ => w.entry(FileEntry::bytes(e.path.as_str(), e.text.as_bytes())).map_err(refuse)?,
+        }
+    }
+    let (bytes, report) = w.finish().map_err(refuse)?;
+    Ok((bytes, report.redacted.len()))
+}
+
+/// The bounded windows around every site the readings name, under
+/// `windows/`, a held row's window marked held at its level.
+pub fn windows(root: &Path, readings: &[ReadingReport]) -> Vec<Entry> {
+    let mut out = Vec::new();
     let mut seen = BTreeSet::new();
     for r in readings {
         for row in r.query.results.iter().chain(&r.unresolved) {
@@ -85,23 +117,12 @@ pub fn windows(root: &Path, readings: &[ReadingReport], dir: &Path, reveal: bool
                 continue;
             }
             let Some((start, end, body)) = window(root, file, line) else { continue };
-            let secret = row.attributes.get("sensitivity").is_some_and(|l| HELD.contains(&l.as_str()));
-            let text = if secret {
-                held += 1;
-                let kept = ClassifiedString::try_new(body, 1 << 20).map_err(|e| ReadingRefusal::Write.refuse(format!("{e:?}")))?;
-                if reveal {
-                    kept.expose(|s| s.to_string())
-                } else {
-                    format!("[REDACTED: {} lines of an item at {}; bundle --reveal shows them]", end - start + 1, row.attributes.get("sensitivity").cloned().unwrap_or_default())
-                }
-            } else {
-                body
-            };
-            let name = format!("{}.L{start}-{end}.txt", file.replace('/', "__"));
-            write_whole(&dir.join(name), format!("// {file}:{start}-{end} ({} {})\n{text}\n", row.kind, row.label).as_bytes())?;
+            let held = row.attributes.get("held").filter(|h| h.as_str() == "true").map(|_| row.attributes.get("sensitivity").cloned().unwrap_or_else(|| crate::bundle::HELD_FROM.to_string()));
+            let name = format!("windows/{}.L{start}-{end}.txt", file.replace('/', "__"));
+            out.push(Entry { path: name, text: format!("// {file}:{start}-{end} ({} {})\n{body}\n", row.kind, row.label), held });
         }
     }
-    Ok(held)
+    out
 }
 
 /// A bundled job unbundled into `queued/<name>`: its job folder's files,
@@ -139,39 +160,4 @@ pub fn job_readings(folder: &Path) -> Vec<(PathBuf, ReadingReport)> {
         }
     }
     out
-}
-
-/// A `bundle` reading's files as one bundle file beside its page: each file
-/// staged whole, the held ranges replaced by a redaction line (unless the
-/// line was run with `--reveal`), then bundled.
-pub fn bundle_reading(root: &Path, report: &ReadingReport, out: &Path) -> Result<PathBuf> {
-    let stage = out.with_extension("stage");
-    let reveal = std::env::var_os(crate::reading::kinds::REVEAL_ENV).is_some();
-    for row in report.query.results.iter().filter(|r| r.kind == "bundled-file") {
-        let Some(rel) = &row.path else { continue };
-        let text = std::fs::read_to_string(root.join(rel)).map_err(|e| ReadingRefusal::MissingInput.refuse(format!("{rel}: {e}")))?;
-        let held: Vec<(u32, u32)> = row
-            .attributes
-            .get("held")
-            .map(|h| h.split(',').filter_map(|r| r.split_once('-')).filter_map(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))).collect())
-            .unwrap_or_default();
-        let mut out_text = String::new();
-        let mut skipping: Option<(u32, u32)> = None;
-        for (i, line) in text.lines().enumerate() {
-            let n = i as u32 + 1;
-            if let Some((a, b)) = held.iter().copied().find(|(a, b)| n >= *a && n <= *b).filter(|_| !reveal) {
-                if skipping != Some((a, b)) {
-                    let kept = ClassifiedString::try_new(text.lines().skip(a as usize - 1).take((b - a + 1) as usize).collect::<Vec<_>>().join("\n"), 1 << 22).map_err(|e| ReadingRefusal::Write.refuse(format!("{e:?}")))?;
-                    out_text.push_str(&format!("// [REDACTED: lines {a}-{b}, an item at secret or above; {} bytes held, not written]\n", kept.len()));
-                    skipping = Some((a, b));
-                }
-                continue;
-            }
-            out_text.push_str(line);
-            out_text.push('\n');
-        }
-        write_whole(&stage.join(rel), out_text.as_bytes())?;
-    }
-    bundles::bundler::bundle_files(&stage, out, &bundles::bundler::BundleOptions { comment_prefix: "#".into(), ..Default::default() }).map_err(|e| ReadingRefusal::Write.refuse(format!("{}: {e}", out.display())))?;
-    Ok(out.to_path_buf())
 }

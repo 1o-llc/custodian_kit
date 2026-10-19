@@ -64,11 +64,30 @@ pub enum ReadingRefusal {
     JobRunning,
     #[liaise(code = 28, msg = "the serve socket answered with something that is not a receipt")]
     BadReply,
+    #[liaise(code = 101, msg = "the bundle filters break the word's own rules")]
+    FiltersRefused,
+    #[liaise(code = 102, msg = "the route holds no file the filters keep")]
+    NothingToBundle,
+    #[liaise(code = 103, msg = "the maintenance registry cannot be read, so what is secret is not known")]
+    Registry,
+    #[liaise(code = 104, msg = "the level table has no `secret`, so nothing could be held; the bundle is refused rather than written open")]
+    NoSecretLevel,
+    #[liaise(code = 105, msg = "a held file could not be kept in a classified container")]
+    Hold,
+    #[liaise(code = 106, msg = "--no-feature names a feature the crate does not declare")]
+    UnknownFeature,
+    #[liaise(code = 107, msg = "bundles refused an entry")]
+    Entry,
 }
 
 impl ReadingRefusal {
     /// The error this refusal raises, with what was refused.
     pub fn refuse(self, detail: impl std::fmt::Display) -> CustodianError {
         CustodianError::Reading { code: self.code(), message: format!("{}: {detail}", self.message()) }
+    }
+
+    /// The same refusal as the stable surface carries it (`api::Refusal`).
+    pub fn refusal(self, detail: impl std::fmt::Display) -> crate::api::Refusal {
+        self.refuse(detail).into()
     }
 }

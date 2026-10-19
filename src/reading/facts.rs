@@ -235,6 +235,17 @@ impl Facts {
         self.levels.iter().position(|l| l == level)
     }
 
+    /// Whether an item at `level` is held (written redacted unless revealed):
+    /// at `secret` (`crate::bundle::HELD_FROM`) or above. A table with no
+    /// `secret` holds every marked item (more, never less).
+    pub fn held(&self, level: &str) -> bool {
+        match (self.level_rank(level), self.level_rank(crate::bundle::HELD_FROM)) {
+            (Some(a), Some(floor)) => a >= floor,
+            (None, Some(_)) => true,
+            (_, None) => true,
+        }
+    }
+
     /// The marks of an item, or of the nearest item enclosing it that has some.
     pub fn marks_of(&self, id: &str) -> Option<&Marks> {
         let mut cur = Some(id.to_string());

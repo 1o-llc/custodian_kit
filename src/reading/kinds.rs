@@ -60,12 +60,16 @@ fn site(f: &Facts, kind: &str, label: impl Into<String>, file: &Path, line: u32,
         if let Some(m) = f.marks_of(item) {
             if let Some(s) = &m.sensitivity {
                 a.insert("sensitivity".to_string(), s.clone());
-                // a secret item's line is held through classified, written redacted unless revealed
-                if crate::job_bundle::HELD.contains(&s.as_str()) {
+                // a secret item's line is held through classified, and written as the
+                // bundles redaction marker (the one marker) unless revealed
+                if f.held(s) {
+                    a.insert("held".to_string(), "true".to_string());
                     let held = classified::ClassifiedString::try_new(f.context(file, line), 1 << 16).ok();
                     let shown = match (&held, std::env::var_os(REVEAL_ENV).is_some()) {
                         (Some(h), true) => h.expose(|t| t.to_string()),
-                        _ => format!("[REDACTED: a line of an item at {s}; --reveal shows it]"),
+                        (Some(h), false) => h.expose(|t| bundles::redaction::RedactionMarker::over(s, bundles::redaction::Span::Lines { start: line as usize, end: line as usize }, t.as_bytes()).render(crate::bundle::PREFIX)),
+                        // too long for a container: the marker over the line itself
+                        (None, _) => bundles::redaction::RedactionMarker::over(s, bundles::redaction::Span::Lines { start: line as usize, end: line as usize }, f.context(file, line).as_bytes()).render(crate::bundle::PREFIX),
                     };
                     a.insert("context".to_string(), shown);
                 }
@@ -1249,62 +1253,57 @@ fn diagnostics(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 // ---------------------------------------------------------------------------
 // bundle
 
-/// The files a bundle holds and, in each, the line ranges of items at
-/// secret or above (an item's own lines: a function to its end, any other
-/// item to the line before the next item in the file; more is held, never less).
+/// A route as one bundle, made by `crate::bundle` (the one redaction, the
+/// one marker): a row per file it holds, with the windows held at secret or
+/// above, and a row per file the filters left out. The bundle's bytes ride on
+/// the reading and are written beside its page.
 fn bundle_rows(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    use crate::bundle::FiltersWord;
     let target = spec.target.trim();
-    let files: Vec<std::path::PathBuf> = if let Some(p) = f.packages.get(&target.replace('-', "_")) {
-        let mut v: Vec<std::path::PathBuf> = f.k.files.iter().filter(|x| f.package_of(&x.path) == Some(p.name.as_str())).map(|x| x.path.clone()).collect();
-        v.push(f.root.join(&p.dir).join("Cargo.toml"));
-        v
-    } else if target.starts_with("decl:") {
-        f.paths.resolve(target, f.how)?.files(&f.root)?
+    // a bare crate name or file is spelled as its route
+    let route = if target.contains(':') {
+        target.to_string()
+    } else if let Some(p) = f.packages.get(&target.replace('-', "_")) {
+        format!("crate:{}", p.name)
     } else {
-        let p = f.root.join(target);
-        if !p.is_file() {
-            return Err(ReadingRefusal::TargetUnknown.refuse(format!("{target}: a bundle takes a crate:, a decl: or a file")));
-        }
-        vec![p]
+        format!("path:{target}")
     };
+    let mut word = if spec.bundle.filters.is_empty() { FiltersWord::DEFAULT } else { FiltersWord::from_names(spec.bundle.filters.iter().map(String::as_str)).map_err(crate::CustodianError::from)?.with_filters_redact_secret() };
+    if std::env::var_os(REVEAL_ENV).is_some() {
+        word = word.reveal_explicitly();
+    }
+    let no_features: Vec<&str> = spec.bundle.no_features.iter().map(String::as_str).collect();
+    let (bytes, written) = crate::bundle::bundle_bytes(f, &route, word.check().map_err(crate::CustodianError::from)?, &no_features).map_err(crate::CustodianError::from)?;
     let mut rows = Vec::new();
-    let mut held_items = 0;
-    for file in files.iter().filter(|p| p.is_file()) {
-        let mut starts: Vec<(u32, &str)> = f.k.items.iter().filter(|d| &d.location.path == file).filter_map(|d| Some((d.location.line?, d.id.as_str()))).collect();
-        starts.sort();
-        let lines = f.k.files.iter().find(|x| &x.path == file).map(|x| x.source.lines().count() as u32).unwrap_or(0);
-        let mut ranges = Vec::new();
-        for (i, (start, id)) in starts.iter().enumerate() {
-            let level = f.marks_of(id).and_then(|m| m.sensitivity.clone());
-            if !level.as_deref().is_some_and(|l| crate::job_bundle::HELD.contains(&l)) {
-                continue;
-            }
-            let end = f
-                .k
-                .index
-                .enclosing(&klepto::FileLocation { path: file.clone(), line: Some(*start), column: Some(u32::MAX / 2) })
-                .and_then(|span| span.end.map(|e| e.0))
-                .or_else(|| starts.get(i + 1).map(|(next, _)| next.saturating_sub(1)))
-                .unwrap_or(lines);
-            held_items += 1;
-            ranges.push(format!("{start}-{end}"));
+    for rel in &written.included {
+        let held: Vec<String> = written
+            .redacted
+            .iter()
+            .filter(|r| &r.path == rel)
+            .map(|r| match r.marker.span {
+                bundles::redaction::Span::All => format!("all@{}", r.marker.level),
+                bundles::redaction::Span::Lines { start, end } => format!("{start}-{end}@{}", r.marker.level),
+            })
+            .collect();
+        let mut attrs = vec![("filters", word.names().join(", "))];
+        if !held.is_empty() {
+            attrs.push(("held", held.join(",")));
         }
-        let rel = f.rel(file);
-        rows.push(CodeQueryResult {
-            id: stable_id("bundled-file", &rel),
-            kind: "bundled-file".into(),
-            label: rel.clone(),
-            crate_name: f.package_of(file).map(str::to_string),
-            path: Some(rel),
-            line: None,
-            column: None,
-            score_reason: vec!["in the bundle".into()],
-            attributes: [("held".to_string(), ranges.join(","))].into_iter().filter(|(_, v)| !v.is_empty()).collect(),
-        });
+        let mut r = named("bundled-file", rel.clone(), f.package_of_rel(rel).map(|p| p.name.clone()), "in the bundle", attrs);
+        r.path = Some(rel.clone());
+        rows.push(r);
+    }
+    for rel in &written.dropped {
+        let mut r = named("dropped-file", rel.clone(), f.package_of_rel(rel).map(|p| p.name.clone()), "left out by the filters", vec![("filters", word.names().join(", "))]);
+        r.path = Some(rel.clone());
+        rows.push(r);
     }
     let mut ans = Answer::default();
-    ans.count("files bundled", rows.len());
-    ans.count("items held redacted (secret or above)", held_items);
+    ans.count("files bundled", written.included.len());
+    ans.count("windows held redacted (secret or above)", written.redacted.len());
+    ans.count("files left out by the filters", written.dropped.len());
+    ans.count("bundle bytes", bytes.len());
     ans.rows = rows;
+    ans.artifact = Some(bytes);
     Ok(ans)
 }
