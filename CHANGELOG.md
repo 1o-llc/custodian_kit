@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.3.2 (2026-10-19)
+
+Two operations the first real bounded job in the kit needed, and the change
+vocabulary did not have. That job turns a hand-written lock-holding restart
+into xccute's `Hold`, and moves the kit off its path copies of xccute onto
+crates.io. Neither could be said as a change spec: no operation replaced a
+function's body, and `add_dependency` refuses a dependency the crate already
+names. Nothing is removed from the API. Every link is pinned to 2a99f02.
+
+- `replace_body`: a function's body replaced (target: the function), the new
+  body toolkit pieces like every other body. Its signature, docs and
+  attributes stay as they are, so no caller changes
+  ([src/change.rs#L59](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/change.rs#L59)). The preflight checks the target is a function the
+  scan captured and that the spec's function is the target's own name
+  ([src/preflight.rs#L409](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/preflight.rs#L409)). `change::render_body` renders a body from its
+  opening brace to its closing one; `render_fn` writes it after the
+  signature, so the two cannot differ ([src/change.rs#L1085](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/change.rs#L1085)).
+- `change_dependency`: a dependency a crate already names, moved to the
+  source the spec names ([src/change.rs#L60](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/change.rs#L60)). A version alone is the
+  registry's and the path is dropped; a path goes with or without a version;
+  features given replace the entry's. The target is `crate:<name>`, or `*`
+  for every crate of the workspace naming it ([src/change.rs#L1301](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/change.rs#L1301)).
+  Several dependencies in `dependencies` move together in one spec, so a
+  family is never split across two specs ([src/change.rs#L450](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/change.rs#L450)).
+  `change::dependency_changes` lists every line it changes, one rule for the
+  preflight and the writer; a crate target that does not name the dependency
+  is refused, so `add_dependency` stays the one way to add one
+  ([src/change.rs#L1315](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/change.rs#L1315)). The preflight's write set is those manifests
+  ([src/preflight.rs#L396](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/preflight.rs#L396)), and they are the change's own files, so a
+  `*` change is in its scope without a widened `scope.write`
+  ([src/preflight.rs#L441](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/preflight.rs#L441)).
+- `add_test` takes `to`: the inline test module of the file it lands in, by
+  name (`tests` when unset). The preflight checks the module is there
+  ([src/preflight.rs#L417](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/src/preflight.rs#L417)).
+- The change schema and the README's operations table carry both operations
+  and the `dependencies` block.
+
+Proof: [tests/bounded.rs#L343](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/tests/bounded.rs#L343) (a `*` change of two dependencies writes
+the two manifests that name them, 3 lines; a crate that does not name one is
+refused) and [tests/bounded.rs#L361](https://github.com/1o-llc/custodian_kit/blob/2a99f025864e23cbf78b7ade3d8029d81ea88931/tests/bounded.rs#L361) (a body replaced on its own
+function is authorized, on another refused; the body renders from its
+pieces). The schema test holds the schema equal to the Rust forms with
+`dependencies` in them. All suites pass: 146 + 13 + 19 + 5 + 2 + 10 + 24.
+
 ## 0.3.1 (2026-10-19)
 
 One rule, one place. The `.custodian` folder was declared three times: here,
