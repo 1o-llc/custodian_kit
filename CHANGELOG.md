@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.3.1 (2026-10-19)
+
+One rule, one place. The `.custodian` folder was declared three times: here,
+in custodian's `src/layout.rs` and in differences_kit's `layout.rs`. Which
+receipt made a reading was decided twice, and differently. A plan could not
+name the crates its intent named, and a job that set out to make a reading
+closed `pending` after making it. Each is now decided once, here. Nothing is
+removed from the API. Every link is pinned to 0d4ac01; the earlier lines
+are pinned to 35968aa (0.3.0).
+
+- The folder is declared once, in `store::named`. The parts custodian kept
+  for itself (a reading's record, a check's JSON, a log) and the tree
+  snapshot differences_kit kept are declared here with the schema, route and
+  place they had ([src/store.rs#L76](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/store.rs#L76) to
+  [src/store.rs#L82](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/store.rs#L82)). `named::ALL` lists every part, each once
+  ([src/store.rs#L85](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/store.rs#L85)). `named::policy` and `named::resolve` are the one
+  way a part becomes a path ([src/store.rs#L92](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/store.rs#L92),
+  [src/store.rs#L97](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/store.rs#L97)); the store resolves through them, and so do
+  custodian and differences_kit. `store::job_folders` lists every job folder
+  with its state ([src/store.rs#L306](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/store.rs#L306)), and `jobs::READINGS_DIR` names
+  a job folder's readings ([src/jobs.rs#L212](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/jobs.rs#L212)).
+- Which receipt made a reading, and where its record is now, is
+  `receipts::reading_of` ([src/receipts.rs#L69](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/receipts.rs#L69)), with
+  `receipts::readings_of` for one spec ([src/receipts.rs#L86](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/receipts.rs#L86)). A
+  reading kept in a job's folder is found wherever that folder is now. The
+  receipts are the one source: custodian's readings index, `differences
+  readings` and a job's close read this rule. A job's close read the journal's
+  own query before ([src/jobs.rs#L769](https://github.com/1o-llc/custodian_kit/blob/35968aa7b93a719854c64753c7a428db71eaa61e/src/jobs.rs#L769)).
+- A plan resolves what its intent names before it matches words.
+  `plan::resolve_named` turns each crate, `decl:` set, file path and
+  declaration the intent names into a target through the index
+  ([src/plan.rs#L235](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/plan.rs#L235)). Those targets are read and stepped first
+  ([src/plan.rs#L317](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/plan.rs#L317)). The rest of the words are matched as before
+  ([src/plan.rs#L259](https://github.com/1o-llc/custodian_kit/blob/35968aa7b93a719854c64753c7a428db71eaa61e/src/plan.rs#L259)). A plain word is asked about only when the intent
+  named no target, and a name spelled as code that resolves to nothing is
+  still asked ([src/plan.rs#L411](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/plan.rs#L411)). Before, every word was matched, so
+  `merge lease_matrix_step3d_core into lease_matrix_core` asked where both
+  crates go ([src/plan.rs#L339](https://github.com/1o-llc/custodian_kit/blob/35968aa7b93a719854c64753c7a428db71eaa61e/src/plan.rs#L339)).
+- A `reading:<spec>` verification means the job changed what it set out to
+  change. It is satisfied when the job's last reading of the spec differs
+  from the latest reading before the job opened, or when the spec was never
+  read before and this is its first reading ([src/jobs.rs#L1039](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/src/jobs.rs#L1039)). The
+  same reading again is `unchanged`; no reading in the job is `not run`.
+  Before, a first reading had nothing to compare with and stayed `not run`
+  ([src/jobs.rs#L1040](https://github.com/1o-llc/custodian_kit/blob/35968aa7b93a719854c64753c7a428db71eaa61e/src/jobs.rs#L1040)).
+
+Proof: the rustdoc JSON of 0.3.0 compared with this release: 5,084 public
+items before, 5,106 after, 22 added, none removed or changed. `cargo test`
+runs 217 tests, the 213 of 0.3.0 and four new:
+`every_part_is_named_once_and_where_the_golden_says` pins every part's route
+and path ([tests/layout.rs#L38](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/tests/layout.rs#L38)),
+`a_part_resolves_under_the_projects_folder_and_never_leaves_it`
+([tests/layout.rs#L48](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/tests/layout.rs#L48)),
+`an_intent_naming_two_crates_targets_them_and_asks_nothing_about_them`
+([tests/bounded.rs#L303](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/tests/bounded.rs#L303)) and
+`a_reading_verification_is_the_job_changing_the_reading_it_named`
+([tests/bounded.rs#L204](https://github.com/1o-llc/custodian_kit/blob/0d4ac01bb6274a7dbe669c0e05c96449ada1846d/tests/bounded.rs#L204)).
+
 ## 0.3.0 (2026-10-19)
 
 The history machinery leaves this crate. Each kind of history is now a crate
@@ -69,7 +127,9 @@ None is removed. Three items are added: `diff::reading_of`,
 tests, every test of 0.2.0 but one: `digest::tests::canonical_forms_do_not_depend_on_field_order`
 moved with the digest to receipt_history, where it passes. custodian 0.2.0's
 source builds against this release, its custodian_kit requirement raised to
-0.3.0, and its 55 tests pass.## 0.2.0 (2026-10-19)
+0.3.0, and its 55 tests pass.
+
+## 0.2.0 (2026-10-19)
 
 The bounded and unbounded increment of the 2026-10-19 specification. An agent
 can now ask, before it changes anything, what a change to one item entails and
