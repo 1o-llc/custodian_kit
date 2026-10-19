@@ -32,7 +32,14 @@ pub struct PathsFile {
     /// Raw paths (relative to the root) a job may name as `path:<raw>`.
     #[serde(default)]
     pub path: Vec<String>,
+    /// Paths no count walks into, in tokei's (gitignore) syntax, on top of
+    /// [`DEFAULT_IGNORE`]: `published/**`, `*.generated.rs`.
+    #[serde(default)]
+    pub ignore: Vec<String>,
 }
+
+/// What every walk inside a route leaves out.
+pub const DEFAULT_IGNORE: &[&str] = &["target", ".git", ".custodian", ".claude"];
 
 /// Who is resolving: a job may only read declared routes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +64,16 @@ pub struct Route {
 }
 
 impl Route {
+    /// Where a walk inside the route starts: a crate's directory, a crate's
+    /// file, or a declared raw path. A declared set has no one root (its files are listed).
+    pub fn walk_root(&self, root: &Path) -> Option<PathBuf> {
+        match &self.place {
+            Place::Crate { root: dir, file, .. } => Some(file.clone().unwrap_or_else(|| dir.clone())),
+            Place::Path { raw } => Some(root.join(raw.trim_start_matches("./"))),
+            _ => None,
+        }
+    }
+
     /// The route as written (`crate:x`, `decl:y`, `path:z`).
     pub fn name(&self) -> &str {
         &self.name
@@ -202,6 +219,11 @@ impl PathsTable {
     }
 
     /// Every route the table declares, by name.
+    /// The ignore set a walk inside a route uses: the defaults and the table's own.
+    pub fn ignored(&self) -> Vec<String> {
+        DEFAULT_IGNORE.iter().map(|s| s.to_string()).chain(self.file.ignore.iter().cloned()).collect()
+    }
+
     pub fn routes(&self) -> Vec<(String, String)> {
         let rel = |p: &Path| p.strip_prefix(&self.root).unwrap_or(p).to_string_lossy().replace('\\', "/");
         let mut out: Vec<(String, String)> = self.crates.iter().map(|(n, r)| (format!("crate:{n}"), rel(r))).collect();

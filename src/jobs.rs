@@ -23,7 +23,35 @@ use std::path::{Path, PathBuf};
 
 /// The job templates custodian ships; `agent init` writes each to
 /// `config/jobs/<kind>.toml`, where they are the user's to edit.
-pub const SHIPPED_TEMPLATES: &[(&str, &str)] = &[("triage", TRIAGE)];
+pub const SHIPPED_TEMPLATES: &[(&str, &str)] = &[("triage", TRIAGE), ("features", FEATURES)];
+
+/// Step kinds that change code (a count is taken after each, when the job counts).
+/// Readings change nothing, so no count follows them.
+pub const CHANGES_CODE: &[&str] = &["apply", "annotate", "transform"];
+
+/// `custodian job start` for a crate's features: the evidence the eligibility reads.
+pub const FEATURES: &str = r#"# features: a crate's public API, what depends on it and what a change to it reaches,
+# counted at open and close so the closing receipt says how many lines the job touched.
+kind = "features"
+summary = "the crate's public API, its dependents and its reach: the evidence features judges with"
+count = true
+count_route = "crate:{target}"
+
+[[step]]
+name = "public-api"
+kind = "public_api"
+target = "crate:{target}"
+
+[[step]]
+name = "dependents"
+kind = "dependents"
+target = "crate:{target}"
+
+[[step]]
+name = "reach"
+kind = "reach"
+target = "crate:{target}"
+"#;
 
 /// `custodian triage <CODE | @logfile>`: where a code is raised, what that
 /// touches, the tests that prove a fix, and the marks there.
@@ -31,6 +59,8 @@ pub const TRIAGE: &str = r#"# triage: a liaise code (or a log's text, as @path) 
 # what each site reaches, the exact tests that prove a fix, and the marks on the items there.
 kind = "triage"
 summary = "raised here; touches these; prove a fix with these tests; the rule's owner is this item"
+# counted at open and close (the workspace), so the closing receipt says how many lines the job touched
+count = true
 
 [[step]]
 name = "codes"
@@ -88,6 +118,12 @@ pub struct Template {
     pub kind: String,
     #[serde(default)]
     pub summary: String,
+    /// Take a count of the job's routes at open, after each step that changes code, and at close.
+    #[serde(default)]
+    pub count: bool,
+    /// The route counted (`{target}` filled); the workspace (`*`) when unset.
+    #[serde(default)]
+    pub count_route: Option<String>,
     pub step: Vec<Step>,
 }
 
@@ -108,6 +144,141 @@ pub struct JobFile {
     /// For an imported job: the digest of the bundle it came from.
     #[serde(default)]
     pub origin: Option<String>,
+    /// Count the job's routes at open, after each step that changes code, and at close.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<bool>,
+    /// The routes counted; the template's `count_route`, else the workspace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<String>,
+}
+
+/// One count a job took: when (`open`, `step 3 apply`, `close`), of which route, its reading.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Taken {
+    pub label: String,
+    pub route: String,
+    /// The count reading's JSON, relative to the job folder.
+    pub reading: String,
+}
+
+/// Lines touched between two counts of a route, as the closing receipt lists them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Touched {
+    /// `job` (open to close) or the step (`step 3 apply`).
+    pub label: String,
+    pub route: String,
+    pub before_digest: String,
+    pub after_digest: String,
+    pub diff_digest: String,
+    pub moved: crate::reading::count::Moved,
+    pub files: usize,
+    pub crates: usize,
+    /// `step 3 apply: +412 −38 across 6 files in 2 crates`.
+    pub line: String,
+    /// The count diff's file, relative to the job folder.
+    pub diff: String,
+}
+
+/// The counts file in a job folder: every count the job took, in order.
+const COUNTS_FILE: &str = "counts.json";
+
+fn slug(s: &str) -> String {
+    let t: String = s.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    t.split('-').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("-")
+}
+
+fn taken(folder: &Path) -> Vec<Taken> {
+    std::fs::read_to_string(folder.join(COUNTS_FILE)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// The routes a job counts, when it counts: the job file's, else the template's, else the workspace.
+fn count_routes(jf: &JobFile, t: Option<&Template>) -> Vec<String> {
+    let on = jf.count.unwrap_or_else(|| t.is_some_and(|t| t.count));
+    if !on {
+        return Vec::new();
+    }
+    if !jf.routes.is_empty() {
+        return jf.routes.clone();
+    }
+    let target = jf.target.clone().unwrap_or_default();
+    vec![t.and_then(|t| t.count_route.clone()).map(|r| r.replace("{target}", &target)).unwrap_or_else(|| "*".to_string())]
+}
+
+/// A count of each route, as readings of the job, kept in the folder's counts file.
+fn take_counts(ctx: &Ctx, folder: &Path, in_job: &InJob, label: &str, routes: &[String], said: &mut Vec<String>, runs: &mut Vec<Ran>) -> Result<()> {
+    let mut all = taken(folder);
+    for route in routes {
+        let name = format!("count-{}-{}", slug(label), if route == "*" { "workspace".to_string() } else { slug(route) });
+        let spec = ReadingSpec::from_toml(&format!("name = {}\nquestion = {}\nkind = \"count\"\ntarget = {}\n", toml_str(&name), toml_str(&format!("how much is in {route} at {label}")), toml_str(route)))?;
+        let p = folder.join("steps").join(crate::oneo::Doc::Reading.file_name(&name));
+        write_whole(&p, spec.to_1o()?.as_bytes())?;
+        let ran = run_reading(ctx, &p, true, Some(in_job))?;
+        said.extend(ran.said.iter().cloned());
+        let json = ran.receipt.as_ref().and_then(|r| r.outputs.iter().find(|o| o.ends_with(".json")).cloned()).ok_or_else(|| ReadingRefusal::ReadingUnreadable.refuse(format!("{name}: the count wrote no reading")))?;
+        // kept relative to the job folder, which moves to done/ at close
+        let abs = ctx.root.join(&json);
+        let reading = abs.strip_prefix(folder).map(|p| p.to_string_lossy().into_owned()).unwrap_or(json);
+        all.push(Taken { label: label.to_string(), route: route.clone(), reading });
+        runs.push(ran);
+    }
+    write_whole(&folder.join(COUNTS_FILE), (serde_json::to_string_pretty(&all)? + "\n").as_bytes())
+}
+
+/// Lines touched from a job's counts: per route, each count against the one
+/// before it (a step's own delta), and `job` from the first to the last. The
+/// count diffs are written beside them under `counts/`.
+pub fn lines_touched_of(folder: &Path, counts: &[Taken]) -> Result<Vec<Touched>> {
+    let mut out = Vec::new();
+    let mut routes: Vec<&String> = counts.iter().map(|t| &t.route).collect();
+    routes.dedup();
+    let mut seen = BTreeSet::new();
+    for route in routes.into_iter().filter(|r| seen.insert(r.to_string())) {
+        let of: Vec<&Taken> = counts.iter().filter(|t| &t.route == route).collect();
+        let mut reports = Vec::new();
+        for t in &of {
+            reports.push((t.label.clone(), load(&folder.join(&t.reading))?));
+        }
+        let mut pairs: Vec<(String, usize, usize)> = (1..reports.len()).filter(|&i| reports[i].0 != "close").map(|i| (reports[i].0.clone(), i - 1, i)).collect();
+        if reports.len() >= 2 {
+            pairs.push(("job".to_string(), 0, reports.len() - 1));
+        }
+        for (label, a, b) in pairs {
+            let d = crate::reading::count::compare(&reports[a].1, &reports[b].1)?;
+            let file = folder.join("counts").join(format!("{}-{}.diff.json", slug(&label), if route == "*" { "workspace".to_string() } else { slug(route) }));
+            write_whole(&file, (serde_json::to_string_pretty(&d)? + "\n").as_bytes())?;
+            out.push(Touched {
+                line: d.line(&label),
+                label,
+                route: route.clone(),
+                before_digest: d.before.digest.clone(),
+                after_digest: d.after.digest.clone(),
+                diff_digest: d.digest.clone(),
+                moved: d.moved,
+                files: d.files().len(),
+                crates: d.crates.len(),
+                diff: file.strip_prefix(folder).unwrap_or(&file).to_string_lossy().into_owned(),
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// What a set of jobs (ids or names) changed together, from their closing
+/// receipts' `job` lines touched.
+pub fn lines_within(store: &Store, jobs: &[&str]) -> Result<crate::reading::count::Within> {
+    let journal = store.journal()?;
+    let mut diffs = Vec::new();
+    for j in jobs {
+        let row = journal.job(j)?.ok_or_else(|| ReadingRefusal::NoJob.refuse(*j))?;
+        let folder = store.root.join(&row.folder);
+        let closing = folder.join("closing.json");
+        let c: Closing = serde_json::from_str(&std::fs::read_to_string(&closing).map_err(|e| ReadingRefusal::MissingInput.refuse(format!("{}: {e}", closing.display())))?)?;
+        for t in c.lines_touched.iter().filter(|t| t.label == "job") {
+            let d: crate::reading::count::CountDiff = serde_json::from_str(&std::fs::read_to_string(folder.join(&t.diff)).map_err(|e| ReadingRefusal::MissingInput.refuse(format!("{}: {e}", t.diff)))?)?;
+            diffs.push(d);
+        }
+    }
+    Ok(crate::reading::count::within(diffs.iter()))
 }
 
 /// The job file's name in 1o: `v1.job.1o.job`.
@@ -255,6 +426,9 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
     let mut said = vec![running_decision_said(), format!("job {id} ({name}, {kind}) started: {} → {}", ctx.rel(&queued), ctx.rel(&running))];
     let in_job = InJob { id: id.clone(), readings: running.join("readings") };
     let mut runs = Vec::new();
+    let t = if kind == "specs" { None } else { Some(template(store, &kind)?) };
+    let routes = count_routes(&jf, t.as_ref());
+    take_counts(ctx, &running, &in_job, "open", &routes, &mut said, &mut runs)?;
     if kind == "specs" {
         let mut specs: Vec<PathBuf> = std::fs::read_dir(&running).map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| crate::reading::spec::SpecForm::of(p).is_some() && !is_job_file(p)).collect()).unwrap_or_default();
         specs.sort();
@@ -264,10 +438,15 @@ pub fn start(ctx: &Ctx, which: Option<&str>, again: bool) -> Result<Started> {
             runs.push(ran);
         }
     } else {
-        let t = template(store, &kind)?;
+        let t = t.expect("a template job has its template");
         let target = jf.target.clone().unwrap_or_default();
         let mut done: Vec<(String, Vec<ReadingReport>)> = Vec::new();
-        for step in &t.step {
+        for (i, step) in t.step.iter().enumerate() {
+            if CHANGES_CODE.contains(&step.kind.as_str()) {
+                // a step that changes code runs through code_passenger's line for it, then is counted;
+                // no such line exists yet, so the job is refused here rather than counted as if it ran
+                return Err(ReadingRefusal::NoWriterLine.refuse(format!("step {} {} ({}): no code_passenger line runs it yet", i + 1, step.name, step.kind)));
+            }
             let question = format!("{} — step {} of the {} job for {target}", t.summary, step.name, t.kind);
             let items = step.change_items.as_ref().map(|f| values(&done, f)).unwrap_or_default();
             let targets: Vec<String> = match (&step.for_each, &step.target) {
@@ -336,6 +515,9 @@ pub struct Closing {
     pub guidance: Option<String>,
     /// For triage: where each code is raised, the tests, the marks (mechanism / boundary / supersedes / owner).
     pub findings: Vec<String>,
+    /// Lines touched, per step that changed code and for the job, from its counts.
+    #[serde(default)]
+    pub lines_touched: Vec<Touched>,
 }
 
 pub const CLOSING_SCHEMA: &str = "custodian.job_closing.v1";
@@ -353,6 +535,17 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
     let id = jf.id.clone().ok_or_else(|| ReadingRefusal::JobState.refuse(format!("{} has no id: was it started?", running.display())))?;
     let journal = store.journal()?;
     let row = journal.job(&id)?;
+    // the closing count, when the job counts, then the lines touched per step and for the job
+    let jkind = jf.kind.clone().unwrap_or_else(|| "specs".into());
+    let t = if jkind == "specs" { None } else { template(store, &jkind).ok() };
+    let routes = count_routes(&jf, t.as_ref());
+    let mut count_said = Vec::new();
+    if !routes.is_empty() {
+        let in_job = InJob { id: id.clone(), readings: running.join("readings") };
+        let mut count_runs = Vec::new();
+        take_counts(ctx, &running, &in_job, "close", &routes, &mut count_said, &mut count_runs)?;
+    }
+    let lines_touched = lines_touched_of(&running, &taken(&running))?;
     let runs = journal.runs_of_job(&id)?;
     let level_floor = 2usize; // confidential in the shipped table; a registry's own table is read below
     let mut specs = Vec::new();
@@ -422,6 +615,7 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
         touched: touched.into_iter().collect(),
         guidance,
         findings,
+        lines_touched,
     };
     let json = serde_json::to_string_pretty(&closing)? + "\n";
     write_whole(&running.join("closing.json"), json.as_bytes())?;
@@ -456,11 +650,13 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
         millis: 0,
     };
     let (r, f) = keep(store, r)?;
-    let said = vec![
+    let mut said = count_said;
+    said.extend(closing.lines_touched.iter().map(|t| format!("lines touched: {} ({})", t.line, t.route)));
+    said.extend(vec![
         format!("job {id} closed: {} → {}", ctx.rel(&running), ctx.rel(&done)),
         format!("closing receipt: {}", ctx.rel(&done.join("closing.md"))),
         format!("journal: run #{} job-close, receipt {}", r.seq, ctx.rel(&f)),
-    ];
+    ]);
     Ok((closing, done, said))
 }
 
@@ -498,6 +694,12 @@ pub fn render_closing(c: &Closing) -> String {
     }
     if !any {
         s.push_str("\n");
+    }
+    if !c.lines_touched.is_empty() {
+        s.push_str("\n## lines touched\n\n");
+        for t in &c.lines_touched {
+            s.push_str(&format!("- {} ({}) · count diff `{}`\n", t.line, t.route, t.diff));
+        }
     }
     s.push_str(&format!("\n## tests run ({})\n\n", c.tests.len()));
     for t in &c.tests {
@@ -550,7 +752,7 @@ pub fn run_template(ctx: &Ctx, kind: &str, target: &str, again: bool) -> Result<
     let store = ctx.store()?;
     let name = format!("{kind}-{}", crate::runs::stamp());
     let dir = store.job_dir(JobState::Queued, &name)?;
-    let jf = JobFile { id: None, name: Some(name.clone()), kind: Some(kind.to_string()), target: Some(target.to_string()), origin: None };
+    let jf = JobFile { id: None, name: Some(name.clone()), kind: Some(kind.to_string()), target: Some(target.to_string()), origin: None, count: None, routes: Vec::new() };
     write_job_file(&dir, &jf)?;
     let started = start(ctx, Some(&name), again)?;
     let (closing, done, said) = close(ctx, &started.id)?;

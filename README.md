@@ -92,6 +92,7 @@ enum; a test holds the two equal.
 | `affected_tests` | from a change (files, a git ref's diff, or a job's touched items): the tests whose closure reaches what changed, and the cargo test lines that run exactly them |
 | `sensitivity` | items by their #[sensitivity] level, with owners, and every use of a more sensitive item from a less sensitive one |
 | `diagnostics` | every liaise code table (liaise_codes! and #[derive(LiaiseCodes)]): each code's meaning and declaration, and the sites that raise it; a code or a log's text as the target narrows it |
+| `count` | how much there is in a route (the workspace, a crate, a declared set, a module): files, lines, code, comments, blanks per language and per crate by tokei, and the share that is tests by klepto |
 | `bundle` | a crate, a declared set or a file as one annotated bundles file beside the reading, items at secret or above redacted |
 | `sweep` | a read-only walk of an undeclared tree (the one walk custodian makes): files by extension, crates, TOML directories, the routes to declare; never in a job |
 
@@ -118,6 +119,28 @@ entry = "id"                   # the field naming the entry each value sits in
 
 Both tables are generated from the enums (`cargo run --example vocabulary`),
 and a test fails when this README and the enums differ.
+
+## Counts
+
+`count` counts a route with tokei, as a library: files, lines, code,
+comments and blanks per language, per crate. tokei walks inside the route's
+own root (the workspace, a crate's directory) with the paths table's `ignore`
+set and the spec's excludes; a declared set and a module are the files they
+name. The share that is tests is klepto's, as the bundle filters read it:
+`tests/`, `benches/`, test-only modules and `#[cfg(test)]` items.
+
+A count's digest is over its counts sorted by crate then language, with no
+time inside, so the same tree gives the same digest; its header carries the
+index key and the git commit. `count::compare` says what moved between two
+counts, file by file (lines added and removed per crate and language, files
+added, removed and changed, the tests' share before and after), with its own
+digest. `count::history` lists a route's counts from the journal.
+
+A job whose template says `count = true` (triage and features do) is counted
+at open, after each step that changes code, and at close; its closing
+receipt lists the lines touched per step and for the job
+(`job: +6 −0 across 2 files in 2 crates`), and `jobs::lines_within` sums them
+over a set of jobs.
 
 ## Scope depth
 

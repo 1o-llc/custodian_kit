@@ -22,6 +22,9 @@ one klepto scan.
   reading's row alike. Its refusals are CUST0101-0107 in the one table.
 - Scope depth: how deep a dependency sits in a crate (item, function,
   module, file, crate) and what goes with it off, for `features` and `reach`.
+- `count`: a route counted by tokei, its tests' share by klepto, a digest
+  the same tree reproduces, `compare` and `history`, and lines touched in a
+  job's closing receipt per step and for the job.
 - Reading specs, job files and the paths table are 1o documents with shipped
   schemas, read by core-1o into the same form TOML reads into.
 

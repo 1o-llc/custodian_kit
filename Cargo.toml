@@ -50,6 +50,7 @@ uh-tom-mick = "0.1.1"
 bundles = { version = "0.2.3", path = "../bundles", default-features = false }
 big-bad-bool = "0.1.1"
 core-1o = "0.1.1"
+tokei = { version = "15.0.0", default-features = false }
 # context windows of secret items held redacted
 classified = "0.2.1"
 # level and boundary rules stated as constraints

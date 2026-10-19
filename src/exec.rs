@@ -131,6 +131,11 @@ pub fn git_diff_names(root: &Path, git_ref: &str) -> GitInRooted<Git> {
     Git::in_dir(root.as_os_str()).words(["diff", "--name-only", git_ref])
 }
 
+/// `git -C ROOT rev-parse HEAD`: the commit the tree is at.
+pub fn git_head(root: &Path) -> GitInRooted<Git> {
+    Git::in_dir(root.as_os_str()).words(["rev-parse", "HEAD"])
+}
+
 /// code_passenger's program.
 #[derive(CompositeShell, Debug, Clone, Copy, Default)]
 #[shell(program = "code-passenger")]

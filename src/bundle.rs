@@ -154,7 +154,7 @@ pub(crate) struct Written {
 
 /// Where a file sits in its package, as cargo lays a package out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Place {
+pub(crate) enum Place {
     Src,
     Tests,
     Benches,
@@ -421,7 +421,7 @@ fn held_items(f: &Facts) -> Result<HeldItems, Refusal> {
 
 /// Where `rel` sits in its package: by cargo's layout (`src/`, `tests/`,
 /// `benches/`, `examples/`) or as a declared target's own file.
-fn place_of(f: &Facts, rel: &str, file: &Path) -> Place {
+pub(crate) fn place_of(f: &Facts, rel: &str, file: &Path) -> Place {
     let Some(pkg) = f.package_of_rel(rel) else { return Place::Other };
     if let Some(info) = f.k.packages.get(&pkg.name) {
         if let Some(t) = info.targets.iter().find(|t| t.src_path == file) {
@@ -444,7 +444,7 @@ fn place_of(f: &Facts, rel: &str, file: &Path) -> Place {
 }
 
 /// `cfg` holds only under `test`.
-fn requires_test(cfg: &CfgPredicate) -> bool {
+pub(crate) fn requires_test(cfg: &CfgPredicate) -> bool {
     matches!(cfg.implies(&CfgPredicate::Key("test".into()), None), Implication::Always)
 }
 
@@ -463,7 +463,7 @@ fn extent_at(extents: &[(usize, usize)], line: usize) -> Option<(usize, usize)> 
 /// Every item of klepto's parse of a file, with its lines (its first
 /// attribute or doc line to its last token) and its own cfg; `visit`
 /// returns whether to go inside it (inline modules, impl and trait items).
-fn walk(items: &[syn::Item], visit: &mut dyn FnMut(usize, usize, &CfgPredicate) -> bool) {
+pub(crate) fn walk(items: &[syn::Item], visit: &mut dyn FnMut(usize, usize, &CfgPredicate) -> bool) {
     use syn::spanned::Spanned;
     fn lines(attrs: &[syn::Attribute], item: &dyn Spanned) -> (usize, usize) {
         let span = item.span();

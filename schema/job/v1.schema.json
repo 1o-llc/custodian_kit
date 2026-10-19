@@ -30,6 +30,14 @@
         "origin": {
           "type": "string",
           "description": "For an imported job: the digest of the bundle it came from."
+        },
+        "count": {
+          "type": "boolean",
+          "description": "Count the job's routes at open, after each step that changes code, and at close."
+        },
+        "routes": {
+          "type": "string",
+          "description": "A route counted (crate:<name>, decl:<name>, *); the template's count_route, else the workspace. Repeats: one value per line, in order."
         }
       }
     }

@@ -42,6 +42,7 @@
             "affected_tests",
             "sensitivity",
             "diagnostics",
+            "count",
             "bundle",
             "sweep"
           ],

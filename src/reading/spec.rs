@@ -85,6 +85,7 @@ vocabulary! {
         AffectedTests = "affected_tests" : "from a change (files, a git ref's diff, or a job's touched items): the tests whose closure reaches what changed, and the cargo test lines that run exactly them",
         Sensitivity = "sensitivity" : "items by their #[sensitivity] level, with owners, and every use of a more sensitive item from a less sensitive one",
         Diagnostics = "diagnostics" : "every liaise code table (liaise_codes! and #[derive(LiaiseCodes)]): each code's meaning and declaration, and the sites that raise it; a code or a log's text as the target narrows it",
+        Count = "count" : "how much there is in a route (the workspace, a crate, a declared set, a module): files, lines, code, comments, blanks per language and per crate by tokei, and the share that is tests by klepto",
         Bundle = "bundle" : "a crate, a declared set or a file as one annotated bundles file beside the reading, items at secret or above redacted",
         Sweep = "sweep" : "a read-only walk of an undeclared tree (the one walk custodian makes): files by extension, crates, TOML directories, the routes to declare; never in a job",
     }
@@ -131,6 +132,7 @@ impl ReadingKind {
             ReadingKind::AffectedTests => "test",
             ReadingKind::Sensitivity => "sensitive-item",
             ReadingKind::Diagnostics => "code",
+            ReadingKind::Count => "count-crate",
             ReadingKind::Bundle => "bundled-file",
             ReadingKind::Sweep => "swept",
         }

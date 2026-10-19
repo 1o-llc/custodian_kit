@@ -12,6 +12,7 @@ pub mod diag;
 pub mod facts;
 pub mod kinds;
 pub mod refusal;
+pub mod count;
 pub mod render;
 pub mod scope;
 pub mod spec;
@@ -65,6 +66,9 @@ pub struct ReadingReport {
     /// not part of the record, so not part of its digest.
     #[serde(skip)]
     pub artifact: Option<Vec<u8>>,
+    /// A `count` reading's count (`custodian.count.v1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<count::CountReport>,
 }
 
 /// What a kind found, before it becomes a report.
@@ -75,6 +79,8 @@ pub struct Answer {
     pub unresolved: Vec<CodeQueryResult>,
     /// The bytes a kind made (the `bundle` kind's bundle).
     pub artifact: Option<Vec<u8>>,
+    /// The `count` kind's count.
+    pub count: Option<count::CountReport>,
 }
 
 impl Answer {
@@ -161,6 +167,7 @@ pub fn read_facts(facts: &Facts, spec_path: &Path, spec: &ReadingSpec, stamp: &s
         index_key,
         items,
         artifact: answer.artifact,
+        count: answer.count,
     })
 }
 
@@ -222,6 +229,7 @@ fn read_sweep(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, ho
         index_key: None,
         items: Vec::new(),
         artifact: None,
+        count: None,
     })
 }
 

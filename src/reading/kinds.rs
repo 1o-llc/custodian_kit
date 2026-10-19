@@ -39,6 +39,7 @@ pub fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
         ReadingKind::AffectedTests => affected_tests(f, spec),
         ReadingKind::Sensitivity => sensitivity(f, spec),
         ReadingKind::Diagnostics => diagnostics(f, spec),
+        ReadingKind::Count => super::count::rows(f, spec),
         ReadingKind::Bundle => bundle_rows(f, spec),
         ReadingKind::Sweep => Err(ReadingRefusal::SpecInvalid.refuse("a sweep is read without a scan")),
     }
@@ -121,6 +122,11 @@ fn item_row(f: &Facts, kind: &str, id: &str, reason: &str, attrs: Vec<(&str, Str
 }
 
 /// A row with no source place (a crate, a binary, a key, a pair of crates).
+/// A row with no site, for kinds outside this file.
+pub(crate) fn named_row(kind: &str, label: &str, crate_name: Option<String>, reason: &str) -> CodeQueryResult {
+    named(kind, label.to_string(), crate_name, reason, vec![])
+}
+
 fn named(kind: &str, label: impl Into<String>, crate_name: Option<String>, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
     let label = label.into();
     CodeQueryResult {

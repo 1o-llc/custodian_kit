@@ -192,7 +192,7 @@ fn the_schemas_name_exactly_the_fields_of_the_rust_forms() {
     declared.sort();
     assert_eq!(have, declared);
 
-    let job = custodian_kit::jobs::JobFile { id: Some("1".into()), name: Some("n".into()), kind: Some("specs".into()), target: Some("t".into()), origin: Some("o".into()) };
+    let job = custodian_kit::jobs::JobFile { id: Some("1".into()), name: Some("n".into()), kind: Some("specs".into()), target: Some("t".into()), origin: Some("o".into()), count: Some(true), routes: vec!["*".into()] };
     let mut have = Vec::new();
     keys(&serde_json::to_value(&job).unwrap(), "", &mut have);
     let mut declared = Vec::new();
@@ -204,7 +204,7 @@ fn the_schemas_name_exactly_the_fields_of_the_rust_forms() {
     let mut declared = Vec::new();
     schema_keys(&Doc::Paths.schema()["properties"]["paths"], "", &mut declared);
     declared.sort();
-    assert_eq!(declared, vec!["decl", "path"]);
+    assert_eq!(declared, vec!["decl", "ignore", "path"]);
 }
 
 #[test]

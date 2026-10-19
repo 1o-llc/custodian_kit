@@ -19,6 +19,10 @@
         "path": {
           "type": "string",
           "description": "A raw path, relative to the root, a job may name as path:<raw>. Repeats: one value per line, in order."
+        },
+        "ignore": {
+          "type": "string",
+          "description": "A path no count walks into, in tokei's (gitignore) syntax, on top of target, .git, .custodian and .claude. Repeats: one value per line, in order."
         }
       }
     }
