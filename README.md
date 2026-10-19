@@ -38,7 +38,7 @@ workspace's is refused with `CUST0002`; open one for it with
 
 ## Reading kinds
 
-| kind | what it reads |
+| kind | what it means |
 |---|---|
 | `use_sites` | every place a path, fn, type, const or macro is used, as klepto resolves it, with its definitions |
 | `readers_of_env` | every read of an env key (a literal or a constant holding it) by a reader fn or macro, the places that only name it, and the declarations of it |
@@ -62,7 +62,7 @@ workspace's is refused with `CUST0002`; open one for it with
 A `[[declared_in]]` table reads TOML files at a key path. Its `role` says what
 the value is, so the kinds that join code to declarations know where to look.
 
-| role | what it reads |
+| role | what it means |
 |---|---|
 | `name` | a name, matched against the target as it is |
 | `binary` | a binary an entry runs; `reach` and `sockets` find entries by it |
@@ -80,6 +80,25 @@ entry = "id"                   # the field naming the entry each value sits in
 
 Both tables are generated from the enums (`cargo run --example vocabulary`),
 and a test fails when this README and the enums differ.
+
+## Scope depth
+
+`features` judges each dependency, and `reach` reads each change, with the
+same scope: the crate's items that use it directly (klepto's dependency use
+sites), every item that reaches those, and every item nested in one, to a
+fixpoint. Each file and module is wholly behind it or partly; the units are
+the widest wholes, and the depth is the widest unit. The *unavailable list*
+says, with it off, which items go, which files and modules are wholly gated,
+and which callers in other crates lose which items: the lines a gate's header
+carries (`Unavailable::header`).
+
+| depth | what it means |
+|---|---|
+| `item` | one item (a type, a const, an impl) uses it; the rest of its module does not |
+| `function` | one function uses it, or calls one that does; the rest of its module does not |
+| `module` | every item of an inline module is behind it; the file holding the module is not |
+| `file` | every item of a whole file is behind it: the `mod` line itself can be gated |
+| `crate` | every item of the crate is behind it: turning it off leaves nothing |
 
 ## Routes
 

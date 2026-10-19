@@ -29,7 +29,7 @@ macro_rules! vocabulary {
 
             /// The README's table of this vocabulary, generated from the enum.
             pub fn doc_table() -> String {
-                let mut s = format!("| {} | what it reads |\n|---|---|\n", $what);
+                let mut s = format!("| {} | what it means |\n|---|---|\n", $what);
                 for v in Self::ALL {
                     s.push_str(&format!("| `{}` | {} |\n", v.as_str(), v.doc()));
                 }
@@ -98,6 +98,18 @@ vocabulary! {
         Env = "env" : "an env key an entry sets; `readers_of_env` joins reads to it",
         Socket = "socket" : "a socket path an entry binds or names; `sockets` reads it",
         SocketEnv = "socket_env" : "the env key that carries a socket path; `sockets` follows its readers",
+    }
+}
+
+vocabulary! {
+    /// How deep a dependency (or a set of items) sits in a crate: the widest
+    /// unit wholly behind it. Narrowest first, so the widest is the greatest.
+    Depth, "depth" {
+        Item = "item" : "one item (a type, a const, an impl) uses it; the rest of its module does not",
+        Function = "function" : "one function uses it, or calls one that does; the rest of its module does not",
+        Module = "module" : "every item of an inline module is behind it; the file holding the module is not",
+        File = "file" : "every item of a whole file is behind it: the `mod` line itself can be gated",
+        Crate = "crate" : "every item of the crate is behind it: turning it off leaves nothing",
     }
 }
 

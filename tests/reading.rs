@@ -213,6 +213,7 @@ fn the_vocabulary_table_in_the_readme_is_the_enum() {
     let readme = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md")).unwrap();
     assert!(readme.contains(&ReadingKind::doc_table()), "README.md must carry ReadingKind::doc_table()");
     assert!(readme.contains(&api::DeclaredRole::doc_table()), "README.md must carry DeclaredRole::doc_table()");
+    assert!(readme.contains(&api::Depth::doc_table()), "README.md must carry Depth::doc_table()");
 }
 
 #[test]
@@ -285,4 +286,62 @@ fn a_job_bundle_holds_a_secret_window_as_the_marker_and_unbundles() {
     std::fs::write(&file, &bytes).unwrap();
     bundles::unbundle_files(&file, &dir, "#").unwrap();
     assert_eq!(std::fs::read_to_string(dir.join("job/job.toml")).unwrap(), "name = \"j\"\n");
+}
+
+fn scope_of(dep: &str) -> custodian_kit::reading::scope::Unavailable {
+    let ws = Workspace::open(&fixture()).unwrap();
+    let j = custodian_kit::features::judge(ws_facts(&ws), &custodian_kit::features::Thresholds::parse(custodian_kit::features::SHIPPED_THRESHOLDS).unwrap());
+    j.into_iter().find(|j| j.package == "layered" && j.dependency == dep).unwrap_or_else(|| panic!("layered/{dep} judged")).unavailable
+}
+
+fn ws_facts(ws: &Workspace) -> &custodian_kit::reading::facts::Facts {
+    ws.facts()
+}
+
+#[test]
+fn scope_depth_of_a_dependency_used_in_one_function() {
+    use custodian_kit::api::Depth;
+    let u = scope_of("helper_a");
+    assert_eq!(u.depth, Some(Depth::Function));
+    assert_eq!(u.direct, vec!["layered::uses_a"]);
+    assert_eq!(u.items, vec!["layered::calls_uses_a", "layered::uses_a"]);
+    assert!(u.units.iter().all(|x| x.depth == Depth::Function));
+    assert!(u.files.iter().all(|p| !p.wholly), "lib.rs keeps plain and the rest");
+    // the caller in another crate loses uses_a; the bystander loses nothing
+    assert_eq!(u.callers_elsewhere.len(), 1);
+    assert_eq!(u.callers_elsewhere[0].caller, "layered_user::user");
+    assert_eq!(u.callers_elsewhere[0].loses, vec!["layered::uses_a"]);
+    assert!(u.header().iter().any(|l| l.contains("layered_user::user (layered_user) loses layered::uses_a")), "{:?}", u.header());
+}
+
+#[test]
+fn scope_depth_of_a_dependency_used_everywhere_in_a_module() {
+    use custodian_kit::api::Depth;
+    let u = scope_of("helper_b");
+    assert_eq!(u.depth, Some(Depth::Module));
+    assert_eq!(u.units.len(), 1, "{:?}", u.units);
+    assert_eq!((u.units[0].name.as_str(), u.units[0].items), ("layered::wide", 2));
+    assert!(u.modules.iter().any(|m| m.name == "layered::wide" && m.wholly));
+    assert!(u.files.iter().all(|p| !p.wholly));
+}
+
+#[test]
+fn scope_depth_of_a_dependency_used_in_a_whole_file() {
+    use custodian_kit::api::Depth;
+    let u = scope_of("helper_c");
+    assert_eq!(u.depth, Some(Depth::File));
+    assert_eq!(u.units.len(), 1, "{:?}", u.units);
+    assert_eq!(u.units[0].name, "crates/layered/src/whole.rs");
+    assert!(u.header().iter().any(|l| l.contains("wholly gated: crates/layered/src/whole.rs")));
+}
+
+#[test]
+fn reach_of_a_crate_says_how_deep_it_sits_in_each_user() {
+    let r = read("reach", "helper_c", "");
+    let scope = rows(&r, "scope").into_iter().find(|x| x.crate_name.as_deref() == Some("layered")).expect("layered's scope");
+    assert_eq!(scope.attributes.get("depth").map(String::as_str), Some("file"));
+    assert_eq!(count(&r, "files wholly behind it"), 1);
+    let r = read("reach", "layered::uses_a", "");
+    assert_eq!(count(&r, "callers in other crates losing items"), 1);
+    assert!(rows(&r, "loses").iter().any(|x| x.label == "layered_user::user"));
 }

@@ -13,6 +13,7 @@ pub mod facts;
 pub mod kinds;
 pub mod refusal;
 pub mod render;
+pub mod scope;
 pub mod spec;
 
 use crate::{CodeGraphSummary, CodeQueryReport, CodeQueryResult, Result};

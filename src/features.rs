@@ -64,23 +64,8 @@ pub struct Judged {
     /// The public items that reach the dependency (at most 12).
     pub examples: Vec<String>,
     pub why: String,
-}
-
-/// The crate's items that reference the dependency's nodes, and those that reach them inside the crate.
-fn reaching(f: &Facts, package: &str, dep: &str) -> BTreeSet<String> {
-    let g = &f.k.graph;
-    let dep_nodes: Vec<&String> = g.nodes.iter().filter(|(_, n)| (n.kind == NodeKind::External && n.module == dep) || n.package.as_deref() == Some(dep)).map(|(id, _)| id).collect();
-    let mut direct: BTreeSet<String> = BTreeSet::new();
-    for d in dep_nodes {
-        for r in f.referrers_of(d) {
-            if f.item(r).is_some_and(|i| i.package == package) {
-                direct.insert(r.clone());
-            }
-        }
-    }
-    let mut all: BTreeSet<String> = f.closure_of(direct.iter().map(String::as_str)).into_iter().filter(|id| f.item(id).is_some_and(|i| i.package == package)).collect();
-    all.extend(direct);
-    all
+    /// With the dependency off: what goes, how deep it sits, who elsewhere loses what.
+    pub unavailable: crate::reading::scope::Unavailable,
 }
 
 pub fn judge(f: &Facts, t: &Thresholds) -> Vec<Judged> {
@@ -89,7 +74,8 @@ pub fn judge(f: &Facts, t: &Thresholds) -> Vec<Judged> {
         let public: BTreeSet<String> = f.k.items.iter().filter(|d| &d.package == pkg && d.is_public && !matches!(d.kind, NodeKind::Module | NodeKind::Impl)).map(|d| d.id.clone()).collect();
         let users: Vec<String> = f.direct_dependents(pkg).into_iter().filter(|(_, l)| *l != Link::Dev).map(|(d, _)| d).collect();
         for d in model.dependencies.iter().filter(|d| d.kind == DepKind::Normal && !d.optional) {
-            let reach = reaching(f, pkg, &d.name);
+            let scope = crate::reading::scope::of_dependency(f, pkg, &d.name);
+            let reach: BTreeSet<String> = scope.items.iter().cloned().collect();
             let public_reaching: BTreeSet<&String> = public.intersection(&reach).collect();
             if public_reaching.is_empty() && reach.is_empty() {
                 continue;
@@ -120,6 +106,7 @@ pub fn judge(f: &Facts, t: &Thresholds) -> Vec<Judged> {
                 dependents_using_those: using_those,
                 examples: public_reaching.iter().take(12).map(|s| (*s).clone()).collect(),
                 why,
+                unavailable: scope,
             });
         }
     }
@@ -172,6 +159,9 @@ fn page(judged: &[Judged], spec_file: Option<&str>) -> String {
                 j.examples.join(", "),
                 if j.dependents_using_those.is_empty() { "none".to_string() } else { j.dependents_using_those.join(", ") }
             ));
+            for line in j.unavailable.header() {
+                s.push_str(&format!("  - {line}\n"));
+            }
         }
     }
     s
@@ -210,6 +200,14 @@ pub fn run(ctx: &Ctx, apply: bool) -> Result<Featured> {
             write_whole(&dir.join("latest.json"), (serde_json::to_string_pretty(&judged)? + "\n").as_bytes())?;
             said.push(format!("reading: {}", ctx.rel(&pf)));
             said.push(format!("code_passenger spec: {}", ctx.rel(&sf)));
+            // the lines each eligible dependency's gate header carries
+            let headers: BTreeMap<String, BTreeMap<String, Vec<String>>> = judged.iter().filter(|j| j.eligible).fold(BTreeMap::new(), |mut m, j| {
+                m.entry(j.package.clone()).or_default().insert(j.dependency.clone(), j.unavailable.header());
+                m
+            });
+            let hf = store.path(&named::PLAN, &[("name", "features-unavailable")])?;
+            write_whole(&hf, toml::to_string(&headers).map_err(|e| ReadingRefusal::Write.refuse(e))?.as_bytes())?;
+            said.push(format!("gate headers (unavailable with each off): {}", ctx.rel(&hf)));
             (Some(pf), Some(sf))
         }
         None => {

@@ -10,7 +10,7 @@ use super::declared::{read_declared, Declared};
 use super::diag;
 use super::facts::{Facts, Link};
 use super::refusal::ReadingRefusal;
-use super::spec::{matches_target, DeclaredRole, ReadingKind, ReadingSpec};
+use super::spec::{matches_target, DeclaredRole, Depth, ReadingKind, ReadingSpec};
 use super::Answer;
 use crate::{
     path_names_item, run_code_query, stable_id, CodeGraph, CodeGraphSummary, CodeQueryResult, CrateNode, Result, UseSiteKind, UseSiteNode,
@@ -806,6 +806,8 @@ fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     // a changed crate reaches every binary linking it; changed items reach the
     // binaries whose own crate root holds an item that reaches them
     let mut item_bins: Option<BTreeSet<String>> = None;
+    // with the change gone: how deep it sits in each crate using it
+    let mut scopes: Vec<crate::reading::scope::Unavailable> = Vec::new();
     let (crates, items): (BTreeSet<String>, BTreeSet<String>) = match changed(f, target)? {
         Changed::Crate(c) => {
             let items: BTreeSet<String> = f.k.items.iter().filter(|d| d.package == c).map(|d| d.id.clone()).collect();
@@ -816,6 +818,9 @@ fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
                 let how = if direct.contains(&d) { "direct" } else { "transitive" };
                 rows.push(named("reach-crate", d.clone(), Some(d.clone()), "links the changed crate", vec![("how", how.into()), ("dir", f.packages[&d].dir.clone())]));
                 crates.insert(d);
+            }
+            for d in &direct {
+                scopes.push(crate::reading::scope::of_dependency(f, d, &c));
             }
             for d in f.direct_dependents(&c).into_iter().filter(|(d, l)| *l == Link::Dev && !crates.contains(d)).map(|(d, _)| d) {
                 rows.push(named("reach-test-only", d.clone(), Some(d.clone()), "a dev-dependency: its tests build against the changed crate", vec![("dir", f.packages[&d].dir.clone())]));
@@ -834,6 +839,15 @@ fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
             crates.extend(reached.iter().filter_map(|id| f.item(id).map(|d| d.package.clone())));
             for c in &crates {
                 rows.push(named("reach-crate", c.clone(), Some(c.clone()), "holds the change or an item reaching it", vec![("dir", f.packages.get(c).map(|p| p.dir.clone()).unwrap_or_default())]));
+            }
+            let mut by_pkg: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            for id in &seeds {
+                if let Some(d) = f.item(id) {
+                    by_pkg.entry(d.package.clone()).or_default().insert(id.clone());
+                }
+            }
+            for (p, ids) in &by_pkg {
+                scopes.push(crate::reading::scope::unavailable(f, p, target, ids));
             }
             let mut all = seeds;
             all.extend(reached);
@@ -861,6 +875,9 @@ fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     for (code, msg) in &codes {
         rows.push(named("reach-code", code.clone(), None, "a liaise code the reached items raise", vec![("message", msg.clone())]));
     }
+    for u in &scopes {
+        rows.extend(scope_rows(u));
+    }
     let entry_names: BTreeSet<(&str, &str)> = entries.iter().map(|d| (d.file.as_str(), d.entry.as_str())).collect();
     let mut ans = Answer::default();
     ans.count("items touched", items.len());
@@ -872,8 +889,31 @@ fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     ans.count("items at level confidential or above", sensitive.len());
     ans.count("liaise codes raised there", codes.len());
     ans.count("test-only dependents", rows.iter().filter(|r| r.kind == "reach-test-only").count());
+    ans.count("items unavailable with it off", scopes.iter().map(|u| u.items.len()).sum());
+    ans.count("files wholly behind it", scopes.iter().map(|u| u.units.iter().filter(|x| x.depth == Depth::File).count()).sum());
+    ans.count("callers in other crates losing items", scopes.iter().map(|u| u.callers_elsewhere.len()).sum());
     ans.rows = rows;
     Ok(ans)
+}
+
+/// A scope as rows: one `scope` row per crate (its depth), one
+/// `unavailable-unit` per unit, one `loses` per caller elsewhere.
+pub fn scope_rows(u: &crate::reading::scope::Unavailable) -> Vec<CodeQueryResult> {
+    let depth = u.depth.map(Depth::as_str).unwrap_or("none").to_string();
+    let mut rows = vec![named(
+        "scope",
+        format!("{} without {}", u.package, u.cause),
+        Some(u.package.clone()),
+        "how deep it sits, and what goes with it off",
+        vec![("depth", depth), ("cause", u.cause.clone()), ("direct", u.direct.join(", ")), ("unavailable", u.items.len().to_string()), ("header", u.header().join("\n"))],
+    )];
+    for x in &u.units {
+        rows.push(named("unavailable-unit", x.name.clone(), Some(u.package.clone()), "unavailable with it off", vec![("depth", x.depth.as_str().to_string()), ("items", x.items.to_string()), ("cause", u.cause.clone())]));
+    }
+    for l in &u.callers_elsewhere {
+        rows.push(named("loses", l.caller.clone(), Some(l.package.clone()), "a caller in another crate that loses these", vec![("loses", l.loses.join(", ")), ("cause", u.cause.clone())]));
+    }
+    rows
 }
 
 // ---------------------------------------------------------------------------

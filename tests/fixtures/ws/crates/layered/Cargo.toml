@@ -1,0 +1,9 @@
+[package]
+name = "layered"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+helper_a = { path = "../helper_a" }
+helper_b = { path = "../helper_b" }
+helper_c = { path = "../helper_c" }

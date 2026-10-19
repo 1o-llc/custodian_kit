@@ -1,0 +1,7 @@
+[package]
+name = "layered_user"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+layered = { path = "../layered" }

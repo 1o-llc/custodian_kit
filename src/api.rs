@@ -19,7 +19,8 @@ use std::path::{Path, PathBuf};
 pub use crate::bundle::{bundle, Bundle, FiltersWord};
 pub use crate::paths::{PathsTable, Resolving, Route};
 pub use crate::reading::refusal::ReadingRefusal as RefusalCode;
-pub use crate::reading::spec::{Change, DeclaredRole, DeclaredSource, DuplicateOptions, ReadingKind, ReadingSpec, Readers, Scope};
+pub use crate::reading::scope::Unavailable;
+pub use crate::reading::spec::{BundleOptions, Change, DeclaredRole, DeclaredSource, Depth, DuplicateOptions, ReadingKind, ReadingSpec, Readers, Scope};
 pub use crate::reading::{Count, ReadingReport};
 pub use crate::store::{Receipt, RECEIPT_SCHEMA};
 pub use crate::CodeQueryResult as Row;
@@ -97,7 +98,8 @@ impl Workspace {
         &self.facts.paths
     }
 
-    pub(crate) fn facts(&self) -> &Facts {
+    /// The facts the readings answer from.
+    pub fn facts(&self) -> &Facts {
         &self.facts
     }
 }
