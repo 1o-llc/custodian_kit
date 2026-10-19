@@ -89,7 +89,11 @@ pub struct Plan {
     pub intent: String,
     pub utc: String,
     pub words: Vec<String>,
+    /// The first [`KEPT`] candidates, in rank order.
     pub candidates: Vec<Candidate>,
+    /// How many candidates the scan found (the plan keeps the first [`KEPT`]).
+    #[serde(default)]
+    pub candidates_found: usize,
     pub reuse: Vec<Reuse>,
     /// Words nothing in the scan names: what may need making.
     pub new: Vec<String>,
@@ -217,6 +221,10 @@ pub fn investigate(f: &crate::reading::facts::Facts, words: &[String]) -> (Vec<C
     let new: Vec<String> = words.iter().filter(|w| !named.contains(w)).cloned().collect();
     (candidates, reuse, new)
 }
+
+/// How many candidates a plan keeps, in rank order: the rest are counted, not listed (a word as common as
+/// `record` names thousands of items in a large workspace).
+pub const KEPT: usize = 25;
 
 /// How many candidates get an impact reading.
 pub const READ: usize = 3;
@@ -354,7 +362,8 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
         intent: intent.into(),
         utc: crate::runs::now_utc(),
         words,
-        candidates,
+        candidates_found: candidates.len(),
+        candidates: candidates.into_iter().take(KEPT).collect(),
         reuse,
         new,
         impacts,
@@ -462,6 +471,9 @@ pub fn markdown(p: &Plan) -> String {
     s.push_str("\n## where the work is\n\n");
     for c in &p.candidates {
         s.push_str(&format!("- {} ({}) names {}{}\n", c.target, c.kind, c.words.join(", "), c.file.as_ref().map(|f| format!(" · `{f}`")).unwrap_or_default()));
+    }
+    if p.candidates_found > p.candidates.len() {
+        s.push_str(&format!("- and {} more ranked below these (counted, not kept)\n", p.candidates_found - p.candidates.len()));
     }
     if !p.reuse.is_empty() {
         s.push_str("\n## to reuse\n\n");
