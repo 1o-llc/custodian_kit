@@ -223,9 +223,101 @@ Two runs with the same `spec_hash` and `code_digest` are the same search: the
 second reuses the first's reading and says so. Every digest is
 `stable_digest`'s sha256 over a declared canonical form, written `sha256:<hex>`.
 
+## Change specs and the preflight
+
+A change spec (1o modifier `change`, `v1.<name>.1o.change`, or its TOML twin,
+in `data/specs/changes/`) asks for one operation on one target, with its
+objective, boundaries (the files it may write), the call sites a signature
+change passes, the questions it leaves, and whether existing uses must keep
+compiling (`compatibility`: `preserve` or `break`). `change::ChangeSpec`
+reads both forms; `digest()` is the stable_digest the preflight and the
+transform are bound to.
+
+| operation | what it does |
+|---|---|
+| `make_struct` | a new struct in a module (target: crate:<name> or crate:<name>/src/<file>.rs): name, fields with types and visibility, derives, attributes, docs |
+| `make_enum` | a new enum in a module: name, variants (unit, tuple or named fields, discriminants), derives, attributes, docs |
+| `make_impl` | a new inherent impl block for a type (target: the type), with its functions |
+| `add_method` | a function added to a type's impl (target: the type): its signature and body, or a toolkit method generator |
+| `make_fn` | a free function in a module: its signature and body |
+| `add_field` | a field added to a struct (target: the struct); with a default, every struct literal gets it too |
+| `add_variant` | a variant added to an enum (target: the enum); the matches without a catch-all arm are listed, never edited |
+| `add_derive` | derives added to a type (target: the type), merged into its #[derive(..)] |
+| `add_attribute` | one attribute line placed on an item (target: the item) |
+| `add_module` | a new module: its own file and its `mod` line in the parent (target: the parent route) |
+| `add_dependency` | a dependency line in a crate's Cargo.toml (target: crate:<name>) |
+| `add_test` | a test function (target: the function it proves): in the file's tests module, its body from toolkit pieces |
+| `add_constructor` | a constructor for a type (target: the type): `Self { field: param, .. }`, or a toolkit constructor generator |
+| `add_trait_impl` | `impl Trait for Type` (target: the type): a toolkit impl generator, or the trait's functions |
+| `change_signature` | a function's signature changed (target: the function): a new parameter with the expression its call sites pass, or a new name |
+| `rename` | an item renamed (target: the item) at its declaration and every use klepto resolves to it |
+| `move` | an item moved to another module (target: the item, `to`: the module route), re-exported where it was so its paths still resolve |
+| `extract` | items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were |
+| `gate` | an item put behind a crate feature the crate declares (target: the item, `feature`) |
+| `anchor` | a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name) |
+
+A function body is never free text the tool trusts. It is a list of pieces,
+each one of simple_impl 0.1.11's toolkit macros (123 of them, the table is
+`change::PIECES` and a test holds it equal to the published registry), or
+`let`, `value`, or `raw`. A `raw` piece is allowed and the preflight flags it.
+A whole function can come from a toolkit generator instead.
+
+`preflight::run_preflight` decides a change spec over the code as it is,
+before anything is written: where it lands (`change::landing`), its impact
+(the `impact` reading), its preconditions (the target resolves, the name is
+free, no TODO is left in the spec), the files it would write against the
+files it may write (one outside is a scope expansion asked for, never
+taken), and the decisions it leaves open. The answer is a big-bad-bool word
+whose flaga rules authorize it or name what is missing. A bounded job needs
+its target and its outcome known. `preflight::gate` lets a code-changing step
+run only on a preflight of this spec's digest over this code's digest.
+
+## Decisions, plans, linkage
+
+A question is asked once. `questions::ask` writes it as a task_history
+`problem` record (its id the digest of the question), `questions::answer` as
+a `solution` record with the same id, the answer and the reason, and
+`questions::open` leaves out any question answered in any task history of
+the project.
+
+`plan::run_plan` reads an intent against the code: the candidates where the
+work is, what can be reused, what is new, the top candidates' impact and the
+cost, alternatives only where the facts give one, the decisions asked
+together, and the steps. `plan::approve` writes a step as a change spec,
+with TODO placeholders the preflight refuses until they are filled in.
+
+A linkage record says why declarations are bound together. Each bind is
+resolved when it is recorded and at every check: `holding`, `review` (a
+bound file changed since) or `stale` (a bind no longer resolves). A
+`// linkage: <name>` comment above an item is an anchor; one no record backs
+is a finding.
+
+| kind | what it records |
+|---|---|
+| `responsibility` | a module uses another crate or module because that one owns the responsibility |
+| `invariant` | an implementation depends on an invariant another declaration keeps |
+| `connected` | two types are connected for an architectural reason |
+| `compatibility` | a feature or a shape exists to satisfy a compatibility requirement |
+| `synchronized` | the declarations must stay synchronized with each other |
+| `guarded` | a declaration must not be changed without considering the others |
+| `semantics` | a dependency must not be replaced casually: its semantics are required |
+
+## Bounded and unbounded jobs
+
+`jobs::JobMode`: a bounded job's touched Rust and TOML lines must each be
+covered by one of its transform records at close, else the close is refused
+(CUST0031) and the result is `rejected`; an unbounded job is help and nothing
+is refused. Every job records at open whether its target is known (it
+resolves) and whether its outcome is known (its `verify` lines:
+`test:<name>`, `reading:<spec>`, `check:<which>`), and the closing receipt
+records the receipt at which each became true. `accepted` needs every verify
+line satisfied by the job's own runs; with none the result is `pending`.
+The task states (`tasks::TaskState`: proposed, ready, running, blocked,
+paused, verifying, completed, failed) are derived from the records.
+
 ## Refusals
 
-A refusal is a liaise code (`CUST0001`…`CUST0028`, `ReadingRefusal`) and one
+A refusal is a liaise code (`CUST0001`…`CUST0039`, `ReadingRefusal`) and one
 sentence. `api::Refusal` carries both.
 
 ## Releasing
@@ -238,7 +330,8 @@ through trusted publishing; a version already on crates.io, or an entry still ma
 
 Developed and published by James Hunt. The repository is held by the 1o organization
 (https://github.com/1o-llc). Assignment of the copyright to 1o is pending documentation. The license texts
-(LICENSE-MIT, LICENSE-APACHE) are left as they were found.
+(LICENSE-MIT, LICENSE-APACHE) are left as they were found. Every file new in 0.2.0 carries the notice
+Copyright © 2026 1o. All rights reserved.
 
 ## License
 
