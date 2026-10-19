@@ -402,7 +402,7 @@ fn env_reads(f: &Facts, spec: &ReadingSpec, target: &str, prefix: &str) -> EnvRe
     let mut key_consts: BTreeMap<String, String> = BTreeMap::new();
     for l in &f.k.literals {
         let (Some(item), None, None) = (&l.enclosing_item, &l.arg_of, &l.in_macro) else { continue };
-        if !matches_target(target, &l.value) || !is_const_item(f, item) {
+        if !is_env_key(target, &l.value) || !is_const_item(f, item) {
             continue;
         }
         let Some(line) = l.location.line else { continue };
@@ -453,7 +453,7 @@ fn env_reads(f: &Facts, spec: &ReadingSpec, target: &str, prefix: &str) -> EnvRe
     };
     for l in &f.k.literals {
         let initialises_const = l.arg_of.is_none() && l.in_macro.is_none() && l.enclosing_item.as_deref().is_some_and(|i| is_const_item(f, i));
-        if initialises_const || !matches_target(target, &l.value) {
+        if initialises_const || !is_env_key(target, &l.value) {
             continue;
         }
         decide(&mut out, l.value.clone(), "literal".into(), &l.location, l.enclosing_item.as_deref(), l.arg_of.as_ref(), l.in_macro.as_deref());
@@ -898,6 +898,12 @@ fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
 
 /// A scope as rows: one `scope` row per crate (its depth), one
 /// `unavailable-unit` per unit, one `loses` per caller elsewhere.
+/// A literal that is an env key the target names: the target matches it and
+/// it is spelled as a key (letters, digits, `_`; not a sentence or `K=V`).
+fn is_env_key(target: &str, value: &str) -> bool {
+    matches_target(target, value) && !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !value.starts_with(|c: char| c.is_ascii_digit())
+}
+
 pub fn scope_rows(u: &crate::reading::scope::Unavailable) -> Vec<CodeQueryResult> {
     let depth = u.depth.map(Depth::as_str).unwrap_or("none").to_string();
     let mut rows = vec![named(

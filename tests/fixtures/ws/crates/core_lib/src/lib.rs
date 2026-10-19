@@ -81,3 +81,8 @@ mod tests {
         assert_eq!(Config::new("a").name, "a");
     }
 }
+
+/// A sentence naming a key is not a key.
+pub fn note() -> &'static str {
+    "FIX_TOKEN=set in tests"
+}
