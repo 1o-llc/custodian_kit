@@ -1,0 +1,1295 @@
+//! One function per reading kind, each answering from `Facts` into
+//! code_passenger.query.v1 result rows. use_sites goes through the kit's own
+//! query engine (`run_code_query` with `--kind use-site --item`) over a code
+//! graph built from klepto's resolved occurrences; the other kinds have no
+//! counterpart there and write their rows directly, in the same shape. A row
+//! that sits in an item carries the item's `#[sensitivity]` and `#[owner]`
+//! when it has them.
+
+use super::declared::{read_declared, Declared};
+use super::diag;
+use super::facts::{Facts, Link};
+use super::refusal::ReadingRefusal;
+use super::spec::{matches_target, DeclaredRole, ReadingKind, ReadingSpec};
+use super::Answer;
+use crate::{
+    path_names_item, run_code_query, stable_id, CodeGraph, CodeGraphSummary, CodeQueryResult, CrateNode, Result, UseSiteKind, UseSiteNode,
+};
+use klepto::graph::NodeKind;
+use klepto::{MiningOptions, PathRole, Resolution, SHAPE_LEVELS};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::Path;
+
+/// Set (by `--reveal`) for a reading line to write a secret item's lines as they are.
+pub const REVEAL_ENV: &str = "CUSTODIAN_REVEAL";
+
+pub fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    match spec.kind {
+        ReadingKind::UseSites => use_sites(f, spec),
+        ReadingKind::ReadersOfEnv => readers_of_env(f, spec),
+        ReadingKind::Duplicates => duplicates(f, spec),
+        ReadingKind::Dependents => dependents(f, spec),
+        ReadingKind::DeclaredIn => declared_in(f, spec),
+        ReadingKind::Sockets => sockets(f, spec),
+        ReadingKind::Reach => reach(f, spec),
+        ReadingKind::Constructs => constructs(f, spec),
+        ReadingKind::MatchesOn => matches_on(f, spec),
+        ReadingKind::PublicApi => public_api(f, spec),
+        ReadingKind::TestsCovering => tests_covering(f, spec),
+        ReadingKind::AffectedTests => affected_tests(f, spec),
+        ReadingKind::Sensitivity => sensitivity(f, spec),
+        ReadingKind::Diagnostics => diagnostics(f, spec),
+        ReadingKind::Bundle => bundle_rows(f, spec),
+        ReadingKind::Sweep => Err(ReadingRefusal::SpecInvalid.refuse("a sweep is read without a scan")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// rows
+
+/// A row at a place in the source, with its crate, the line as context, and
+/// the enclosing item's marks.
+#[allow(clippy::too_many_arguments)]
+fn site(f: &Facts, kind: &str, label: impl Into<String>, file: &Path, line: u32, col: Option<u32>, item: Option<&str>, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
+    let label = label.into();
+    let rel = f.rel(file);
+    let mut a = BTreeMap::new();
+    a.insert("context".to_string(), f.context(file, line));
+    if let Some(item) = item {
+        a.insert("item".to_string(), item.to_string());
+        if let Some(m) = f.marks_of(item) {
+            if let Some(s) = &m.sensitivity {
+                a.insert("sensitivity".to_string(), s.clone());
+                // a secret item's line is held through classified, written redacted unless revealed
+                if crate::job_bundle::HELD.contains(&s.as_str()) {
+                    let held = classified::ClassifiedString::try_new(f.context(file, line), 1 << 16).ok();
+                    let shown = match (&held, std::env::var_os(REVEAL_ENV).is_some()) {
+                        (Some(h), true) => h.expose(|t| t.to_string()),
+                        _ => format!("[REDACTED: a line of an item at {s}; --reveal shows it]"),
+                    };
+                    a.insert("context".to_string(), shown);
+                }
+            }
+            if let Some(o) = &m.owner {
+                a.insert("owner".to_string(), o.clone());
+            }
+            if let Some(mech) = &m.mechanism {
+                a.insert("mechanism".to_string(), mech.clone());
+            }
+            if let Some(b) = &m.boundary {
+                a.insert("boundary".to_string(), b.join(", "));
+            }
+            if let Some(sup) = &m.supersedes {
+                a.insert("supersedes".to_string(), sup.clone());
+            }
+        }
+    }
+    for (k, v) in attrs {
+        a.insert(k.to_string(), v);
+    }
+    CodeQueryResult {
+        id: stable_id(kind, &format!("{rel}:{line}:{}:{label}", col.unwrap_or(0))),
+        kind: kind.to_string(),
+        label,
+        crate_name: f.package_of(file).map(str::to_string),
+        path: Some(rel),
+        line: Some(line),
+        column: col,
+        score_reason: vec![reason.to_string()],
+        attributes: a,
+    }
+}
+
+/// A row at an item's own place.
+fn item_row(f: &Facts, kind: &str, id: &str, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
+    match f.item(id).and_then(|d| Some((d, d.location.line?))) {
+        Some((d, line)) => site(f, kind, id, &d.location.path, line, d.location.column, Some(id), reason, attrs),
+        None => {
+            let mut r = named(kind, id, None, reason, attrs);
+            if let Some(m) = f.marks_of(id) {
+                if let Some(s) = &m.sensitivity {
+                    r.attributes.insert("sensitivity".to_string(), s.clone());
+                }
+            }
+            r
+        }
+    }
+}
+
+/// A row with no source place (a crate, a binary, a key, a pair of crates).
+fn named(kind: &str, label: impl Into<String>, crate_name: Option<String>, reason: &str, attrs: Vec<(&str, String)>) -> CodeQueryResult {
+    let label = label.into();
+    CodeQueryResult {
+        id: stable_id(kind, &label),
+        kind: kind.to_string(),
+        label,
+        crate_name,
+        path: None,
+        line: None,
+        column: None,
+        score_reason: vec![reason.to_string()],
+        attributes: attrs.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+    }
+}
+
+/// A row at a line of a declaration file.
+fn declared_row(f: &Facts, kind: &str, d: &Declared, reason: &str) -> CodeQueryResult {
+    let file = f.root.join(&d.file);
+    let mut r = site(f, kind, d.value.clone(), &file, d.line, None, None, reason, vec![("entry", d.entry.clone()), ("key", d.at.clone()), ("role", d.role.as_str().to_string())]);
+    r.crate_name = None;
+    r
+}
+
+fn canonical(r: &Resolution) -> Option<&str> {
+    Facts::canonical(r)
+}
+
+fn unresolved_text(r: &Resolution) -> Option<(String, String)> {
+    match r {
+        Resolution::Unresolved { reason, candidates, .. } => Some((format!("{reason:?}"), candidates.join(", "))),
+        _ => None,
+    }
+}
+
+fn crates_and_bins(f: &Facts, rows: &[CodeQueryResult]) -> (usize, usize) {
+    let crates: BTreeSet<&str> = rows.iter().filter_map(|r| r.crate_name.as_deref()).collect();
+    let bins: BTreeSet<String> = crates.iter().flat_map(|c| f.bins_of(c)).collect();
+    (crates.len(), bins.len())
+}
+
+fn sort_rows(rows: &mut [CodeQueryResult]) {
+    rows.sort_by(|a, b| (&a.kind, &a.path, a.line, a.column, &a.label).cmp(&(&b.kind, &b.path, b.line, b.column, &b.label)));
+}
+
+fn tail(target: &str) -> &str {
+    target.rsplit("::").next().unwrap_or(target)
+}
+
+/// Items among `ids` whose level is at least `confidential` in the level table.
+fn sensitive_among<'a>(f: &Facts, ids: impl IntoIterator<Item = &'a str>) -> BTreeSet<String> {
+    let floor = f.level_rank("confidential");
+    ids.into_iter()
+        .filter(|id| f.marks_of(id).and_then(|m| m.sensitivity.as_deref()).and_then(|l| f.level_rank(l)).zip(floor).is_some_and(|(p, fl)| p >= fl))
+        .map(str::to_string)
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// use_sites
+
+fn use_sites(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let name = tail(target);
+    let k = &f.k;
+    let mut ans = Answer::default();
+
+    let mut defs: Vec<CodeQueryResult> = k
+        .items
+        .iter()
+        .filter(|d| path_names_item(&d.id, target))
+        .filter_map(|d| {
+            let line = d.location.line?;
+            Some(site(f, "definition", d.id.clone(), &d.location.path, line, d.location.column, Some(&d.id), "klepto item", vec![("item_kind", format!("{:?}", d.kind).to_lowercase())]))
+        })
+        .collect();
+    sort_rows(&mut defs);
+
+    // klepto's resolved occurrences ending in the name, as the kit's use-site nodes
+    let mut sites: Vec<UseSiteNode> = Vec::new();
+    let mut items_at: BTreeMap<(String, u32, u32), String> = BTreeMap::new();
+    let mut seen: HashSet<(String, u32, u32, String)> = HashSet::new();
+    let mut add = |loc: &klepto::FileLocation, res: Option<&Resolution>, kind: UseSiteKind, scope: Option<&String>, item: Option<&String>| {
+        let (Some(line), Some(col), Some(full)) = (loc.line, loc.column, res.and_then(canonical)) else { return };
+        if full.rsplit("::").next() != Some(name) {
+            return;
+        }
+        let file = f.rel(&loc.path);
+        if !seen.insert((file.clone(), line, col, full.to_string())) {
+            return;
+        }
+        if let Some(i) = item {
+            items_at.insert((file.clone(), line, col), i.clone());
+        }
+        let package = f.package_of(&loc.path).unwrap_or("").to_string();
+        let mut segs = full.split("::");
+        let dep = segs.next().unwrap_or("").to_string();
+        let head = segs.next().unwrap_or("*").to_string();
+        let kind = match (kind, res) {
+            (UseSiteKind::Path, Some(Resolution::Local(_))) => UseSiteKind::InternalPath,
+            (k, _) => k,
+        };
+        sites.push(UseSiteNode {
+            id: stable_id("site", &format!("{file}:{line}:{col}:{full}")),
+            crate_id: stable_id("crate", &package),
+            crate_name: package,
+            path: file,
+            dep,
+            full_path: full.to_string(),
+            head,
+            kind,
+            line,
+            column: col,
+            scope: scope.cloned().unwrap_or_else(|| "file".to_string()),
+            feature_candidates: Vec::new(),
+            optional_dep: false,
+        });
+    };
+    for c in &k.calls {
+        add(&c.location, c.resolution.as_ref(), UseSiteKind::Path, c.enclosing_fn.as_ref(), c.enclosing_item.as_ref());
+    }
+    for p in &k.paths {
+        add(&p.location, p.resolution.as_ref(), UseSiteKind::Path, p.enclosing_fn.as_ref(), p.enclosing_item.as_ref());
+    }
+    for m in &k.macros_inv {
+        add(&m.location, m.resolution.as_ref(), UseSiteKind::MacroCall, m.enclosing_fn.as_ref(), m.enclosing_item.as_ref());
+    }
+    for i in &k.imports {
+        add(&i.location, i.resolution.as_ref(), UseSiteKind::UseStmt, i.enclosing_fn.as_ref(), i.enclosing_item.as_ref());
+    }
+    for a in &k.attrs {
+        for r in &a.arg_resolutions {
+            add(&a.location, Some(r), UseSiteKind::Path, a.enclosing_fn.as_ref(), a.enclosing_item.as_ref());
+        }
+    }
+    let crates: Vec<CrateNode> = f
+        .packages
+        .values()
+        .map(|p| CrateNode {
+            id: stable_id("crate", &p.name),
+            name: p.name.clone(),
+            crate_root: p.dir.clone(),
+            manifest_path: format!("{}/Cargo.toml", p.dir),
+            src_root: None,
+        })
+        .collect();
+    let mut graph = CodeGraph {
+        schema: "code_passenger.graph.v1".to_string(),
+        root: f.root.display().to_string(),
+        root_exists: true,
+        max_depth: 0,
+        crates,
+        files: Vec::new(),
+        features: Vec::new(),
+        deps: Vec::new(),
+        functions: Vec::new(),
+        imports: Vec::new(),
+        use_sites: sites,
+        findings: Vec::new(),
+        summary: CodeGraphSummary::default(),
+    };
+    crate::finish_summary(&mut graph);
+    let mut q = crate::parse_code_query_spec(&spec.query_args());
+    q.limit = usize::MAX;
+    let report = run_code_query(&graph, q);
+    let mut uses: Vec<CodeQueryResult> = report
+        .results
+        .into_iter()
+        .map(|mut r| {
+            if let (Some(p), Some(l)) = (&r.path, r.line) {
+                r.attributes.insert("context".to_string(), f.context(&f.root.join(p), l));
+                if let Some(item) = items_at.get(&(p.clone(), l, r.column.unwrap_or(0))) {
+                    r.attributes.insert("item".to_string(), item.clone());
+                    if let Some(m) = f.marks_of(item) {
+                        if let Some(s) = &m.sensitivity {
+                            r.attributes.insert("sensitivity".to_string(), s.clone());
+                        }
+                        if let Some(o) = &m.owner {
+                            r.attributes.insert("owner".to_string(), o.clone());
+                        }
+                    }
+                }
+            }
+            r.label = r.attributes.get("full_path").cloned().unwrap_or(r.label);
+            r
+        })
+        .collect();
+    sort_rows(&mut uses);
+
+    // what klepto could not resolve that could be the name
+    let mut unresolved = Vec::new();
+    let mut useen: HashSet<(String, u32, u32)> = HashSet::new();
+    for u in &k.graph.unresolved {
+        let last = tail(&u.raw);
+        let cand = matches!(&u.resolution, Resolution::Unresolved { candidates, .. } if candidates.iter().any(|c| path_names_item(c, target)));
+        let (Some(line), true) = (u.location.line, last == name || cand) else { continue };
+        if !useen.insert((f.rel(&u.location.path), line, u.location.column.unwrap_or(0))) {
+            continue;
+        }
+        let (reason, cands) = unresolved_text(&u.resolution).unwrap_or_default();
+        unresolved.push(site(f, "unresolved", u.raw.clone(), &u.location.path, line, u.location.column, Some(&u.from), "klepto: unresolved", vec![("reason", reason), ("candidates", cands)]));
+    }
+    for c in k.calls.iter().filter(|c| c.is_method && c.callee == name) {
+        let Some(r) = &c.resolution else { continue };
+        let (Some((reason, cands)), Some(line)) = (unresolved_text(r), c.location.line) else { continue };
+        if !useen.insert((f.rel(&c.location.path), line, c.location.column.unwrap_or(0))) {
+            continue;
+        }
+        unresolved.push(site(f, "unresolved", format!(".{}()", c.callee), &c.location.path, line, c.location.column, c.enclosing_item.as_deref(), "klepto: method receiver not typed", vec![("reason", reason), ("candidates", cands)]));
+    }
+    let mut in_macros = 0;
+    for m in &k.macros_inv {
+        let named_here: Vec<&String> = m.token_paths.iter().filter(|p| tail(p) == name).collect();
+        let Some(line) = m.location.line else { continue };
+        for p in named_here {
+            in_macros += 1;
+            unresolved.push(site(
+                f,
+                "macro-token",
+                format!("{p} in {}!", m.path.as_deref().unwrap_or(&m.name)),
+                &m.location.path,
+                line,
+                m.location.column,
+                m.enclosing_item.as_deref(),
+                "named inside macro tokens; klepto resolves no paths there",
+                vec![("macro", m.name.clone())],
+            ));
+        }
+    }
+    sort_rows(&mut unresolved);
+
+    let (crates_n, bins_n) = crates_and_bins(f, &uses);
+    ans.count("definitions", defs.len());
+    ans.count("use sites (resolved)", uses.len());
+    ans.count("crates using it", crates_n);
+    ans.count("binaries linking those crates", bins_n);
+    ans.count("unresolved that could be it (klepto)", unresolved.len() - in_macros);
+    ans.count("named inside macro tokens", in_macros);
+    ans.rows = defs.into_iter().chain(uses).collect();
+    ans.unresolved = unresolved;
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// env reads (readers_of_env, and the socket keys of sockets)
+
+#[derive(Default)]
+struct EnvReads {
+    /// key → rows
+    reads: BTreeMap<String, Vec<CodeQueryResult>>,
+    named: BTreeMap<String, Vec<CodeQueryResult>>,
+    consts: BTreeMap<String, Vec<CodeQueryResult>>,
+    unresolved: Vec<CodeQueryResult>,
+}
+
+/// The reader fns: those the spec names, and (with `follow`) every fn or
+/// method klepto's item graph shows reaching one of them.
+fn reader_fns(f: &Facts, spec: &ReadingSpec) -> BTreeSet<String> {
+    let base: BTreeSet<String> = spec.readers.fns.iter().cloned().collect();
+    let mut readers = base.clone();
+    if spec.readers.follow {
+        let g = &f.k.graph;
+        readers.extend(f.closure_of(base.iter().map(String::as_str)).into_iter().filter(|id| g.node(id).is_some_and(|n| matches!(n.kind, NodeKind::Fn | NodeKind::Method))));
+    }
+    readers
+}
+
+fn is_const_item(f: &Facts, id: &str) -> bool {
+    f.item(id).is_some_and(|d| matches!(d.kind, NodeKind::Const | NodeKind::Static))
+}
+
+fn env_reads(f: &Facts, spec: &ReadingSpec, target: &str, prefix: &str) -> EnvReads {
+    let g = &f.k.graph;
+    let readers = reader_fns(f, spec);
+    let is_reader = |id: &str| readers.contains(id) || g.resolve_id(id).is_some_and(|r| readers.contains(r));
+    let macro_reads = |name: &str| spec.readers.macros.iter().any(|m| m == name || m == tail(name));
+
+    let mut out = EnvReads::default();
+    // constants that hold a key: const id → key
+    let mut key_consts: BTreeMap<String, String> = BTreeMap::new();
+    for l in &f.k.literals {
+        let (Some(item), None, None) = (&l.enclosing_item, &l.arg_of, &l.in_macro) else { continue };
+        if !matches_target(target, &l.value) || !is_const_item(f, item) {
+            continue;
+        }
+        let Some(line) = l.location.line else { continue };
+        key_consts.insert(item.clone(), l.value.clone());
+        out.consts.entry(l.value.clone()).or_default().push(site(f, &format!("{prefix}const"), item.clone(), &l.location.path, line, l.location.column, Some(item), "a constant holding the key", vec![("key", l.value.clone())]));
+    }
+
+    // a key written at a place, read or not by the call it is an argument of
+    let decide = |out: &mut EnvReads, key: String, via: String, loc: &klepto::FileLocation, item: Option<&str>, arg_of: Option<&klepto::ArgOf>, in_macro: Option<&str>| {
+        let Some(line) = loc.line else { return };
+        let mut attrs = vec![("key", key.clone()), ("via", via)];
+        if let Some(m) = in_macro.filter(|m| macro_reads(m)) {
+            attrs.push(("reader", format!("{m}!")));
+            out.reads.entry(key.clone()).or_default().push(site(f, &format!("{prefix}read"), key, &loc.path, line, loc.column, item, "read by a macro", attrs));
+            return;
+        }
+        let Some(call) = arg_of else {
+            if let Some(m) = in_macro {
+                attrs.push(("in", format!("{m}!")));
+            }
+            out.named.entry(key.clone()).or_default().push(site(f, &format!("{prefix}named"), key, &loc.path, line, loc.column, item, "named, not in a call", attrs));
+            return;
+        };
+        if let Some(m) = in_macro {
+            attrs.push(("built_by", format!("{m}!")));
+        }
+        match call.resolution.as_ref() {
+            Some(r) => match canonical(r) {
+                Some(id) if is_reader(id) => {
+                    attrs.push(("reader", id.to_string()));
+                    out.reads.entry(key.clone()).or_default().push(site(f, &format!("{prefix}read"), key, &loc.path, line, loc.column, item, "an argument of a reader", attrs));
+                }
+                Some(id) => {
+                    attrs.push(("in", id.to_string()));
+                    out.named.entry(key.clone()).or_default().push(site(f, &format!("{prefix}named"), key, &loc.path, line, loc.column, item, "an argument of a call that does not read the environment", attrs));
+                }
+                None => {
+                    let (reason, cands) = unresolved_text(r).unwrap_or_default();
+                    attrs.extend([("call", call.callee.clone()), ("reason", reason), ("candidates", cands)]);
+                    out.unresolved.push(site(f, &format!("{prefix}unresolved"), key, &loc.path, line, loc.column, item, "klepto: the call is unresolved", attrs));
+                }
+            },
+            None => {
+                attrs.push(("call", call.callee.clone()));
+                out.unresolved.push(site(f, &format!("{prefix}unresolved"), key, &loc.path, line, loc.column, item, "klepto recorded no resolution for the call", attrs));
+            }
+        }
+    };
+    for l in &f.k.literals {
+        let initialises_const = l.arg_of.is_none() && l.in_macro.is_none() && l.enclosing_item.as_deref().is_some_and(|i| is_const_item(f, i));
+        if initialises_const || !matches_target(target, &l.value) {
+            continue;
+        }
+        decide(&mut out, l.value.clone(), "literal".into(), &l.location, l.enclosing_item.as_deref(), l.arg_of.as_ref(), l.in_macro.as_deref());
+    }
+    // the key constants wherever they are used
+    for p in &f.k.paths {
+        let Some(id) = p.resolution.as_ref().and_then(canonical) else { continue };
+        let Some(key) = key_consts.get(id) else { continue };
+        decide(&mut out, key.clone(), format!("const {id}"), &p.location, p.enclosing_item.as_deref(), p.arg_of.as_ref(), None);
+    }
+    out
+}
+
+fn declared(f: &Facts, spec: &ReadingSpec) -> Result<Vec<Declared>> {
+    read_declared(&f.root, &spec.declared_in, &f.paths, f.how)
+}
+
+fn readers_of_env(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let reads = env_reads(f, spec, target, "env-");
+    let decls: Vec<Declared> = declared(f, spec)?.into_iter().filter(|d| d.role == DeclaredRole::Env && matches_target(target, &d.value)).collect();
+
+    let mut keys: BTreeSet<String> = BTreeSet::new();
+    keys.extend(reads.reads.keys().cloned());
+    keys.extend(reads.named.keys().cloned());
+    keys.extend(reads.consts.keys().cloned());
+    keys.extend(decls.iter().map(|d| d.value.clone()));
+
+    let mut ans = Answer::default();
+    let mut key_rows = Vec::new();
+    let (mut read_undeclared, mut declared_unread) = (0, 0);
+    for key in &keys {
+        let r = reads.reads.get(key).map(Vec::len).unwrap_or(0);
+        let n = reads.named.get(key).map(Vec::len).unwrap_or(0);
+        let entries: BTreeSet<&str> = decls.iter().filter(|d| &d.value == key).map(|d| d.entry.as_str()).collect();
+        let readers: BTreeSet<&str> = reads.reads.get(key).into_iter().flatten().filter_map(|r| r.crate_name.as_deref()).collect();
+        if !spec.declared_in.is_empty() {
+            if r > 0 && entries.is_empty() {
+                read_undeclared += 1;
+            }
+            if r == 0 && !entries.is_empty() {
+                declared_unread += 1;
+            }
+        }
+        key_rows.push(named(
+            "env-key",
+            key.clone(),
+            None,
+            "one key",
+            vec![
+                ("reads", r.to_string()),
+                ("named", n.to_string()),
+                ("read_by", readers.into_iter().collect::<Vec<_>>().join(", ")),
+                ("declared_in", if spec.declared_in.is_empty() { "(no declared_in in the spec)".to_string() } else { entries.into_iter().collect::<Vec<_>>().join(", ") }),
+            ],
+        ));
+    }
+    let mut read_rows: Vec<CodeQueryResult> = reads.reads.into_values().flatten().collect();
+    let mut named_rows: Vec<CodeQueryResult> = reads.named.into_values().flatten().collect();
+    let mut const_rows: Vec<CodeQueryResult> = reads.consts.into_values().flatten().collect();
+    let mut decl_rows: Vec<CodeQueryResult> = decls.iter().map(|d| declared_row(f, "env-declared", d, "declared")).collect();
+    for v in [&mut read_rows, &mut named_rows, &mut const_rows, &mut decl_rows] {
+        sort_rows(v);
+    }
+    let (crates_n, bins_n) = crates_and_bins(f, &read_rows);
+    ans.count("keys", keys.len());
+    ans.count("reads", read_rows.len());
+    ans.count("crates reading", crates_n);
+    ans.count("binaries linking those crates", bins_n);
+    ans.count("constants holding a key", const_rows.len());
+    ans.count("places naming a key without reading it", named_rows.len());
+    if !spec.declared_in.is_empty() {
+        ans.count("declarations", decl_rows.len());
+        ans.count("keys read but declared nowhere", read_undeclared);
+        ans.count("keys declared but read nowhere", declared_unread);
+    }
+    ans.count("unresolved (klepto)", reads.unresolved.len());
+    ans.rows = key_rows.into_iter().chain(read_rows).chain(const_rows).chain(decl_rows).chain(named_rows).collect();
+    ans.unresolved = reads.unresolved;
+    sort_rows(&mut ans.unresolved);
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// duplicates
+
+fn duplicates(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let level = SHAPE_LEVELS
+        .iter()
+        .copied()
+        .find(|l| l.name() == spec.duplicates.level)
+        .ok_or_else(|| ReadingRefusal::SpecInvalid.refuse(format!("duplicates.level `{}`: one of exact, renamed, literals, types, callees", spec.duplicates.level)))?;
+    let only: Option<BTreeSet<String>> = (spec.target.trim() != "*").then(|| spec.target.split(',').map(|s| s.trim().replace('-', "_")).collect());
+    let report = klepto::patterns::mine(&f.k, &MiningOptions { min_tokens: spec.duplicates.min_tokens, min_members: 2 });
+    let fns: BTreeMap<&str, &klepto::CapturedFn> = f.k.functions.iter().map(|c| (c.fq_name.as_str(), c)).collect();
+    let mut per_crate: BTreeMap<String, usize> = BTreeMap::new();
+    for c in &f.k.functions {
+        if let Some(p) = f.package_of(&c.location.path) {
+            *per_crate.entry(p.to_string()).or_default() += 1;
+        }
+    }
+
+    let mut pairs: BTreeMap<(String, String), usize> = BTreeMap::new();
+    let mut rows = Vec::new();
+    let mut clusters = 0;
+    let mut members_n = 0;
+    for c in report.clusters.iter().filter(|c| c.level == level) {
+        let placed: Vec<(&klepto::CapturedFn, String)> =
+            c.members.iter().filter_map(|m| fns.get(m.as_str())).filter_map(|cf| Some((*cf, f.package_of(&cf.location.path)?.to_string()))).collect();
+        let crates: BTreeSet<&str> = placed.iter().map(|(_, p)| p.as_str()).collect();
+        if crates.len() < 2 || only.as_ref().is_some_and(|o| !crates.iter().any(|c| o.contains(*c))) {
+            continue;
+        }
+        clusters += 1;
+        let list: Vec<&str> = crates.iter().copied().collect();
+        for i in 0..list.len() {
+            for j in i + 1..list.len() {
+                *pairs.entry((list[i].to_string(), list[j].to_string())).or_default() += 1;
+            }
+        }
+        for (cf, _) in &placed {
+            let Some(line) = cf.location.line else { continue };
+            members_n += 1;
+            rows.push(site(
+                f,
+                "duplicate",
+                cf.fq_name.clone(),
+                &cf.location.path,
+                line,
+                cf.location.column,
+                Some(&cf.fq_name),
+                "same body as the others in its cluster",
+                vec![("cluster", c.hash.chars().take(12).collect()), ("members", c.members.len().to_string()), ("crates", list.join(", "))],
+            ));
+        }
+    }
+    let mut pair_rows: Vec<(usize, CodeQueryResult)> = pairs
+        .into_iter()
+        .map(|((a, b), n)| {
+            let (na, nb) = (per_crate.get(&a).copied().unwrap_or(0), per_crate.get(&b).copied().unwrap_or(0));
+            (
+                n,
+                named(
+                    "crate-pair",
+                    format!("{a} ↔ {b}"),
+                    None,
+                    "crates sharing bodies",
+                    vec![("shared_bodies", n.to_string()), ("a_functions", format!("{a}: {na}")), ("b_functions", format!("{b}: {nb}"))],
+                ),
+            )
+        })
+        .collect();
+    pair_rows.sort_by(|(x, a), (y, b)| y.cmp(x).then(a.label.cmp(&b.label)));
+    rows.sort_by(|a, b| (&a.attributes.get("crates"), &a.attributes.get("cluster"), &a.path, a.line).cmp(&(&b.attributes.get("crates"), &b.attributes.get("cluster"), &b.path, b.line)));
+    let mut ans = Answer::default();
+    ans.count(format!("clusters of same bodies across crates ({} level)", level.name()), clusters);
+    ans.count("functions in them", members_n);
+    ans.count("crate pairs sharing bodies", pair_rows.len());
+    ans.count("functions shaped", report.shapes.len());
+    ans.rows = pair_rows.into_iter().map(|(_, r)| r).chain(rows).collect();
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// dependents
+
+fn dependents(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let mut ans = Answer::default();
+    if let Some(p) = f.package_named(target) {
+        let direct = f.direct_dependents(&p.name);
+        let linked = f.linked_dependents(&p.name);
+        let mut rows = Vec::new();
+        for (d, l) in &direct {
+            rows.push(named("dependent", d.clone(), Some(d.clone()), "depends on it directly", vec![("how", format!("direct, {}", l.as_str())), ("dir", f.packages[d].dir.clone())]));
+        }
+        let direct_names: BTreeSet<&String> = direct.iter().map(|(d, _)| d).collect();
+        for d in linked.iter().filter(|d| !direct_names.contains(d)) {
+            rows.push(named("dependent", d.clone(), Some(d.clone()), "depends on it through others", vec![("how", "transitive".to_string()), ("dir", f.packages[d].dir.clone())]));
+        }
+        let dev_only = direct.iter().filter(|(d, l)| *l == Link::Dev && !linked.contains(d)).count();
+        ans.count("direct dependents", direct_names.len());
+        ans.count("dependents through normal and build dependencies (transitive)", linked.len());
+        ans.count("dev-only dependents (tests)", dev_only);
+        ans.count("binaries linking it", f.bins_of(&p.name).len());
+        ans.rows = rows;
+        return Ok(ans);
+    }
+    let id = item_id(f, target)?;
+    let direct: BTreeSet<String> = f.referrers_of(&id).iter().cloned().collect();
+    let all = f.closure_of([id.as_str()]);
+    let mut rows: Vec<CodeQueryResult> = all.iter().map(|d| item_row(f, "dependent", d, "uses it", vec![("how", if direct.contains(d) { "direct" } else { "transitive" }.to_string())])).collect();
+    sort_rows(&mut rows);
+    let (crates_n, bins_n) = crates_and_bins(f, &rows);
+    ans.count(format!("direct dependents of {id}"), direct.len());
+    ans.count("dependents, transitive", all.len());
+    ans.count("crates", crates_n);
+    ans.count("binaries linking those crates", bins_n);
+    ans.rows = rows;
+    Ok(ans)
+}
+
+/// The graph node a target names: exactly, or by its trailing segments.
+fn item_id(f: &Facts, target: &str) -> Result<String> {
+    let g = &f.k.graph;
+    g.resolve_id(target)
+        .map(str::to_string)
+        .or_else(|| g.nodes.keys().find(|k| path_names_item(k, target) && g.nodes[*k].kind != NodeKind::External).cloned())
+        .ok_or_else(|| ReadingRefusal::TargetUnknown.refuse(target))
+}
+
+// ---------------------------------------------------------------------------
+// declared_in
+
+fn declared_in(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    if spec.declared_in.is_empty() {
+        return Err(ReadingRefusal::SpecInvalid.refuse("declared_in needs at least one [[declared_in]] source"));
+    }
+    let hits: Vec<Declared> = declared(f, spec)?.into_iter().filter(|d| matches_target(spec.target.trim(), &d.value)).collect();
+    let files: BTreeSet<&str> = hits.iter().map(|d| d.file.as_str()).collect();
+    let entries: BTreeSet<(&str, &str)> = hits.iter().map(|d| (d.file.as_str(), d.entry.as_str())).collect();
+    let mut ans = Answer::default();
+    ans.count("declarations", hits.len());
+    ans.count("files", files.len());
+    ans.count("entries", entries.len());
+    ans.rows = hits.iter().map(|d| declared_row(f, "declared", d, "declared")).collect();
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// sockets
+
+fn sockets(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let decls = declared(f, spec)?;
+    let own: BTreeSet<(&str, &str)> = decls.iter().filter(|d| d.role == DeclaredRole::Binary && d.value == target).map(|d| (d.file.as_str(), d.entry.as_str())).collect();
+    let is_own = |d: &Declared| own.contains(&(d.file.as_str(), d.entry.as_str()));
+    let paths: BTreeSet<&str> = decls.iter().filter(|d| is_own(d) && d.role == DeclaredRole::Socket).map(|d| d.value.as_str()).collect();
+    let keys: BTreeSet<&str> = decls.iter().filter(|d| is_own(d) && d.role == DeclaredRole::SocketEnv).map(|d| d.value.as_str()).collect();
+
+    let mut rows: Vec<CodeQueryResult> = decls.iter().filter(|d| is_own(d) && matches!(d.role, DeclaredRole::Socket | DeclaredRole::SocketEnv)).map(|d| declared_row(f, "socket", d, "the binary's entry declares it")).collect();
+    let mut unresolved = Vec::new();
+    let mut dial_reads = 0;
+    for key in &keys {
+        let r = env_reads(f, spec, key, "dial-env-");
+        dial_reads += r.reads.values().map(Vec::len).sum::<usize>();
+        rows.extend(r.reads.into_values().flatten());
+        rows.extend(r.consts.into_values().flatten());
+        rows.extend(r.named.into_values().flatten());
+        unresolved.extend(r.unresolved);
+    }
+    // the socket path written in code: a constant holding it and its uses, or the literal itself
+    let mut path_consts: BTreeMap<String, String> = BTreeMap::new();
+    let mut literals = 0;
+    for l in &f.k.literals {
+        if !paths.contains(l.value.as_str()) {
+            continue;
+        }
+        let Some(line) = l.location.line else { continue };
+        match l.enclosing_item.as_deref().filter(|i| l.arg_of.is_none() && l.in_macro.is_none() && is_const_item(f, i)) {
+            Some(item) => {
+                path_consts.insert(item.to_string(), l.value.clone());
+                rows.push(site(f, "dial-const", item, &l.location.path, line, l.location.column, Some(item), "a constant holding the socket path", vec![("socket", l.value.clone())]));
+            }
+            None => {
+                literals += 1;
+                let mut attrs = vec![("socket", l.value.clone())];
+                if let Some(a) = &l.arg_of {
+                    attrs.push(("in", a.resolution.as_ref().and_then(canonical).unwrap_or(&a.callee).to_string()));
+                }
+                if let Some(m) = &l.in_macro {
+                    attrs.push(("macro", format!("{m}!")));
+                }
+                rows.push(site(f, "dial-literal", l.value.clone(), &l.location.path, line, l.location.column, l.enclosing_item.as_deref(), "the socket path written in code", attrs));
+            }
+        }
+    }
+    let mut const_uses = 0;
+    for p in &f.k.paths {
+        let (Some(id), Some(line)) = (p.resolution.as_ref().and_then(canonical), p.location.line) else { continue };
+        if let Some(sock) = path_consts.get(id) {
+            const_uses += 1;
+            rows.push(site(f, "dial-const-use", id.to_string(), &p.location.path, line, p.location.column, p.enclosing_item.as_deref(), "uses the socket path's constant", vec![("socket", sock.clone())]));
+        }
+    }
+    // other entries naming the path or its key
+    let others: Vec<&Declared> = decls.iter().filter(|d| !is_own(d) && (paths.contains(d.value.as_str()) || keys.contains(d.value.as_str()))).collect();
+    rows.extend(others.iter().map(|d| declared_row(f, "dial-entry", d, "another entry names the socket or its key")));
+    sort_rows(&mut rows);
+    sort_rows(&mut unresolved);
+    let mut ans = Answer::default();
+    ans.count("entries running the binary", own.len());
+    ans.count("sockets declared", paths.len());
+    ans.count("socket env keys declared", keys.len());
+    ans.count("reads of those keys in code", dial_reads);
+    ans.count("socket path literals in code", literals);
+    ans.count("constants holding a socket path", path_consts.len());
+    ans.count("uses of those constants", const_uses);
+    ans.count("other entries naming a socket or its key", others.len());
+    ans.count("unresolved (klepto)", unresolved.len());
+    ans.rows = rows;
+    ans.unresolved = unresolved;
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// reach
+
+/// What a target names for reach: a crate (by name or directory), a file
+/// (relative to the root), or an item.
+enum Changed {
+    Crate(String),
+    Items { seeds: BTreeSet<String>, crates: BTreeSet<String> },
+}
+
+fn changed(f: &Facts, target: &str) -> Result<Changed> {
+    if let Some(p) = f.package_named(target) {
+        return Ok(Changed::Crate(p.name.clone()));
+    }
+    let as_file = f.root.join(target.trim_start_matches("./"));
+    if as_file.is_file() {
+        let seeds: BTreeSet<String> = f.k.items.iter().filter(|d| d.location.path == as_file).map(|d| d.id.clone()).collect();
+        let crates = f.package_of(&as_file).map(|p| BTreeSet::from([p.to_string()])).or_else(|| f.package_of_rel(target).map(|p| BTreeSet::from([p.name.clone()]))).unwrap_or_default();
+        return Ok(Changed::Items { seeds, crates });
+    }
+    let id = item_id(f, target)?;
+    let crates = f.item(&id).map(|d| BTreeSet::from([d.package.clone()])).unwrap_or_default();
+    Ok(Changed::Items { seeds: BTreeSet::from([id]), crates })
+}
+
+/// The codes the reached items raise (their paths naming a code variant).
+fn codes_touched(f: &Facts, items: &BTreeSet<String>) -> Vec<(String, String)> {
+    let (codes, _) = diag::tables(f);
+    let by_variant: BTreeMap<&str, &diag::Declared> = codes.iter().map(|d| (d.variant.as_str(), d)).collect();
+    let mut out = BTreeSet::new();
+    for p in &f.k.paths {
+        let (Some(item), Some(id)) = (&p.enclosing_item, p.resolution.as_ref().and_then(canonical)) else { continue };
+        if items.contains(item) {
+            if let Some(d) = by_variant.get(id) {
+                out.insert((d.code.clone().unwrap_or_else(|| d.variant.clone()), d.message.clone()));
+            }
+        }
+    }
+    out.into_iter().collect()
+}
+
+fn reach(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let mut rows = Vec::new();
+    let (crates, items): (BTreeSet<String>, BTreeSet<String>) = match changed(f, target)? {
+        Changed::Crate(c) => {
+            let items: BTreeSet<String> = f.k.items.iter().filter(|d| d.package == c).map(|d| d.id.clone()).collect();
+            rows.push(named("reach-crate", c.clone(), Some(c.clone()), "the changed crate", vec![("how", "changed".into()), ("dir", f.packages[&c].dir.clone())]));
+            let mut crates = BTreeSet::from([c.clone()]);
+            let direct: BTreeSet<String> = f.direct_dependents(&c).into_iter().filter(|(_, l)| *l != Link::Dev).map(|(d, _)| d).collect();
+            for d in f.linked_dependents(&c) {
+                let how = if direct.contains(&d) { "direct" } else { "transitive" };
+                rows.push(named("reach-crate", d.clone(), Some(d.clone()), "links the changed crate", vec![("how", how.into()), ("dir", f.packages[&d].dir.clone())]));
+                crates.insert(d);
+            }
+            for d in f.direct_dependents(&c).into_iter().filter(|(d, l)| *l == Link::Dev && !crates.contains(d)).map(|(d, _)| d) {
+                rows.push(named("reach-test-only", d.clone(), Some(d.clone()), "a dev-dependency: its tests build against the changed crate", vec![("dir", f.packages[&d].dir.clone())]));
+            }
+            (crates, items)
+        }
+        Changed::Items { seeds, crates: seed_crates } => {
+            for s in &seeds {
+                rows.push(item_row(f, "reach-changed", s, "the changed item", vec![]));
+            }
+            let reached = f.closure_of(seeds.iter().map(String::as_str));
+            for r in &reached {
+                rows.push(item_row(f, "reach-item", r, "reaches the change through its references", vec![]));
+            }
+            let mut crates = seed_crates;
+            crates.extend(reached.iter().filter_map(|id| f.item(id).map(|d| d.package.clone())));
+            for c in &crates {
+                rows.push(named("reach-crate", c.clone(), Some(c.clone()), "holds the change or an item reaching it", vec![("dir", f.packages.get(c).map(|p| p.dir.clone()).unwrap_or_default())]));
+            }
+            let mut all = seeds;
+            all.extend(reached);
+            (crates, all)
+        }
+    };
+    let bins: BTreeSet<String> = crates.iter().flat_map(|c| f.bins_of(c)).collect();
+    for b in &bins {
+        let from: Vec<&str> = f.packages.values().filter(|q| q.bins.contains(b)).map(|q| q.name.as_str()).collect();
+        rows.push(named("reach-binary", b.clone(), from.first().map(|s| s.to_string()), "a binary linking what changed", vec![("built_by", from.join(", "))]));
+    }
+    let files: BTreeSet<String> = items.iter().filter_map(|id| f.item(id).map(|d| f.rel(&d.location.path))).collect();
+    let decls = declared(f, spec)?;
+    let entries: Vec<&Declared> = decls.iter().filter(|d| d.role == DeclaredRole::Binary && bins.contains(&d.value)).collect();
+    rows.extend(entries.iter().map(|d| declared_row(f, "reach-entry", d, "names a binary that links what changed")));
+    let sensitive = sensitive_among(f, items.iter().map(String::as_str));
+    for s in &sensitive {
+        rows.push(item_row(f, "reach-sensitive", s, "a reached item at level confidential or above", vec![]));
+    }
+    let codes = codes_touched(f, &items);
+    for (code, msg) in &codes {
+        rows.push(named("reach-code", code.clone(), None, "a liaise code the reached items raise", vec![("message", msg.clone())]));
+    }
+    let entry_names: BTreeSet<(&str, &str)> = entries.iter().map(|d| (d.file.as_str(), d.entry.as_str())).collect();
+    let mut ans = Answer::default();
+    ans.count("items touched", items.len());
+    ans.count("files", files.len());
+    ans.count("crates", crates.len());
+    ans.count("binaries", bins.len());
+    ans.count("entries naming those binaries", entry_names.len());
+    ans.count("declarations naming those binaries", entries.len());
+    ans.count("items at level confidential or above", sensitive.len());
+    ans.count("liaise codes raised there", codes.len());
+    ans.count("test-only dependents", rows.iter().filter(|r| r.kind == "reach-test-only").count());
+    ans.rows = rows;
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// constructs
+
+fn types_named<'f>(f: &'f Facts, target: &str) -> Vec<&'f klepto::TypeDecl> {
+    f.k.types.iter().filter(|t| path_names_item(&t.id, target)).collect()
+}
+
+fn constructs(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let types = types_named(f, target);
+    if types.is_empty() {
+        return Err(ReadingRefusal::TargetUnknown.refuse(target));
+    }
+    let mut rows = Vec::new();
+    let mut ctor_fns: BTreeSet<String> = BTreeSet::new();
+    for t in &types {
+        let names_it = |id: &str| id == t.id || id.strip_prefix(&format!("{}::", t.id)).is_some_and(|rest| t.variants.iter().any(|v| v.name == rest));
+        for p in &f.k.paths {
+            let (Some(id), Some(line)) = (p.resolution.as_ref().and_then(canonical), p.location.line) else { continue };
+            if !names_it(id) {
+                continue;
+            }
+            let how = match (p.role, p.ns) {
+                (PathRole::StructLiteral, _) => "struct literal",
+                (PathRole::Other, klepto::Namespace::Value) => "constructor or unit value",
+                _ => continue,
+            };
+            rows.push(site(f, "construct", id, &p.location.path, line, p.location.column, p.enclosing_item.as_deref(), how, vec![("how", how.to_string())]));
+        }
+        // its own associated fns returning Self or the type
+        for func in &f.k.functions {
+            let klepto::FnKind::ImplMethod { self_ty, trait_ty: None } = &func.kind else { continue };
+            if tail(self_ty) != t.name {
+                continue;
+            }
+            let ret = func.return_ty.as_deref().unwrap_or("");
+            if ret == "Self" || ret == t.name || ret.ends_with(&format!("::{}", t.name)) {
+                ctor_fns.insert(func.fq_name.clone());
+            }
+        }
+    }
+    for c in &f.k.calls {
+        let (Some(id), Some(line)) = (c.resolution.as_ref().and_then(canonical), c.location.line) else { continue };
+        if ctor_fns.contains(id) {
+            rows.push(site(f, "construct", id, &c.location.path, line, c.location.column, c.enclosing_item.as_deref(), "a call of its own constructor", vec![("how", "constructor fn".into())]));
+        }
+    }
+    sort_rows(&mut rows);
+    rows.dedup_by(|a, b| a.path == b.path && a.line == b.line && a.column == b.column && a.label == b.label);
+    let (crates_n, bins_n) = crates_and_bins(f, &rows);
+    let mut ans = Answer::default();
+    ans.count("types named", types.len());
+    ans.count("places building it", rows.len());
+    ans.count("constructor fns returning it", ctor_fns.len());
+    ans.count("crates", crates_n);
+    ans.count("binaries linking those crates", bins_n);
+    ans.rows = rows;
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// matches_on
+
+fn matches_on(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let enums: Vec<&klepto::TypeDecl> = types_named(f, target).into_iter().filter(|t| !t.variants.is_empty()).collect();
+    if enums.is_empty() {
+        return Err(ReadingRefusal::TargetUnknown.refuse(format!("{target}: no enum of that name")));
+    }
+    let mut rows = Vec::new();
+    let mut missing_total = 0;
+    for e in &enums {
+        let variants: BTreeSet<&str> = e.variants.iter().map(|v| v.name.as_str()).collect();
+        for m in &f.k.matches {
+            let named: BTreeSet<&str> = m
+                .arms
+                .iter()
+                .flat_map(|a| a.paths.iter())
+                .filter_map(|p| p.resolution.as_ref().and_then(canonical))
+                .filter_map(|id| id.strip_prefix(&format!("{}::", e.id)))
+                .filter(|v| variants.contains(v))
+                .collect();
+            if named.is_empty() {
+                continue;
+            }
+            let Some(line) = m.location.line else { continue };
+            let catch_all = m.arms.iter().any(|a| a.catch_all);
+            let missing: Vec<&str> = variants.difference(&named).copied().collect();
+            if !catch_all {
+                missing_total += missing.len();
+            }
+            rows.push(site(
+                f,
+                "match",
+                format!("match {}", m.scrutinee),
+                &m.location.path,
+                line,
+                m.location.column,
+                m.enclosing_item.as_deref(),
+                "a match naming the enum's variants",
+                vec![
+                    ("enum", e.id.clone()),
+                    ("arms", m.arms.len().to_string()),
+                    ("names", named.iter().copied().collect::<Vec<_>>().join(", ")),
+                    ("not_named", missing.join(", ")),
+                    ("catch_all", catch_all.to_string()),
+                ],
+            ));
+        }
+    }
+    sort_rows(&mut rows);
+    let (crates_n, _) = crates_and_bins(f, &rows);
+    let mut ans = Answer::default();
+    ans.count("enums named", enums.len());
+    ans.count("matches on it", rows.len());
+    ans.count("matches with a catch-all arm", rows.iter().filter(|r| r.attributes.get("catch_all").is_some_and(|c| c == "true")).count());
+    ans.count("variants left to a catch-all or unnamed, in matches without one", missing_total);
+    ans.count("crates", crates_n);
+    ans.rows = rows;
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// public_api
+
+fn public_api(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let p = f.package_named(target).ok_or_else(|| ReadingRefusal::TargetUnknown.refuse(target))?;
+    let mut rows = Vec::new();
+    let mut used = 0;
+    let mut uses_total = 0;
+    let public: Vec<&klepto::ItemDecl> = f.k.items.iter().filter(|d| d.package == p.name && d.is_public && d.kind != NodeKind::Module).collect();
+    for d in &public {
+        let users: BTreeSet<&String> = f.referrers_of(&d.id).iter().filter(|r| f.item(r).is_some_and(|u| u.package != p.name)).collect();
+        let crates: BTreeSet<String> = users.iter().filter_map(|u| f.item(u).map(|i| i.package.clone())).collect();
+        if !users.is_empty() {
+            used += 1;
+        }
+        uses_total += users.len();
+        rows.push(item_row(
+            f,
+            "public-item",
+            &d.id,
+            "public in the crate",
+            vec![("item_kind", format!("{:?}", d.kind).to_lowercase()), ("users", users.len().to_string()), ("used_by_crates", crates.into_iter().collect::<Vec<_>>().join(", "))],
+        ));
+        for u in users {
+            rows.push(item_row(f, "public-use", u, "uses it from another crate", vec![("uses", d.id.clone())]));
+        }
+    }
+    sort_rows(&mut rows);
+    let mut ans = Answer::default();
+    ans.count("public items", public.len());
+    ans.count("used from other crates", used);
+    ans.count("never used from another crate", public.len() - used);
+    ans.count("uses from other crates (items)", uses_total);
+    ans.rows = rows;
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// tests (tests_covering, affected_tests)
+
+/// One test, as cargo runs it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TestCase {
+    pub package: String,
+    /// `--test <name>` for an integration test file; `None` for the lib / bin unit tests.
+    pub test_target: Option<String>,
+    /// The test's path inside its target, as libtest names it.
+    pub filter: String,
+    pub id: String,
+}
+
+/// The cargo test lines that run exactly `cases`: one per package and
+/// target, filters exact.
+pub fn test_lines(cases: &[TestCase]) -> Vec<(String, Option<String>, Vec<String>)> {
+    let mut by: BTreeMap<(String, Option<String>), Vec<String>> = BTreeMap::new();
+    for c in cases {
+        by.entry((c.package.clone(), c.test_target.clone())).or_default().push(c.filter.clone());
+    }
+    by.into_iter().map(|((p, t), fs)| (p, t, fs)).collect()
+}
+
+fn test_case(f: &Facts, id: &str) -> Option<TestCase> {
+    let d = f.item(id)?;
+    let pkg = f.packages.get(&d.package)?;
+    let tests_dir = f.root.join(&pkg.dir).join("tests");
+    let mut segs: Vec<&str> = id.split("::").collect();
+    if segs.first() == Some(&d.package.as_str()) {
+        segs.remove(0);
+    }
+    let test_target = d.location.path.strip_prefix(&tests_dir).ok().and_then(|rel| rel.components().next()).map(|c| {
+        let s = c.as_os_str().to_string_lossy().into_owned();
+        s.strip_suffix(".rs").map(str::to_string).unwrap_or(s)
+    });
+    if let Some(t) = &test_target {
+        if segs.first() == Some(&t.as_str()) {
+            segs.remove(0);
+        }
+    }
+    Some(TestCase { package: d.package.clone(), test_target, filter: segs.join("::"), id: id.to_string() })
+}
+
+fn tests_reaching(f: &Facts, seeds: &BTreeSet<String>) -> Vec<TestCase> {
+    let tests = f.tests();
+    let reached = f.closure_of(seeds.iter().map(String::as_str));
+    let mut cases: Vec<TestCase> = tests.iter().filter(|t| reached.contains(*t) || seeds.contains(*t)).filter_map(|t| test_case(f, t)).collect();
+    cases.sort();
+    cases
+}
+
+fn test_rows(f: &Facts, cases: &[TestCase], reason: &str) -> Vec<CodeQueryResult> {
+    let mut rows: Vec<CodeQueryResult> = cases.iter().map(|c| item_row(f, "test", &c.id, reason, vec![("filter", c.filter.clone()), ("test_target", c.test_target.clone().unwrap_or_else(|| "unit".into()))])).collect();
+    for (p, t, filters) in test_lines(cases) {
+        let line = match &t {
+            Some(t) => format!("cargo test -p {p} --test {t} -- {} --exact", filters.join(" ")),
+            None => format!("cargo test -p {p} --lib --bins -- {} --exact", filters.join(" ")),
+        };
+        rows.push(named("test-line", line, Some(p), "runs exactly these tests", vec![("tests", filters.len().to_string())]));
+    }
+    rows
+}
+
+fn tests_covering(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let id = item_id(f, spec.target.trim())?;
+    let cases = tests_reaching(f, &BTreeSet::from([id.clone()]));
+    let rows = test_rows(f, &cases, "a test whose calls reach the item");
+    let crates: BTreeSet<&str> = cases.iter().map(|c| c.package.as_str()).collect();
+    let mut ans = Answer::default();
+    ans.count(format!("tests reaching {id}"), cases.len());
+    ans.count("crates", crates.len());
+    ans.count("cargo test lines", test_lines(&cases).len());
+    ans.count("tests in the scan", f.tests().len());
+    ans.rows = rows;
+    Ok(ans)
+}
+
+/// The items a change touches: those located in the changed files, and the
+/// items named.
+pub fn changed_items(f: &Facts, files: &[String], items: &[String]) -> BTreeSet<String> {
+    let abs: BTreeSet<std::path::PathBuf> = files.iter().map(|p| f.root.join(p.trim_start_matches("./"))).collect();
+    let mut out: BTreeSet<String> = f.k.items.iter().filter(|d| abs.contains(&d.location.path)).map(|d| d.id.clone()).collect();
+    for i in items {
+        if let Ok(id) = item_id(f, i) {
+            out.insert(id);
+        }
+    }
+    out
+}
+
+fn affected_tests(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    if spec.change.files.is_empty() && spec.change.items.is_empty() {
+        return Err(ReadingRefusal::NoChange.refuse(&spec.name));
+    }
+    let seeds = changed_items(f, &spec.change.files, &spec.change.items);
+    let cases = tests_reaching(f, &seeds);
+    let mut rows: Vec<CodeQueryResult> = spec.change.files.iter().map(|p| named("changed-file", p.clone(), f.package_of_rel(p).map(|c| c.name.clone()), "in the change", vec![])).collect();
+    rows.extend(test_rows(f, &cases, "a test whose closure reaches the change"));
+    let crates: BTreeSet<&str> = cases.iter().map(|c| c.package.as_str()).collect();
+    let mut ans = Answer::default();
+    ans.count("files changed", spec.change.files.len());
+    ans.count("items changed", seeds.len());
+    ans.count("tests reaching the change", cases.len());
+    ans.count("crates with such tests", crates.len());
+    ans.count("cargo test lines", test_lines(&cases).len());
+    ans.count("tests in the scan", f.tests().len());
+    ans.rows = rows;
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// sensitivity
+
+fn sensitivity(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let only: Option<BTreeSet<String>> = (spec.target.trim() != "*").then(|| spec.target.split(',').map(|s| s.trim().replace('-', "_")).collect());
+    let mut rows = Vec::new();
+    let mut by_level: BTreeMap<String, usize> = BTreeMap::new();
+    let marked: Vec<(&String, &super::facts::Marks)> = f.marks.iter().filter(|(id, m)| m.sensitivity.is_some() && only.as_ref().is_none_or(|o| f.item(id).is_some_and(|d| o.contains(&d.package)))).collect();
+    for (id, m) in &marked {
+        let level = m.sensitivity.clone().unwrap_or_default();
+        *by_level.entry(level.clone()).or_default() += 1;
+        rows.push(item_row(f, "sensitive-item", id, "marked #[sensitivity]", vec![("level", level.clone()), ("known_level", f.level_rank(&level).is_some().to_string())]));
+    }
+    // uses of a more sensitive item from a less sensitive one (an unmarked user is public)
+    let mut ups = 0;
+    for (id, m) in &marked {
+        let Some(rank) = m.sensitivity.as_deref().and_then(|l| f.level_rank(l)) else { continue };
+        for user in f.referrers_of(id) {
+            let user_level = f.marks_of(user).and_then(|m| m.sensitivity.clone());
+            let user_rank = user_level.as_deref().map(|l| f.level_rank(l)).unwrap_or(Some(0));
+            let Some(user_rank) = user_rank else { continue };
+            if user_rank < rank {
+                ups += 1;
+                rows.push(item_row(
+                    f,
+                    "sensitivity-up",
+                    user,
+                    "uses a more sensitive item",
+                    vec![("uses", (*id).clone()), ("uses_level", m.sensitivity.clone().unwrap_or_default()), ("own_level", user_level.unwrap_or_else(|| "public (unmarked)".into()))],
+                ));
+            }
+        }
+    }
+    sort_rows(&mut rows);
+    let mut ans = Answer::default();
+    ans.count(format!("items marked (marks from the {})", f.marks_from), marked.len());
+    for name in &f.levels {
+        ans.count(format!("at {name}"), by_level.get(name).copied().unwrap_or(0));
+    }
+    let unknown: usize = by_level.iter().filter(|(l, _)| f.level_rank(l).is_none()).map(|(_, n)| *n).sum();
+    ans.count("at a level the level table does not name", unknown);
+    ans.count("uses of a more sensitive item from a less sensitive one", ups);
+    ans.count("items with an owner", f.marks.values().filter(|m| m.owner.is_some()).count());
+    ans.rows = rows;
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// diagnostics
+
+fn diagnostics(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let (codes, unread) = diag::tables(f);
+    // the target: `*`, a crate, a code, or a file of log text (`@path`)
+    let text = target.strip_prefix('@').map(|p| std::fs::read_to_string(f.root.join(p)).unwrap_or_default());
+    let chosen: Vec<&diag::Declared> = match (&text, target) {
+        (Some(t), _) => diag::codes_in(t, &codes),
+        (None, "*") => codes.iter().collect(),
+        (None, t) => codes.iter().filter(|d| d.code.as_deref() == Some(t) || f.package_of(&d.file) == Some(&t.replace('-', "_"))).collect(),
+    };
+    let mut rows = Vec::new();
+    let mut raised = 0;
+    for d in &chosen {
+        rows.push(site(
+            f,
+            "code",
+            d.code.clone().unwrap_or_else(|| format!("{}{} (a constant)", d.prefix, d.number)),
+            &d.file,
+            d.line,
+            None,
+            Some(&d.variant),
+            "declared",
+            vec![("message", d.message.clone()), ("variant", d.variant.clone()), ("severity", d.severity.clone().unwrap_or_default()), ("declared_by", d.declared_by.to_string())],
+        ));
+        for p in &f.k.paths {
+            let (Some(id), Some(line)) = (p.resolution.as_ref().and_then(canonical), p.location.line) else { continue };
+            if id == d.variant {
+                raised += 1;
+                rows.push(site(f, "code-raised", d.code.clone().unwrap_or_else(|| d.variant.clone()), &p.location.path, line, p.location.column, p.enclosing_item.as_deref(), "raises it", vec![("variant", d.variant.clone())]));
+            }
+        }
+    }
+    let unresolved: Vec<CodeQueryResult> = unread.iter().map(|(file, line, why)| site(f, "code-table-unread", why.clone(), file, *line, None, None, "a table klepto saw but custodian could not read", vec![])).collect();
+    let tables: BTreeSet<(&std::path::PathBuf, &str)> = codes.iter().map(|d| (&d.file, d.prefix.as_str())).collect();
+    let mut ans = Answer::default();
+    ans.count("code tables", tables.len());
+    ans.count("codes declared", codes.len());
+    ans.count("codes in this reading", chosen.len());
+    ans.count("sites raising them", raised);
+    ans.count("tables not read", unresolved.len());
+    ans.rows = rows;
+    ans.unresolved = unresolved;
+    Ok(ans)
+}
+
+// ---------------------------------------------------------------------------
+// bundle
+
+/// The files a bundle holds and, in each, the line ranges of items at
+/// secret or above (an item's own lines: a function to its end, any other
+/// item to the line before the next item in the file; more is held, never less).
+fn bundle_rows(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
+    let target = spec.target.trim();
+    let files: Vec<std::path::PathBuf> = if let Some(p) = f.packages.get(&target.replace('-', "_")) {
+        let mut v: Vec<std::path::PathBuf> = f.k.files.iter().filter(|x| f.package_of(&x.path) == Some(p.name.as_str())).map(|x| x.path.clone()).collect();
+        v.push(f.root.join(&p.dir).join("Cargo.toml"));
+        v
+    } else if target.starts_with("decl:") {
+        f.paths.resolve(target, f.how)?.files(&f.root)?
+    } else {
+        let p = f.root.join(target);
+        if !p.is_file() {
+            return Err(ReadingRefusal::TargetUnknown.refuse(format!("{target}: a bundle takes a crate:, a decl: or a file")));
+        }
+        vec![p]
+    };
+    let mut rows = Vec::new();
+    let mut held_items = 0;
+    for file in files.iter().filter(|p| p.is_file()) {
+        let mut starts: Vec<(u32, &str)> = f.k.items.iter().filter(|d| &d.location.path == file).filter_map(|d| Some((d.location.line?, d.id.as_str()))).collect();
+        starts.sort();
+        let lines = f.k.files.iter().find(|x| &x.path == file).map(|x| x.source.lines().count() as u32).unwrap_or(0);
+        let mut ranges = Vec::new();
+        for (i, (start, id)) in starts.iter().enumerate() {
+            let level = f.marks_of(id).and_then(|m| m.sensitivity.clone());
+            if !level.as_deref().is_some_and(|l| crate::job_bundle::HELD.contains(&l)) {
+                continue;
+            }
+            let end = f
+                .k
+                .index
+                .enclosing(&klepto::FileLocation { path: file.clone(), line: Some(*start), column: Some(u32::MAX / 2) })
+                .and_then(|span| span.end.map(|e| e.0))
+                .or_else(|| starts.get(i + 1).map(|(next, _)| next.saturating_sub(1)))
+                .unwrap_or(lines);
+            held_items += 1;
+            ranges.push(format!("{start}-{end}"));
+        }
+        let rel = f.rel(file);
+        rows.push(CodeQueryResult {
+            id: stable_id("bundled-file", &rel),
+            kind: "bundled-file".into(),
+            label: rel.clone(),
+            crate_name: f.package_of(file).map(str::to_string),
+            path: Some(rel),
+            line: None,
+            column: None,
+            score_reason: vec!["in the bundle".into()],
+            attributes: [("held".to_string(), ranges.join(","))].into_iter().filter(|(_, v)| !v.is_empty()).collect(),
+        });
+    }
+    let mut ans = Answer::default();
+    ans.count("files bundled", rows.len());
+    ans.count("items held redacted (secret or above)", held_items);
+    ans.rows = rows;
+    Ok(ans)
+}

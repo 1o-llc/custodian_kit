@@ -1,0 +1,44 @@
+{
+  "format": 1,
+  "levels": ["public", "internal", "confidential", "secret", "key_material"],
+  "items": [
+    {
+      "id": "core_lib::vault_key",
+      "package": "core_lib",
+      "kind": "fn",
+      "file": "crates/core_lib/src/lib.rs",
+      "line": 66,
+      "sensitivity": "secret",
+      "sensitivity_from": "core_lib::vault_key",
+      "owner": "platform",
+      "owner_from": "core_lib::vault_key",
+      "review": null,
+      "deprecated_after": null,
+      "mechanism": "vault keys",
+      "boundary": null,
+      "supersedes": null,
+      "reads_env": [],
+      "golden_writer": null,
+      "wire_writer": false
+    },
+    {
+      "id": "core_lib::token",
+      "package": "core_lib",
+      "kind": "fn",
+      "file": "crates/core_lib/src/lib.rs",
+      "line": 15,
+      "sensitivity": "confidential",
+      "sensitivity_from": "core_lib::token",
+      "owner": null,
+      "owner_from": null,
+      "review": null,
+      "deprecated_after": null,
+      "mechanism": null,
+      "boundary": null,
+      "supersedes": null,
+      "reads_env": ["FIX_TOKEN"],
+      "golden_writer": null,
+      "wire_writer": false
+    }
+  ]
+}

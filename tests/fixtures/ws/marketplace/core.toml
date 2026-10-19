@@ -1,0 +1,13 @@
+id = "fix:core"
+binary = "appd"
+binds = ["/run/fix/core.sock"]
+
+[socket]
+path = "/run/fix/core.sock"
+path_env = "FIX_SOCKET"
+
+[env.FIX_SOCKET]
+default = "/run/fix/core.sock"
+
+[env.FIX_DECLARED_ONLY]
+external = true

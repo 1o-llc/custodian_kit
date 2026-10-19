@@ -1,0 +1,11 @@
+[package]
+name = "tool"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+core_lib = { path = "../core_lib" }
+
+[[bin]]
+name = "toold"
+path = "src/main.rs"

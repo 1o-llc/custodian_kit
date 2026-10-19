@@ -1,0 +1,58 @@
+[package]
+name = "custodian_kit"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+
+license = "MIT OR Apache-2.0"
+description = "Read a Rust workspace as data: code graph, queries, pins, context windows, Tantivy search receipts, and reading specs that answer one question from klepto's facts into a dated page"
+keywords = ["klepto", "code-search", "static-analysis", "workspace", "tantivy"]
+categories = ["development-tools"]
+
+authors = ["James Hunt <james@1o.business>"]
+repository = "https://github.com/jameshuntt/custodian_kit"
+readme = "README.md"
+
+include = ["src/**", "Cargo.toml", "LICENSE*", "README*", "CHANGELOG*"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+walkdir = "2"
+thiserror = "1"
+tantivy = "0.26.1"
+# reading specs: klepto is the one extractor; syn reads the attribute and macro tokens klepto hands over,
+# TOML declarations with their spans, and the UTC stamp of each reading
+klepto = { version = "0.3.1", path = "../klepto" }
+syn = { version = "2", features = ["full", "visit", "extra-traits"] }
+quote = "1"
+toml_edit = "0.22"
+globset = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# every run a declared command through James's executor: the program declared once (simple_impl_derive), its run a receipt
+xccute_runtime = "0.1.2"
+xccute_contract = "0.1.2"
+simple_impl_derive = "0.2.6"
+# the folder layout named once
+pathgen = "0.1.2"
+# refusal codes
+liaise = "0.2.4"
+# every digest
+stable_digest = "0.1.1"
+# the programs custodian runs that xccute_commands already declares (cargo, git)
+xccute_commands = "0.1.1"
+# the questions a run asks before acting, answered by observation tools
+xccute_decisions = "0.1.1"
+# the journal's sequence and the one-writer admission for .custodian/
+uh-tom-mick = "0.1.1"
+# a job or a reading packed into one annotated file
+bundles = "0.2.2"
+# context windows of secret items held redacted
+classified = "0.2.1"
+# level and boundary rules stated as constraints
+flaga_solver = "0.1.1"
+# the maintenance marks' levels, the registry file, the checks' declared runner
+maintenance = { path = "../maintenance_macros/crates/maintenance", features = ["runner"] }
+# the journal: receipts, index keys, jobs, test results
+rusqlite = { version = "0.40", features = ["bundled"] }

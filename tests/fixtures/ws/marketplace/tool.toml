@@ -1,0 +1,5 @@
+id = "fix:tool"
+binary = "toold"
+
+[env.FIX_SOCKET]
+default = "/run/fix/core.sock"
