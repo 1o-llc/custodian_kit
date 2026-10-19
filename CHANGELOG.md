@@ -1,5 +1,161 @@
 # Changelog
 
+## 0.2.0 (2026-10-19)
+
+The bounded and unbounded increment of the 2026-10-19 specification. An agent
+can now ask, before it changes anything, what a change to one item entails and
+what it would cost; write the change as a spec; have it decided against the
+code as it is; and, in a bounded job, have the code written for it and every
+touched line accounted for at close. Nothing is removed from the API. Three
+behaviours change, each named below: a reading with no declaration source
+refuses or says so instead of counting zeros; a job with no verification
+closes `pending`, not `accepted`; and the same-search key is the kit's, so a
+spec read under 0.1.1 is read once more under 0.2.0. Every link is pinned to
+5fe79c7.
+
+### Reading before changing
+
+- The `impact` reading: one target's definitions, use sites, constructions,
+  matches without a catch-all, impl blocks, uses from other crates,
+  dependents, reach, the tests covering it, the features and klepto's check
+  matrix, the linkage records naming it, and the cost of changing it by
+  dimension, each marked measured, heuristic or unknown. Runtime cost, memory
+  layout and concurrency are said unknown with the reason, never written as
+  a number. Its record is a task_history `diagnosis` record.
+  [src/reading/impact.rs#L106](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/impact.rs#L106), the basis [src/reading/impact.rs#L40](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/impact.rs#L40),
+  the unknowns [src/reading/impact.rs#L267](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/impact.rs#L267), the record
+  [src/reading/impact.rs#L318](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/impact.rs#L318). Proven by
+  `a_struct_is_read_with_its_uses_constructions_impls_dependents_and_tests`
+  ([tests/impact.rs#L33](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/impact.rs#L33)) and
+  `a_change_under_several_feature_configurations_counts_them`
+  ([tests/impact.rs#L77](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/impact.rs#L77)).
+- One same-search key, the kit's: `api::SearchKey` (the spec's hash and
+  klepto's fingerprint of the code its scope reads), [src/api.rs#L137](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/api.rs#L137).
+  And one search spec per target, `ReadingSpec::search`
+  ([src/reading/spec.rs#L349](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/spec.rs#L349)): the command line's `run TARGET --kind
+  impact`, a preflight's impact and a plan's are the same spec, so each
+  reuses the others' reading. On the kit a preflight reused the impact
+  `custodian run` had read (receipts #77, #78). Proven by
+  `a_preflight_finds_the_impact_the_command_line_already_read`
+  ([tests/bounded.rs#L273](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/bounded.rs#L273)).
+- `reach` lists the env keys its reached items read, from the registry's
+  `reads_env` marks (rows `reach-env`, [src/reading/kinds.rs#L931](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/kinds.rs#L931)).
+- A reading that reads declarations and has none no longer answers zeros.
+  `sockets` refuses, CUST0039 ([src/reading/kinds.rs#L738](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/kinds.rs#L738)); `reach` and
+  `readers_of_env` say they read no declarations. A workspace names one
+  default source in `config/declared.toml` ([src/reading/kinds.rs#L488](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/kinds.rs#L488)).
+  Before, [src/reading/kinds.rs#L695](https://github.com/1o-llc/custodian_kit/blob/528b2fd003a7cd95ce00c67137a291777a430319/src/reading/kinds.rs#L695) answered 0 entries and 0 sockets
+  for `relayerd` on the kit when the spec named no source (receipt #62); with
+  the job's source it is 2 and 1 (receipt #24). Proven by
+  `a_reading_with_no_declaration_source_refuses_or_says_so_never_zeros`
+  ([tests/reading.rs#L353](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/reading.rs#L353)).
+- `duplicates` heads its answer with its top three crate pairs
+  ([src/reading/kinds.rs#L661](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/kinds.rs#L661)); `the_duplicates_summary_names_the_top_crate_pairs`
+  ([tests/reading.rs#L376](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/reading.rs#L376)).
+
+### Change specs and the preflight
+
+- The change spec (1o modifier `change`, and its TOML twin), one document for
+  the preflight and the writer: `change::ChangeSpec`
+  ([src/change.rs#L408](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/change.rs#L408)), its 20 operations declared once
+  ([src/change.rs#L38](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/change.rs#L38)): creation first (make_struct, make_enum,
+  make_impl, add_method, make_fn, add_field, add_variant, add_derive,
+  add_attribute, add_module, add_dependency, add_test), then add_constructor,
+  add_trait_impl, change_signature, rename, move, extract, gate, anchor.
+  Where each lands is one rule, `change::landing` ([src/change.rs#L1282](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/change.rs#L1282)),
+  read by the preflight and by code_passenger.
+- A function body is simple_impl 0.1.11's toolkit pieces, not free text:
+  `change::PIECES` ([src/change.rs#L638](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/change.rs#L638)) is its 123 macros plus `let`,
+  `value` and `raw`, and `the_pieces_are_the_toolkit_exactly`
+  ([src/change.rs#L1350](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/change.rs#L1350)) holds it equal to the published registry. A
+  `raw` piece is allowed and flagged.
+- `preflight::run_preflight` ([src/preflight.rs#L510](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/preflight.rs#L510)) decides a spec
+  over the code as it is, before anything is written: where it lands, its
+  impact, its preconditions, the files it would write against the files it
+  may write, the decisions it leaves open (`preflight::assess`,
+  [src/preflight.rs#L242](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/preflight.rs#L242)). Its answer is a big-bad-bool word whose flaga
+  rules authorize it ([src/preflight.rs#L45](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/preflight.rs#L45)). A file outside the scope
+  is a scope expansion asked for, never taken. On the kit, a field added to
+  `nodeplan_sdk::uds_contract::UdsRouteTable` was not authorized: its default
+  fills 19 struct literals, in 18 files of other crates (receipt #79).
+  Proven by `a_field_with_a_default_is_authorized_and_lands_inside_the_struct`
+  ([tests/bounded.rs#L53](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/bounded.rs#L53)),
+  `a_write_outside_the_scope_is_asked_for_never_taken_and_a_taken_name_is_a_collision`
+  ([tests/bounded.rs#L93](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/bounded.rs#L93)), `the_word_authorizes_only_when_its_rules_hold`
+  ([src/preflight.rs#L644](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/preflight.rs#L644)).
+- `preflight::gate` ([src/preflight.rs#L623](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/preflight.rs#L623)): a code-changing step runs
+  only on a preflight of this spec's digest over this code's digest. A job
+  step that changes code now runs code_passenger's `transform` line
+  ([src/jobs.rs#L730](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/jobs.rs#L730)); CUST0024 is raised only for a step kind with no
+  line ([src/jobs.rs#L753](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/jobs.rs#L753); before, every such step:
+  [src/jobs.rs#L610](https://github.com/1o-llc/custodian_kit/blob/528b2fd003a7cd95ce00c67137a291777a430319/src/jobs.rs#L610)). `a_code_changing_step_needs_a_preflight_of_this_spec_over_this_code`
+  ([tests/bounded.rs#L108](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/bounded.rs#L108)).
+
+### Decisions, plans, linkage
+
+- A question is asked once. `questions::ask` writes a task_history `problem`
+  record whose id is the question's digest, `questions::answer` a `solution`
+  with the answer and the reason, and `questions::open` leaves out any
+  question answered in any task history of the project
+  ([src/questions.rs#L130](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/questions.rs#L130), [src/questions.rs#L149](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/questions.rs#L149),
+  [src/questions.rs#L94](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/questions.rs#L94)). `a_decision_answered_once_is_never_asked_again_in_any_task`
+  ([tests/bounded.rs#L133](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/bounded.rs#L133)).
+- `plan::run_plan` ([src/plan.rs#L244](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/plan.rs#L244)): an intent read against the code
+  (candidates, reuse, what is new, the top candidates' impact, the cost,
+  alternatives only where the facts give one, the decisions asked together,
+  the steps). The thing the intent names ranks first (`rank`,
+  [src/plan.rs#L148](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/plan.rs#L148)): on the kit, `UdsRouteTable` ranked fourth by word
+  count alone, behind two functions of nodeplan_macros and a test. A plan keeps 25 candidates and
+  counts the rest ([src/plan.rs#L227](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/plan.rs#L227)); on the kit the first record was
+  1.3 MB. `plan::approve` writes a step as a change spec with TODO
+  placeholders the preflight refuses ([src/plan.rs#L510](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/plan.rs#L510)).
+  `an_intent_is_planned_from_the_code_and_a_step_becomes_a_change_spec`
+  ([tests/bounded.rs#L248](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/bounded.rs#L248)), `the_named_thing_ranks_before_names_that_share_its_words`
+  ([src/plan.rs#L558](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/plan.rs#L558)).
+- Linkage records: why declarations are bound together, seven kinds, each
+  bind resolved when recorded and at every check; holding, review or stale;
+  a `// linkage:` anchor no record backs is a finding
+  ([src/linkage.rs#L49](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/linkage.rs#L49), [src/linkage.rs#L191](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/linkage.rs#L191),
+  [src/linkage.rs#L232](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/linkage.rs#L232)). `a_linkage_record_binds_two_declarations_and_goes_stale_when_one_is_gone`
+  ([tests/impact.rs#L108](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/impact.rs#L108)).
+
+### Bounded and unbounded jobs
+
+- `jobs::JobMode` ([src/jobs.rs#L94](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/jobs.rs#L94)). A bounded job's touched Rust and
+  TOML lines must each be covered by one of its transform records
+  (`transform::coverage`, [src/transform.rs#L107](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/transform.rs#L107)); a line no transform
+  covers refuses the close, CUST0031, and the job is closed `rejected`, its
+  record terminal. Documentation is not code
+  ([src/jobs.rs#L1133](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/jobs.rs#L1133)). A bounded job needs code-passenger installed,
+  CUST0037 ([src/jobs.rs#L659](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/jobs.rs#L659)). Unbounded is help: nothing is refused.
+- Every job records whether its target is known and whether its outcome is
+  known (its `verify` lines, [src/jobs.rs#L104](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/jobs.rs#L104)) at open, and the closing
+  receipt the receipt at which each became true. `accepted` needs every
+  verify line satisfied by the job's own runs; with none the result is
+  `pending` ([src/jobs.rs#L1085](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/jobs.rs#L1085)). Before, a job closed `accepted` unless
+  a test failed: [src/jobs.rs#L785](https://github.com/1o-llc/custodian_kit/blob/528b2fd003a7cd95ce00c67137a291777a430319/src/jobs.rs#L785). `the_four_combinations_of_target_and_outcome_known`
+  ([tests/bounded.rs#L162](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/bounded.rs#L162)),
+  `a_bounded_job_refuses_hand_edits_at_close_and_needs_its_facts_before_a_preflight_authorizes`
+  ([tests/bounded.rs#L216](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/tests/bounded.rs#L216)), `a_file_is_covered_only_when_its_transforms_carry_it_open_to_close`
+  ([src/transform.rs#L160](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/transform.rs#L160)).
+- The task states (proposed, ready, running, blocked, paused, verifying,
+  completed, failed) are one word derived from the records
+  ([src/tasks.rs#L19](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/tasks.rs#L19)); `the_states_are_the_specification_s_words`
+  ([src/tasks.rs#L68](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/tasks.rs#L68)).
+
+### The rest
+
+- Refusals CUST0031–CUST0039 ([src/reading/refusal.rs#L72](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/reading/refusal.rs#L72) onward).
+- simple_impl_derive 0.2.7, xccute_contract 0.1.3, xccute_decisions 0.2.1;
+  `rust-version` 1.89, and CI tests on it. The journal's busy timeout is one
+  named value, `store::JOURNAL_BUSY` ([src/store.rs#L21](https://github.com/1o-llc/custodian_kit/blob/5fe79c7dd7116094ced976fe44448e62e7dc91f3/src/store.rs#L21)).
+- Public API: 1131 items added, none removed (rustdoc JSON of 528b2fd against
+  5fe79c7). Every new file carries the notice
+  Copyright © 2026 1o. All rights reserved.; the existing notices are as they
+  were.
+- 213 tests: 147 unit, 9 in tests/bounded.rs, 5 in tests/impact.rs, and the
+  0.1.1 suites.
+
 ## 0.1.1 (2026-10-19)
 
 Additive: nothing 0.1.0 does changes.
