@@ -3,8 +3,9 @@
 //! here, as fleet_commands declares the kit's (a `CompositeShell` root, a
 //! `SimpleSubCommand` leaf per way it is called, its exit statuses named):
 //! custodian itself (`exec-reading`, the reading as a child process), cargo
-//! (`test`), git (`diff --name-only`), code-passenger (`gate`) and maintenance
-//! (its own declared lines, from its runner). A plan of lines is walked from
+//! (`test`, `check`), git (`diff --name-only`), code-passenger (`gate`,
+//! `transform`), the cheap model's command line (`claude -p`, the exercise's
+//! intents) and maintenance (its own declared lines, from its runner). A plan of lines is walked from
 //! the first by each line's exit-status policy, and every line walked leaves
 //! xccute's `RuntimeOperationReceipt` (plan digest, operation digest,
 //! decision) with what it printed and how long it took.
@@ -56,6 +57,7 @@ pub struct ExecReading {
 #[derive(CompositeShell, Debug, Clone, Copy, Default)]
 #[shell(program = "cargo")]
 #[composite(command = "test", method = "test", ty = CargoTest, init = "manifest_path,package")]
+#[composite(command = "check", method = "check", ty = CargoCheck, init = "manifest_path")]
 pub struct Cargo;
 
 /// `cargo test --manifest-path M -p PACKAGE [--lib --bins | --test T] -- FILTER... --exact`.
@@ -89,6 +91,33 @@ fn cargo_test_valid(line: &CargoTest) -> CommandValidationResult {
         return Err(xccute_contract::CommandValidationError::structural("the filters follow `--`").with_field("rest"));
     }
     Ok(())
+}
+
+/// `cargo check --manifest-path M [--workspace] [--all-targets] [--offline] [--message-format F]`: whether the code
+/// compiles, the first error in what it printed (the exercise's compile step).
+#[allow(clippy::duplicated_attributes)]
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "check")]
+#[exit_status(code = 0, word = "compiles")]
+#[exit_status(code = 101, word = "does not compile")]
+pub struct CargoCheck {
+    #[builder(init_required, into)]
+    #[arg(kv = "--manifest-path")]
+    pub manifest_path: OsString,
+    #[arg(flag = "--workspace")]
+    pub workspace: bool,
+    #[arg(flag = "--all-targets")]
+    pub all_targets: bool,
+    #[arg(flag = "--offline")]
+    pub offline: bool,
+    #[builder(into)]
+    #[arg(kv = "--message-format")]
+    pub message_format: Option<OsString>,
+}
+
+/// `cargo check` over every crate and target of the workspace at `root`, offline, one short line per message.
+pub fn cargo_check(root: &Path) -> CargoCheckRooted<Cargo> {
+    Cargo::check(root.join("Cargo.toml").as_os_str()).workspace().all_targets().offline().message_format("short")
 }
 
 /// `cargo test` for one package and target, exactly these tests (all of them
@@ -164,6 +193,27 @@ pub fn passenger_gate(root: &Path, spec: &Path, write: bool) -> PassengerAtRoote
         words.push("--write".into());
     }
     CodePassenger::at_root(root.as_os_str()).words(words)
+}
+
+/// The cheap model's command line, `claude` (the exercise's intents become change specs through it).
+#[derive(CompositeShell, Debug, Clone, Copy, Default)]
+#[shell(program = "claude")]
+#[composite(command = "-p", method = "print", ty = ModelPrint, init = "model,prompt")]
+pub struct ModelCli;
+
+/// `claude -p --model MODEL PROMPT`: one answer to one prompt, printed, nothing else done.
+#[allow(clippy::duplicated_attributes)]
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "-p")]
+#[exit_status(code = 0, word = "answered")]
+#[exit_status(code = 1, word = "not answered")]
+pub struct ModelPrint {
+    #[builder(init_required, into)]
+    #[arg(kv = "--model")]
+    pub model: OsString,
+    #[builder(init_required, into)]
+    #[arg(positional)]
+    pub prompt: OsString,
 }
 
 /// Whether a program is on PATH (a bounded job needs code-passenger, its writer).

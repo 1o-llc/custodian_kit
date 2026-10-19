@@ -571,10 +571,13 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     let mut said = vec![running_decision_said(), format!("job {id} ({name}, {kind}) started: {} → {}", ctx.rel(&queued), ctx.rel(&running))];
     let in_job = InJob { id: id.clone(), readings: running.join(READINGS_DIR) };
     let mut runs = Vec::new();
-    let t = if kind == "specs" { None } else { Some(template_in(store, &kind)?) };
+    // an exercise has no template: its cases are planned from the index (`crate::exercise`)
+    let exercise = kind == crate::exercise::KIND;
+    let t = if kind == "specs" || exercise { None } else { Some(template_in(store, &kind)?) };
     // the task history: a new revision of the job's task, its task and intent records
     let intent = match &t {
         Some(t) => format!("{} ({} {})", t.summary, t.kind, jf.target.clone().unwrap_or_default()),
+        None if exercise => format!("exercise custodian's change path on copies of the project: {}", crate::exercise::options_of(&running)?.line()),
         None => format!("read the job's specs: {name}"),
     };
     let task = crate::task_records::open(store, &name, &kind, &id, &intent)?;
@@ -612,7 +615,12 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     }
     let routes = count_routes(&jf, t.as_ref());
     take_counts(ctx, &running, &in_job, "open", &routes, &mut said, &mut runs, by)?;
-    if kind == "specs" {
+    if exercise {
+        // every case on a copy in the job's data folder, its findings diagnosis records of the job's task
+        let (ran, case_said) = crate::exercise::run_in_job(ctx, &running, &in_job, &task)?;
+        said.extend(case_said);
+        runs.extend(ran);
+    } else if kind == "specs" {
         for s in job_specs(&running) {
             let ran = run_reading_by(ctx, &s, again, Some(&in_job), by)?;
             said.extend(ran.said.iter().cloned());
@@ -635,6 +643,10 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
 
 /// Whether a job's target resolves: a declared route, or an item of the scan.
 fn target_resolves(ctx: &Ctx, target: &str, ws: Option<&crate::api::Workspace>) -> bool {
+    // `*` is the workspace: there whenever the scan is
+    if target.trim() == crate::change::WORKSPACE {
+        return ctx.root.join("Cargo.toml").is_file();
+    }
     let table = match ws {
         Some(w) => Some(w.paths().clone()),
         None => crate::paths::PathsTable::load(&ctx.root, ctx.store.as_ref()).ok(),
@@ -923,7 +935,14 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         history_said.push(format!("task history: {}/{} ({} changes, {} verifications, result)", task.task_id, task.revision, changes, tests.len() + runs.iter().filter(|r| r.command == "check").count()));
     }
     let kind = jf.kind.clone().unwrap_or_else(|| "specs".into());
-    let guidance = (kind != "specs").then(|| template_in(store, &kind).ok().map(|t| t.summary)).flatten();
+    let mut guidance = (kind != "specs").then(|| template_in(store, &kind).ok().map(|t| t.summary)).flatten();
+    // an exercise: its headline is the guidance, what to fix (most findings first) its findings
+    if kind == crate::exercise::KIND {
+        if let Some(s) = crate::exercise::summary_of(&running) {
+            guidance = Some(format!("{} (exercise report {id})", s.headline()));
+            findings.extend(s.to_fix.iter().cloned());
+        }
+    }
     let decisions_open: Vec<crate::questions::Question> = match (&jf.task_id, crate::questions::open(store)) {
         (Some(t), Ok(qs)) => qs.into_iter().filter(|q| q.task.as_deref().is_some_and(|x| x.starts_with(&format!("{t}/")))).collect(),
         _ => Vec::new(),

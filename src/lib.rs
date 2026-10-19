@@ -59,6 +59,7 @@ pub mod questions;
 pub mod transform;
 pub mod plan;
 pub mod tasks;
+pub mod exercise;
 
 #[cfg(test)]
 mod tests;

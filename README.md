@@ -304,6 +304,52 @@ is a finding.
 | `guarded` | a declaration must not be changed without considering the others |
 | `semantics` | a dependency must not be replaced casually: its semantics are required |
 
+## The exercise
+
+`exercise` is a job kind that tries custodian's own change path on the
+project's code, every result a receipt. For each operation of the change
+vocabulary and each kind of unit it applies to (`exercise::units_of`: item,
+function, impl, module, file, crate), N targets are picked from the index by a
+seed, and each pick is a case run on a copy of the workspace in the job's data
+folder (the project's tree is never written): the smallest change spec the
+operation can make there, its preflight, code_passenger's `transform --write`,
+`cargo check` over the copy (and the landing crate's tests with `tests`), and
+the closing check that every touched file is covered by the transform record.
+Every refusal, crash, compile error, failed test or uncovered file is a finding
+(`exercise::FindingCode`) and a diagnosis record of the job's task naming its
+receipt. With an intents file, each line goes to a cheap model's declared line
+(`claude -p --model claude-haiku-4-5-20251001`) for a spec that runs the same
+chain; no model on the machine is `not run: no model`. The options are one
+big-bad-bool word (`exercise::ExerciseWord`, its rule `model => intents`
+checked by flaga_solver); the cases run as tasks of one `scope`, numbered by a
+uh-tom-mick counter; the copy's counts are tree_history's. The summary
+(`data/exercise/summary.json` and `.md`) has the cases run and passed, the
+findings by code, the operation × unit matrix, the slowest cases and what to fix
+first; a `check` receipt named `exercise` is the job's verification.
+
+| unit | what it means |
+|---|---|
+| `item` | a module-level declaration that is not a function: a struct, an enum, a trait, a const, a static, a type alias |
+| `function` | a free function, or a method of an inherent impl |
+| `impl` | a type with an inherent impl block (what a new method or constructor lands inside) |
+| `module` | a module with a file of its own, as its route (crate:<name>/src/<file>.rs) |
+| `file` | a crate's root file, as its route (crate:<name>/src/lib.rs) |
+| `crate` | a crate of the workspace, as its route (crate:<name>) |
+
+| finding | what it means |
+|---|---|
+| `spec-refused` | the change spec written for the case is refused by the spec's own checks |
+| `preflight-refused` | the preflight did not authorize the change |
+| `preflight-failed` | the preflight gave a refusal instead of a verdict |
+| `gate-refused` | the transform's gate found no authorizing preflight of this spec over this code |
+| `transform-refused` | code_passenger refused the spec (exit 2) |
+| `transform-unproved` | code_passenger did not prove the change: a configuration did not compile, or a postcondition did not hold (exit 1) |
+| `transform-crashed` | code_passenger panicked, was killed, or exited with a status it does not declare |
+| `compile-error` | cargo check fails on the copy after the transform wrote it |
+| `test-failure` | the landing crate's tests fail after the transform wrote it |
+| `uncovered` | a file the case touched is not carried by its transform record from its digest before to its digest after |
+| `model-miss` | the cheap model's answer is not a change spec, or names a target that does not resolve |
+
 ## Bounded and unbounded jobs
 
 `jobs::JobMode`: a bounded job's touched Rust and TOML lines must each be

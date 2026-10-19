@@ -296,6 +296,25 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                     }
                 }
                 pre.push(Check { what: "every struct literal gets the new field".into(), holds: !preserve || default.is_some() || literals.is_empty(), detail: format!("{} literals; {}", literals.len(), if default.is_some() { "the default fills them" } else { "no default given" }) });
+                // a literal can name the new field only where the field is visible: a private one in the struct's module
+                // and the modules inside it, a `pub(crate)` or `pub(super)` one in the struct's crate, a `pub` one anywhere
+                let vis = spec.field.as_ref().and_then(|x| x.vis.clone()).unwrap_or_default();
+                let module_of = |p: &str| crate::change::module_of_file(&f.k, &f.root.join(p)).map(|m| m.path.clone());
+                let blind: Vec<String> = literals
+                    .iter()
+                    .filter_map(|r| {
+                        let p = r.path.clone().unwrap_or_default();
+                        let sees = match vis.trim() {
+                            "pub" => true,
+                            v if v.starts_with("pub(") => f.package_of_rel(&p).map(|k| k.name.as_str()) == Some(l.package.as_str()),
+                            _ => module_of(&p).is_some_and(|m| m == l.module || m.starts_with(&format!("{}::", l.module))),
+                        };
+                        (!sees).then(|| format!("{p}:{}", r.line.unwrap_or(0)))
+                    })
+                    .collect();
+                if default.is_some() {
+                    pre.push(Check { what: "every struct literal can name the new field".into(), holds: !preserve || blind.is_empty(), detail: if blind.is_empty() { format!("the field is visible at every literal ({})", if vis.is_empty() { "private" } else { vis.as_str() }) } else { format!("{} cannot see a {} field: {}", blind.len(), if vis.is_empty() { "private" } else { vis.as_str() }, blind.join(", ")) } });
+                }
             }
             Operation::AddVariant => {
                 let t = ty.filter(|t| !t.variants.is_empty());
@@ -349,6 +368,13 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                 let feat = spec.feature.clone().unwrap_or_default();
                 let declared = f.k.features.get(&l.package).is_some_and(|m| m.features.contains_key(&feat));
                 pre.push(Check { what: format!("{} declares the feature {feat}", l.package), holds: declared, detail: if declared { "declared".into() } else { "declare it first (code_passenger's features document)".into() } });
+                // every use outside the item itself stops compiling without the feature
+                let item = l.item.clone().unwrap_or_default();
+                let uses: Vec<String> = kind_rows("use-site").iter().filter(|r| r.attributes.get("item").is_none_or(|i| *i != item && !i.starts_with(&format!("{item}::")))).map(|r| format!("{}:{} ({})", r.path.clone().unwrap_or_default(), r.line.unwrap_or(0), r.attributes.get("item").cloned().unwrap_or_default())).collect();
+                for u in &uses {
+                    listed.push(format!("use {u}: stops compiling without {feat} unless it is gated too"));
+                }
+                pre.push(Check { what: format!("nothing outside {item} uses it ungated"), holds: !preserve || uses.is_empty(), detail: if uses.is_empty() { "no uses".into() } else { format!("{} uses outside it (compatibility break gates it anyway)", uses.len()) } });
             }
             Operation::Anchor => {
                 let name = spec.linkage.clone().unwrap_or_default();

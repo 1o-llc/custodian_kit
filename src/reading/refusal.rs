@@ -100,6 +100,8 @@ pub enum ReadingRefusal {
     UnknownFeature,
     #[liaise(code = 107, msg = "bundles refused an entry")]
     Entry,
+    #[liaise(code = 120, msg = "the exercise's options are refused: a word that is not an operation or a unit kind, a number that is not one, or a rule of the exercise word broken")]
+    ExerciseRefused,
 }
 
 impl ReadingRefusal {
