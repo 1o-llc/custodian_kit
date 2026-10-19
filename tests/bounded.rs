@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! Change specs and their preflight, the gate a code-changing step passes, decisions asked once, the modes of a job
 //! and the two facts it starts from, and an intent's plan, on copies of the fixture workspace.
 

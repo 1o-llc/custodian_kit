@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! An intent's plan (unbounded work): what an objective entails, found from
 //! the code before anything is changed, and proposed as bounded steps.
 //!

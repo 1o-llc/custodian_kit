@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! A task's state, one word, derived from the records each time it is read:
 //! never stored as a second copy that could drift from them.
 //!

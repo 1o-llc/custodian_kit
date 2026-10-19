@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! The change spec: one bounded operation on the code, declared as a document
 //! (1o modifier `change`, `v1.<name>.1o.change`; `<name>.toml` is its twin),
 //! the contract between the agent that asks for a change and the writer that

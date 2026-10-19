@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! Architectural linkage records: why declarations are bound together, kept
 //! as documents beside the readings and checked against the code each time
 //! they are read.

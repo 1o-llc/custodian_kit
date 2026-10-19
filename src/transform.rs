@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! A transform's record: what code_passenger wrote for one change spec, file
 //! by file, with the digests before and after, the lines it wrote, the
 //! passenger checkpoints around the write, the cargo checks that proved it

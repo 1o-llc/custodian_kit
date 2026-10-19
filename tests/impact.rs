@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! The impact reading and its record, on the fixture workspaces: what a change to a type, an enum, a crate and a
 //! feature-gated item entails; the cost by dimension with its basis; the linkage records that bind a target, stale
 //! once a bound declaration is gone.

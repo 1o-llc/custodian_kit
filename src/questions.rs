@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! Decisions only a person makes, found before the work and asked together,
 //! and their answers, kept as the project's task history so no answered
 //! question is asked again.

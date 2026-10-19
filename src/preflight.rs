@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! The preflight: what a change spec entails over the code as it is, and
 //! whether it is authorized, decided before anything is written.
 //!

@@ -1,3 +1,5 @@
+// Copyright © 2026 1o. All rights reserved.
+
 //! The `impact` reading: everything a change to one target entails, in one
 //! reading over klepto's scan, and the structured record of it.
 //!
