@@ -1263,8 +1263,9 @@ pub fn is_receiver(arg: &str) -> bool {
 
 /// What stops a function from being inlined, one line each (none: it can be). The one rule the preflight and the
 /// writer read: a free function or an associated one without `self`, not generic, not `async` or `unsafe`, with a
-/// body; no `return` and no `?` in its body (in the caller they would leave the caller); not calling itself; and
-/// every use of it a call (a function named as a value has no call to put the body in).
+/// body; no `return` and no `?` in its body (in the caller they would leave the caller), no `Self` (in the caller it
+/// is the caller's); not calling itself; every use of it a call (a function named as a value has no call to put the
+/// body in); and every call in the function's own file, where the names its body uses resolve as they do in it.
 pub fn inline_blockers(k: &klepto::Klepto, item: &str) -> Vec<String> {
     let mut out = Vec::new();
     let Some(f) = k.functions.iter().find(|x| x.fq_name == item) else { return vec![format!("{item}: not a function the scan captured")] };
@@ -1292,6 +1293,9 @@ pub fn inline_blockers(k: &klepto::Klepto, item: &str) -> Vec<String> {
                     if e.question {
                         out.push(format!("{item}'s body uses `?`: in a caller it would leave the caller"));
                     }
+                    if e.self_type {
+                        out.push(format!("{item}'s body names `Self`: in a caller it is the caller's"));
+                    }
                 }
                 None => out.push(format!("{item}: no body at {}:{line}", f.location.path.display())),
             }
@@ -1303,6 +1307,12 @@ pub fn inline_blockers(k: &klepto::Klepto, item: &str) -> Vec<String> {
         out.push(format!("{item} calls itself"));
     }
     let calls: std::collections::BTreeSet<(std::path::PathBuf, u32)> = k.calls.iter().filter(|c| names(&c.resolution)).filter_map(|c| Some((c.location.path.clone(), c.location.line?))).collect();
+    let home = f.location.path.canonicalize().unwrap_or_else(|_| f.location.path.clone());
+    for (path, line) in &calls {
+        if path.canonicalize().unwrap_or_else(|_| path.clone()) != home {
+            out.push(format!("{item} is called from another file, {}:{line}: the names its body uses do not resolve there as they do in its own", path.display()));
+        }
+    }
     for p in k.paths.iter().filter(|p| names(&p.resolution)) {
         if let Some(l) = p.location.line {
             if !calls.contains(&(p.location.path.clone(), l)) {
@@ -1338,11 +1348,13 @@ impl<'ast> syn::visit::Visit<'ast> for BodyOf {
     }
 }
 
-/// `return` and `?` in a body, outside the closures, async blocks and items nested in it (theirs leave only them).
+/// `return` and `?` in a body, outside the closures, async blocks and items nested in it (theirs leave only them),
+/// and `Self` anywhere in it.
 #[derive(Default)]
 struct Escapes {
     ret: bool,
     question: bool,
+    self_type: bool,
 }
 
 impl<'ast> syn::visit::Visit<'ast> for Escapes {
@@ -1353,6 +1365,12 @@ impl<'ast> syn::visit::Visit<'ast> for Escapes {
     fn visit_expr_try(&mut self, e: &'ast syn::ExprTry) {
         self.question = true;
         syn::visit::visit_expr_try(self, e);
+    }
+    fn visit_path(&mut self, p: &'ast syn::Path) {
+        if p.segments.first().is_some_and(|s| s.ident == "Self") {
+            self.self_type = true;
+        }
+        syn::visit::visit_path(self, p);
     }
     fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
     fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}

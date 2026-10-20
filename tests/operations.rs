@@ -18,14 +18,16 @@ fn write(root: &Path, rel: &str, text: &str) {
 
 fn project(tag: &str) -> (Store, Ctx, Workspace) {
     let root = std::env::temp_dir().join(format!("custodian-kit-ops-{tag}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-    write(&root, "Cargo.toml", "[workspace]\nresolver = \"2\"\nmembers = [\"marks\", \"shop\"]\n");
+    write(&root, "Cargo.toml", "[workspace]\nresolver = \"2\"\nmembers = [\"marks\", \"shop\", \"app\"]\n");
+    write(&root, "app/Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nshop = { path = \"../shop\" }\n");
+    write(&root, "app/src/lib.rs", "pub fn shop_version() -> u32 {\n    shop::version()\n}\n");
     write(&root, "marks/Cargo.toml", "[package]\nname = \"marks\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[lib]\nproc-macro = true\n");
     write(&root, "marks/src/lib.rs", "use proc_macro::TokenStream;\n\n#[proc_macro_attribute]\npub fn keep(_a: TokenStream, item: TokenStream) -> TokenStream {\n    item\n}\n");
     write(&root, "shop/Cargo.toml", "[package]\nname = \"shop\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nmarks = { path = \"../marks\" }\n");
     write(
         &root,
         "shop/src/lib.rs",
-        "use marks::keep;\n\n#[keep]\npub struct Packed {\n    pub bits: u8,\n}\n\nfn double(n: u32) -> u32 {\n    n * 2\n}\n\npub fn twice(o: u32) -> u32 {\n    double(o) + double(1)\n}\n\nfn early(n: u32) -> u32 {\n    if n > 3 {\n        return 3;\n    }\n    n\n}\n\npub fn capped() -> u32 {\n    early(9)\n}\n\npub fn version() -> u32 {\n    1\n}\n",
+        "use marks::keep;\n\n#[keep]\npub struct Packed {\n    pub bits: u8,\n}\n\nfn double(n: u32) -> u32 {\n    n * 2\n}\n\npub fn twice(o: u32) -> u32 {\n    double(o) + double(1)\n}\n\nfn early(n: u32) -> u32 {\n    if n > 3 {\n        return 3;\n    }\n    n\n}\n\npub fn capped() -> u32 {\n    early(9)\n}\n\npub fn version() -> u32 {\n    1\n}\n\nimpl Packed {\n    pub fn zero() -> Self {\n        Self { bits: 0 }\n    }\n}\n",
     );
     let (store, _) = Store::init(&root, Mode::Agent).unwrap();
     let ctx = Ctx { root: store.root.clone(), store: Some(store.clone()), exe: PathBuf::from("custodian") };
@@ -69,6 +71,9 @@ fn inline_is_authorized_for_a_function_whose_body_can_sit_in_its_callers() {
     assert!(!e.authorized);
     assert!(e.preconditions.iter().any(|c| c.what == "the function can be inlined" && !c.holds && c.detail.contains("returns early")), "{:?}", e.preconditions);
     assert!(custodian_kit::change::inline_blockers(w.klepto(), "shop::Packed").iter().any(|b| b.contains("not a function")));
+    // a call in another crate: the body's names do not resolve there; `Self` in the body is the caller's
+    assert!(custodian_kit::change::inline_blockers(w.klepto(), "shop::version").iter().any(|b| b.contains("called from another file")), "{:?}", custodian_kit::change::inline_blockers(w.klepto(), "shop::version"));
+    assert!(custodian_kit::change::inline_blockers(w.klepto(), "shop::Packed::zero").iter().any(|b| b.contains("names `Self`")), "{:?}", custodian_kit::change::inline_blockers(w.klepto(), "shop::Packed::zero"));
 }
 
 #[test]
