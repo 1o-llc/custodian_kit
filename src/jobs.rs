@@ -933,7 +933,7 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
                             if marks.is_empty() { String::new() } else { format!(" ({})", marks.join(", ")) }
                         ))
                     }
-                    "test-line" => findings.push(format!("prove a fix with: {}", row.label)),
+                    "test-line" => findings.push(format!("{PROVE_A_FIX}{}", row.label)),
                     _ => {}
                 }
             }
@@ -1050,6 +1050,9 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
             findings.extend(s.to_fix.iter().cloned());
         }
     }
+    // each finding once, in the order first met; the lines that prove a fix only when a test the job ran fails
+    let mut seen_findings = BTreeSet::new();
+    findings.retain(|f| seen_findings.insert(f.clone()) && (!judged.own.is_empty() || !f.starts_with(PROVE_A_FIX)));
     let decisions_open: Vec<crate::questions::Question> = match (&jf.task_id, crate::questions::open(store)) {
         (Some(t), Ok(qs)) => qs.into_iter().filter(|q| q.task.as_deref().is_some_and(|x| x.starts_with(&format!("{t}/")))).collect(),
         _ => Vec::new(),
@@ -1227,6 +1230,9 @@ pub fn test_named(test: &str, what: &str) -> bool {
         None => test == what || test.ends_with(&format!("::{what}")),
     }
 }
+
+/// A closing finding naming the cargo test line that proves a fix: listed once, and only when a test fails.
+pub const PROVE_A_FIX: &str = "prove a fix with: ";
 
 /// Files cargo writes from the manifests: a job that changes a dependency changes them through cargo, never by hand.
 pub const CARGO_WRITTEN: &[&str] = &["Cargo.lock"];

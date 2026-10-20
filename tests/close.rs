@@ -171,3 +171,33 @@ fn a_test_verification_names_a_test_or_every_test_of_a_module() {
     assert!(!test_named("kitchen::tests::can_cook", "cook") && !test_named("kitchen::tests_more::can_cook", "tests::*") && !test_named("kitchen::tests::can_cook", "kitchen::*::x"));
     jobs::check_verify("test:pantry_tests::*").unwrap();
 }
+
+#[test]
+fn a_closes_findings_are_each_said_once_and_the_lines_that_prove_a_fix_only_with_a_failing_test() {
+    let close = |name: &str, break_it: bool| {
+        let (store, ctx) = project(name);
+        let w = Workspace::open_with(&store.root, &Default::default(), Resolving::Job).unwrap();
+        let spec = store.root.join("touch.toml");
+        std::fs::write(&spec, "name = \"touch\"\nobjective = \"o\"\noperation = \"add_attribute\"\ntarget = \"core_lib::vault_key\"\nattribute = \"#[inline]\"\n").unwrap();
+        job(&store, name, &format!("{{ job {{ name \"{name}\" kind \"specs\" target \"crate:core_lib\" verify \"test:vault_key_is_42\" }} }}\n"));
+        let started = jobs::start_with(&ctx, Some(name), false, Some(&w)).unwrap();
+        let in_job = InJob { id: started.id.clone(), readings: started.folder.join(jobs::READINGS_DIR) };
+        if break_it {
+            let lib = store.root.join("crates/core_lib/src/lib.rs");
+            std::fs::write(&lib, std::fs::read_to_string(&lib).unwrap().replace("k + 1", "k + 2")).unwrap();
+        }
+        // the same impact read three times: its test lines are findings of each reading
+        for _ in 0..3 {
+            custodian_kit::preflight::run_preflight(&ctx, &spec, Some(&in_job), custodian_kit::runs::Runner::InProcess(&w)).unwrap();
+        }
+        gate_tests(&ctx, &in_job);
+        jobs::close_with(&ctx, &started.id, Some(&w)).unwrap().0
+    };
+    let quiet = close("quiet", false);
+    assert!(!quiet.findings.iter().any(|f| f.starts_with(jobs::PROVE_A_FIX)), "no test of the job fails: {:?} {:?}", quiet.findings, quiet.failing);
+    let failing = close("failing", true);
+    let prove: Vec<&String> = failing.findings.iter().filter(|f| f.starts_with(jobs::PROVE_A_FIX)).collect();
+    assert!(!prove.is_empty(), "a test fails: {:?} {:?}", failing.findings, failing.failing);
+    let unique: std::collections::BTreeSet<&&String> = prove.iter().collect();
+    assert_eq!(unique.len(), prove.len(), "each once: {prove:?}");
+}
