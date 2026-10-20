@@ -1,5 +1,99 @@
 # Changelog
 
+## 0.3.6 (2026-10-20)
+
+A program built from an empty crate through change specs (the pantry: 42 specs, two bounded jobs) found where the
+vocabulary stopped. Its first job closed accepted; its second, which made two crate features, was rejected because
+no operation could write a feature or make a dependency optional, so the agent edited the manifest by hand. This
+release adds what it needed and fixes the fourteen smaller things it found, numbered as the findings were. It also
+brings in the `patterns` branch and the toolkit of simple_impl 0.1.12, and fixes how a job's close compares a test
+that fails in a scratch folder. Nothing is removed from the API: the rustdoc JSON of 0.3.5 and 0.3.6 differ by 408
+additions and no removal. Every link is pinned to b2a40dc.
+
+### A failing test's scratch folder
+
+- item-hold's close said `failed_test` for seven tests that fail the same way at the base: each panics on a path
+  in a fresh temporary folder (`.tmpY3a7Dp` there, `.tmpbLm43K` here), and the first failing line kept the folder's
+  name: [baseline.rs L124 at 0.3.5](https://github.com/1o-llc/custodian_kit/blob/797945c/src/baseline.rs#L124). The line now writes the system temp folder and the one name under it as
+  `<temp>`: [baseline.rs L127-L159](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/baseline.rs#L127-L159). Proof: `the_first_failing_line_is_the_panics_message_with_the_root_written_root`
+  ([baseline.rs L339](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/baseline.rs#L339)); item-hold's fix2 closed `accepted` with its 31 failing tests named pre-existing.
+
+### patterns and the toolkit of simple_impl 0.1.12
+
+- The `patterns` reading (merged from the branch of that name): every function body against the toolkit, its shape,
+  the pieces whose expansion it holds (exact, or near with the difference named), the replace_body spec that swaps
+  them, and the repeated shapes no piece writes. A kind that walks the syntax trees is now the count, the bundle,
+  the duplicates and the patterns: [spec.rs L126-L128](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/reading/spec.rs#L126-L128).
+- The toolkit is simple_impl 0.1.12 ([change.rs L859](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L859)): seven new pieces, `ensure_valid`, `require_ok_into`,
+  `require_some_into`, `ok_or_else_return`, `return_if_err`, `if_else` and `table`
+  ([change.rs L744](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L744) to [change.rs L763](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L763)), and eleven probes ([probe.rs L101-L125](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/toolkit/probe.rs#L101-L125)); the
+  catalog is made again, 151 shapes (`schema/toolkit/simple_impl-0.1.12.shapes.json`; the 0.1.11 file is kept).
+- A slot written around its placeholder (`require_some_into`'s `|| __si_error`) writes the body's code back inside
+  it, so the `ok_or_else` call is never written as the `ok_or` one: [probe.rs L653](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/toolkit/probe.rs#L653),
+  [matcher.rs L450-L455](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/toolkit/matcher.rs#L450-L455).
+- Proof: `each_new_probe_expands_and_matches_its_own_shape` ([tests.rs L205](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/toolkit/tests.rs#L205)): each probe's call,
+  expanded, is matched as its own shape exactly and the spec it proposes writes the call back. On the fixture `ws`
+  the patterns reading finds 2 functions with an exact toolkit match (both `table`), 0 before; pieces matched
+  somewhere 2, 1 before.
+
+### The pantry's findings
+
+1. **Features in the manifest.** `declare_feature` ([change.rs L64](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L64)): `feature` and `enables` write
+   `[features] name = [..]`; `optional` on `add_dependency` and `change_dependency` ([change.rs L383](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L383)).
+   Each entry is read through the feature graph ([change.rs L1622](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L1622), [change.rs L1655](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L1655)): `a/x` and
+   `b?/y` name a feature the dependency has, else refused with its features named; `dep:b` an optional dependency,
+   or a required one the declaration makes optional in the same step (cargo takes `dep:` only for an optional one);
+   a plain name a feature the crate declares. The preflight says what the feature brings at each level and which
+   entries are weak ([preflight.rs L384](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/preflight.rs#L384)). One refusal per close: code written by hand is CUST0031 and names
+   the other files too; a file no operation writes, a features document among them, is CUST0041
+   ([jobs.rs L1061](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/jobs.rs#L1061), [jobs.rs L1352](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/jobs.rs#L1352)); 0.3.5 counted every TOML file as code
+   ([jobs.rs L973 at 0.3.5](https://github.com/1o-llc/custodian_kit/blob/797945c/src/jobs.rs#L973)). Proof: tests/operations.rs `declare_feature_takes_every_cargo_form_and_reads_it_through_the_feature_graph`
+   (L190) and `declare_feature_refuses_a_feature_the_dependency_does_not_have_and_names_its_features` (L206) on a
+   workspace with `a/x = ["c/z"]`; tests/close.rs `a_bounded_job_names_every_file_it_touched_and_a_file_no_operation_writes_needs_allow_file` (L129).
+2. **A feature named like its dependency** (`chrono = ["dep:chrono"]`): klepto 0.3.4 writes it; through
+   `declare_feature` too.
+3. **A library beside a binary.** `make_lib` ([change.rs L63](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L63), [preflight.rs L287](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/preflight.rs#L287)); a module
+   named `lib`, `main` or `mod` is refused and points to it ([preflight.rs L284](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/preflight.rs#L284)). Proof:
+   `make_lib_is_for_a_crate_with_only_a_binary_and_a_module_named_lib_is_refused` (tests/operations.rs L112).
+4. **A generator's function unseen.** The scan reads dependency macros through a frozen `cargo metadata`; while
+   the tree's lock file lacked the dependency a transform had just added, it read none, and a function a toolkit
+   generator writes was not there. code_passenger 0.4.4 writes the lock file with the manifest; the refusal now says
+   why ([change.rs L1769](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L1769), was [change.rs L1585 at 0.3.5](https://github.com/1o-llc/custodian_kit/blob/797945c/src/change.rs#L1585)). Proof:
+   `a_target_unseen_while_the_lock_file_is_behind_the_manifests_says_why` (tests/operations.rs L129).
+5. **A signature and a body together.** `change_signature` with `function.body` writes both in one step, said in
+   the preflight ([preflight.rs L465](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/preflight.rs#L465)). Proof: `change_signature_with_a_body_says_both_are_proved_together` (L143).
+6. **A module's tests.** `test:<module>::*` verifies every test of a module ([jobs.rs L1227](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/jobs.rs#L1227), was
+   [jobs.rs L1193 at 0.3.5](https://github.com/1o-llc/custodian_kit/blob/797945c/src/jobs.rs#L1193)); `add_test` into a module the file does not have makes it
+   ([preflight.rs L514](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/preflight.rs#L514), was [preflight.rs L468 at 0.3.5](https://github.com/1o-llc/custodian_kit/blob/797945c/src/preflight.rs#L468)). Proof: `a_test_verification_names_a_test_or_every_test_of_a_module`
+   (tests/close.rs L167), `add_test_into_a_module_the_file_does_not_have_says_it_is_made` (tests/operations.rs L151).
+7. **A gate twice.** `gate` refuses an item its feature gates already ([preflight.rs L435](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/preflight.rs#L435)); code that
+   compiles only with the feature on takes its `#[cfg]` in its `attrs` as it is made, said in the vocabulary.
+   Proof: `gate_refuses_an_item_its_feature_gates_already` (L159).
+8. **cfg_attr derives.** klepto 0.3.4: a use that exists only with the feature on is not lost when it is off; the
+   pantry's "with json off" names `to_json` and its test, not all 26 items.
+9. **The manifest's spacing.** code_passenger 0.4.4: `features = ["derive"], optional = true`.
+10. **Features in a test run.** `testrun::Configuration` ([testrun.rs L44](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/testrun.rs#L44)): a line's feature
+    configuration, carried in its target word (`lib [features json]`) so its outcomes are told apart and a close's
+    rerun runs it the same way (baseline and handoff read it back); `Configuration::matrix` is the check matrix's
+    ([testrun.rs L115](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/testrun.rs#L115)); `cargo test` takes the three flags ([exec.rs L159](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/exec.rs#L159)). custodian 0.3.4 has
+    `test run --features`, `--all-features`, `--matrix`. Proof: `a_configuration_is_carried_in_the_target_word_and_read_back` ([testrun.rs L338](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/testrun.rs#L338)).
+11. **One finding once.** A close's findings are each said once, and the lines that prove a fix only when a test of
+    the job fails ([jobs.rs L1053-L1055](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/jobs.rs#L1053-L1055), was [jobs.rs L936 at 0.3.5](https://github.com/1o-llc/custodian_kit/blob/797945c/src/jobs.rs#L936)). Proof:
+    `a_closes_findings_are_each_said_once_and_the_lines_that_prove_a_fix_only_with_a_failing_test` (tests/close.rs L176).
+12. **init, then a job.** custodian 0.3.4 says the exact line: `custodian agent init`.
+13. **A generator's docs.** A method generator's docs are written inside its call as `#[doc]` attributes; a `///`
+    above a macro call documents nothing ([change.rs L1136-L1139](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L1136-L1139), was [change.rs L1059 at 0.3.5](https://github.com/1o-llc/custodian_kit/blob/797945c/src/change.rs#L1059)).
+    Proof: `a_method_generators_docs_are_written_inside_its_call` (tests/operations.rs L216).
+14. **Code in a value.** A `value` or `let` step that carries a closure or a macro call is reported with the raw
+    code, flagged and never refused ([change.rs L617](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L617), [change.rs L630](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/change.rs#L630), was
+    [change.rs L589 at 0.3.5](https://github.com/1o-llc/custodian_kit/blob/797945c/src/change.rs#L589)). Proof: `a_value_step_with_a_closure_or_a_macro_call_is_reported_not_refused` (L224).
+
+### Proof, all of it
+
+- `cargo test --all-features`: every test passes, the change schema's keys among them (`the_schemas_name_exactly_the_fields_of_the_rust_forms`, tests/oneo.rs L185).
+- The exercise word holds 32 operations ([exercise.rs L140](https://github.com/1o-llc/custodian_kit/blob/b2a40dc/src/exercise.rs#L140)); it held 24, and the vocabulary has 26. No
+  record decodes a word it kept.
+
 ## 0.3.5 (2026-10-20)
 
 Three things an agent asked for as custodian's user, each read from the
