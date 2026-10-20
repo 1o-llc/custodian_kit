@@ -138,3 +138,11 @@ fn a_target_unseen_while_the_lock_file_is_behind_the_manifests_says_why() {
     assert!(!p.authorized);
     assert!(p.preconditions.iter().any(|c| !c.holds && c.detail.contains("dependency macros not harvested") && c.detail.contains("lock file")), "{:?}", p.preconditions);
 }
+
+#[test]
+fn change_signature_with_a_body_says_both_are_proved_together() {
+    let (store, ctx, w) = project("sig");
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "s", "name = \"s\"\nobjective = \"o\"\noperation = \"change_signature\"\ntarget = \"shop::version\"\n\n[function]\nname = \"version\"\nvis = \"pub\"\nreturns = \"u64\"\nbody = [{ piece = \"value\", value = \"1u64\" }]\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(p.authorized, "{:?} {:?}", p.reasons, p.preconditions);
+    assert!(p.listed.iter().any(|l| l == "its body is written with the signature: 1 pieces, proved together"), "{:?}", p.listed);
+}

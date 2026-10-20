@@ -449,6 +449,9 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                 }
             }
             Operation::ChangeSignature => {
+                if let Some(n) = spec.function.as_ref().map(|f| f.body.len()).filter(|n| *n > 0) {
+                    listed.push(format!("its body is written with the signature: {n} pieces, proved together"));
+                }
                 let calls: Vec<_> = kind_rows("use-site");
                 let pass = spec.call_sites.as_ref().and_then(|c| c.pass.clone());
                 let adds = spec.function.as_ref().is_some_and(|nf| f.k.functions.iter().find(|x| Some(x.fq_name.as_str()) == land.as_ref().ok().and_then(|l| l.item.as_deref())).is_some_and(|old| nf.params.len() > old.args.iter().filter(|a| !crate::change::is_receiver(a)).count()));
