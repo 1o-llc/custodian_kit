@@ -17,7 +17,8 @@
 //! The first failing line is the panic's message (the line after `thread '..'
 //! panicked at <file>:<line>:<col>:`), not its place: a job that edits the
 //! file a failing test sits in moves the place, never the message. The trees'
-//! own paths in it are written `<root>`, so the job's tree and the base's read
+//! own paths in it are written `<root>`, and a test's scratch folder under the
+//! system's temporary directory `<temp>`, so the job's tree and the base's read
 //! the same.
 
 use crate::exec::{self, Plan, Watch};
@@ -121,8 +122,34 @@ pub fn first_failing_line(stdout: &str, test: &str, root: &Path) -> Option<Strin
     let canon = std::fs::canonicalize(&root).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     first.map(|f| {
         let f = if canon.is_empty() { f } else { f.replace(&canon, "<root>") };
-        f.replace(&root, "<root>")
+        temp_written(&f.replace(&root, "<root>"))
     })
+}
+
+/// A test's own scratch folder written `<temp>`: the system's temporary directory and the one name under it
+/// (`.tmpY3a7Dp`, made fresh by each run), so the same failure in a scratch folder reads the same on the job's tree
+/// and at the base.
+fn temp_written(line: &str) -> String {
+    let temp = std::env::temp_dir();
+    let mut prefixes: Vec<String> = [Some(temp.clone()), std::fs::canonicalize(&temp).ok()].into_iter().flatten().map(|p| p.to_string_lossy().trim_end_matches('/').to_string()).filter(|p| p.len() > 1).collect();
+    // the longest first: `/private/var/folders/..` holds `/var/folders/..`
+    prefixes.sort_by_key(|p| std::cmp::Reverse(p.len()));
+    prefixes.dedup();
+    let mut out = line.to_string();
+    for prefix in &prefixes {
+        let mut written = String::new();
+        let mut rest = out.as_str();
+        while let Some(at) = rest.find(&format!("{prefix}/")) {
+            written.push_str(&rest[..at]);
+            let after = &rest[at + prefix.len() + 1..];
+            let name = after.find(|c: char| c == '/' || c.is_whitespace() || "'\"`:),".contains(c)).unwrap_or(after.len());
+            written.push_str("<temp>");
+            rest = &after[name..];
+        }
+        written.push_str(rest);
+        out = written;
+    }
+    out
 }
 
 /// `test <name> ... ok|FAILED|ignored` from libtest's output.
@@ -309,6 +336,12 @@ mod tests {
         assert_eq!(first_failing_line(out, "a::x", Path::new("/w/tree")).as_deref(), Some("no such file <root>/etc/x"));
         let old = "---- b stdout ----\nthread 'b' panicked at 'boom', src/lib.rs:3:1\n";
         assert_eq!(first_failing_line(old, "b", Path::new("/w")).as_deref(), Some("boom"));
+        // a test's fresh scratch folder reads the same on both trees
+        let tmp = std::env::temp_dir().join(".tmpY3a7Dp").join("ended");
+        let other = std::env::temp_dir().join(".tmpbLm43K").join("ended");
+        let says = |p: &Path| format!("---- c stdout ----\nthread 'c' panicked at src/lib.rs:1:1:\nchown root:root {} failed\n", p.display());
+        assert_eq!(first_failing_line(&says(&tmp), "c", Path::new("/w")), first_failing_line(&says(&other), "c", Path::new("/w")));
+        assert_eq!(first_failing_line(&says(&tmp), "c", Path::new("/w")).as_deref(), Some("chown root:root <temp>/ended failed"));
         assert_eq!(outcomes("test a::x ... FAILED\ntest result: FAILED. 1 passed"), vec![("a::x".to_string(), "FAILED".to_string())]);
     }
 }
