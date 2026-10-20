@@ -211,3 +211,11 @@ fn declare_feature_refuses_a_feature_the_dependency_does_not_have_and_names_its_
         assert!(!p.authorized && p.preconditions.iter().any(|c| !c.holds && c.detail.contains(why)), "{enables}: {:?}", p.preconditions);
     }
 }
+
+#[test]
+fn a_method_generators_docs_are_written_inside_its_call() {
+    let f: custodian_kit::change::FnSpec = toml::from_str("name = \"can_cook\"\nvis = \"pub\"\nreceiver = \"&self\"\nparams = [{ name = \"r\", ty = \"&Recipe\" }]\nreturns = \"bool\"\ndoc = \"Whether the shelves hold\\neverything the recipe needs.\"\ngenerator = { piece = \"simple_method\", value = \"self.missing(r).is_empty()\" }\n").unwrap();
+    let text = custodian_kit::change::render_fn(&f, "    ").unwrap();
+    assert_eq!(text, "    simple_impl::simple_method!(#[doc = \" Whether the shelves hold\"] #[doc = \" everything the recipe needs.\"] pub fn can_cook(&self, r: &Recipe) -> bool => self.missing(r).is_empty());\n");
+    assert!(!text.contains("///"), "a `///` above a macro call documents nothing");
+}

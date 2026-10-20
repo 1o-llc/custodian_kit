@@ -1079,7 +1079,6 @@ pub fn signature(f: &FnSpec) -> String {
 /// A function as source, indented by `indent`: docs, attributes, then the generator's line or the signature with
 /// the body's steps (`todo!()` when the body is empty).
 pub fn render_fn(f: &FnSpec, indent: &str) -> std::result::Result<String, String> {
-    let mut out = doc_lines(f.doc.as_deref(), indent);
     if let Some(g) = &f.generator {
         let d = check_piece(g)?;
         let text = match d.family {
@@ -1089,15 +1088,20 @@ pub fn render_fn(f: &FnSpec, indent: &str) -> std::result::Result<String, String
                 sig_only.ret = None;
                 sig_only.doc = None;
                 let sig = if d.name == "forward_trait_method" { signature(&FnSpec { vis: None, ..sig_only }) } else { signature(&sig_only) };
+                // the docs go inside the call, as the attributes they stand for, onto the function the macro writes: a
+                // `///` above a macro call documents nothing (rustc's unused doc comment)
+                let docs: String = f.doc.as_deref().map(|d| d.lines().map(|l| format!("#[doc = {:?}] ", format!(" {l}").trim_end())).collect()).unwrap_or_default();
                 let attrs: String = f.attrs.iter().map(|a| format!("{a} ")).collect();
+                let attrs = format!("{docs}{attrs}");
                 format!("{indent}{}({attrs}{});\n", mac(d.name), fill(d.template, g, &sig, f.ret.as_deref()))
             }
-            Family::Builder => format!("{indent}{}({});\n", mac(d.name), fill(d.template, g, "", None)),
+            // a builder line takes no attributes: its docs stay above it
+            Family::Builder => format!("{}{indent}{}({});\n", doc_lines(f.doc.as_deref(), indent), mac(d.name), fill(d.template, g, "", None)),
             _ => return Err(format!("{} does not make a function", d.name)),
         };
-        out.push_str(&text);
-        return Ok(out);
+        return Ok(text);
     }
+    let mut out = doc_lines(f.doc.as_deref(), indent);
     for a in &f.attrs {
         out.push_str(&format!("{indent}{a}\n"));
     }
