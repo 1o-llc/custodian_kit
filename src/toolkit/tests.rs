@@ -62,7 +62,8 @@ fn the_shipped_catalog_is_the_probe_expanded() {
         eprintln!("cargo-expand is not on PATH: the catalog is not rebuilt here");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("custodian_toolkit_probe_{}_{}", std::process::id(), crate::runs::stamp().replace([':', '.'], "")));
+    // one directory, written over each run (its build kept), so runs do not pile up
+    let dir = std::env::temp_dir().join("custodian_toolkit_probe");
     let fresh = probe::build_catalog(&dir).unwrap();
     assert_eq!(&fresh, catalog(), "regenerate with `cargo run --example toolkit_shapes -- <new dir>`");
 }

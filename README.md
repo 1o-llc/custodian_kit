@@ -99,6 +99,19 @@ enum; a test holds the two equal.
 | `linkage` | the architectural linkage records (why declarations are bound together) naming the target, `*` for all: each bound declaration resolved through klepto, stale when it no longer resolves, to review when its file changed since the record was made; comment anchors with no record behind them |
 | `patterns` | every function body in scope (`*`, or crates by name) against the simple_impl toolkit: its shape, the toolkit pieces whose expansion it holds (exact: the call expands to the same tokens; near: the difference named) with the replace_body spec that swaps them, the shapes that repeat across crates and no piece writes (ranked by count times size, each with a body and a proposed macro), and the counts by crate |
 
+### The toolkit's shapes (`patterns`)
+
+The `patterns` kind matches every function body against the simple_impl 0.1.11 toolkit. Its catalog,
+`schema/toolkit/simple_impl-0.1.11.shapes.json`, is one call of each piece on placeholder arguments (written by the
+change vocabulary's own renderer), expanded by `cargo expand` as rustc does it, or by klepto where the expansion
+holds a std macro (`vec!`, `format!`, `write!`, `matches!`) that hand-written code keeps as the macro. A statement
+matches a piece when its tokens are the expansion's with the holes filled, and the filling put back into the
+expansion reads the same in the normal form (`toolkit::normal`): exact. A near match names what differs (a
+`return` without its `;`, a builder line's `#[inline]`, `a != b` for the macro's `!(a == b)`). The catalog is made
+again by `cargo run --example toolkit_shapes -- <new dir>`, and `toolkit::tests` holds the shipped one equal to a
+fresh expansion. Each function row carries the replace_body spec (`spec`, JSON) that code_passenger's `to-toolkit`
+makes; the shapes no piece writes come with a proposed macro for the suite.
+
 ## Declaration roles
 
 A `[[declared_in]]` table reads TOML files at a key path. Its `role` says what
