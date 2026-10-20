@@ -608,9 +608,54 @@ impl ChangeSpec {
             if let Some(b) = &p.block {
                 out.push(format!("{} block: {b}", p.piece));
             }
+            // a `value` or `let` step is an expression the tool writes as given: one that carries a closure or a
+            // macro call holds code the pieces do not name, so it is said here (flagged, never refused)
+            if matches!(p.piece.as_str(), "value" | "let") {
+                if let Some(v) = &p.value {
+                    let (closures, macros) = code_in_value(v);
+                    if closures > 0 {
+                        out.push(format!("{} with a closure: {v}", p.piece));
+                    }
+                    if !macros.is_empty() {
+                        out.push(format!("{} with a macro call ({}): {v}", p.piece, macros.iter().map(|m| format!("{m}!")).collect::<Vec<_>>().join(", ")));
+                    }
+                }
+            }
         }
         out
     }
+}
+
+/// The closures and the macro calls (by name) in an expression as written; none when it does not parse.
+pub fn code_in_value(value: &str) -> (usize, Vec<String>) {
+    use syn::visit::Visit;
+    #[derive(Default)]
+    struct Seen {
+        closures: usize,
+        macros: Vec<String>,
+    }
+    impl<'a> Visit<'a> for Seen {
+        fn visit_expr_closure(&mut self, c: &'a syn::ExprClosure) {
+            self.closures += 1;
+            syn::visit::visit_expr_closure(self, c);
+        }
+        fn visit_macro(&mut self, m: &'a syn::Macro) {
+            if let Some(s) = m.path.segments.last() {
+                self.macros.push(s.ident.to_string());
+            }
+            // a macro's arguments are tokens: an expression-like one is read too (`vec![|x| x]`)
+            if let Ok(args) = m.parse_body_with(syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated) {
+                for a in &args {
+                    self.visit_expr(a);
+                }
+            }
+        }
+    }
+    let mut seen = Seen::default();
+    if let Ok(e) = syn::parse_str::<syn::Expr>(value) {
+        seen.visit_expr(&e);
+    }
+    (seen.closures, seen.macros)
 }
 
 // ---------------------------------------------------------------------------

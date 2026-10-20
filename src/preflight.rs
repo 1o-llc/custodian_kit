@@ -132,7 +132,7 @@ pub struct Preflight {
     pub outside: Vec<String>,
     /// Sites the operation lists for a person and does not edit.
     pub listed: Vec<String>,
-    /// `raw` steps and code blocks.
+    /// `raw` steps, code blocks, and `value`/`let` steps that carry a closure or a macro call.
     pub raw: Vec<String>,
     /// The decisions still open, asked together.
     pub decisions: Vec<crate::questions::Question>,
@@ -193,7 +193,7 @@ impl Preflight {
             }
         }
         if !self.raw.is_empty() {
-            s.push_str("\n## raw code (flagged)\n\n");
+            s.push_str("\n## code written as given (flagged: raw steps, code blocks, values with a closure or a macro call)\n\n");
             for r in &self.raw {
                 s.push_str(&format!("- `{}`\n", r.replace('`', "'")));
             }

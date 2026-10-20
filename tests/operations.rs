@@ -219,3 +219,16 @@ fn a_method_generators_docs_are_written_inside_its_call() {
     assert_eq!(text, "    simple_impl::simple_method!(#[doc = \" Whether the shelves hold\"] #[doc = \" everything the recipe needs.\"] pub fn can_cook(&self, r: &Recipe) -> bool => self.missing(r).is_empty());\n");
     assert!(!text.contains("///"), "a `///` above a macro call documents nothing");
 }
+
+#[test]
+fn a_value_step_with_a_closure_or_a_macro_call_is_reported_not_refused() {
+    let (store, ctx, w) = project("values");
+    let text = "name = \"v\"\nobjective = \"o\"\noperation = \"make_fn\"\ntarget = \"crate:shop\"\n\n[function]\nname = \"listed\"\nvis = \"pub\"\nreturns = \"Vec<u32>\"\nbody = [\n  { piece = \"let\", bind = \"xs\", value = \"vec![1, 2, 3]\" },\n  { piece = \"value\", value = \"xs.into_iter().map(|x| x * 2).collect()\" },\n]\n";
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "v", text), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(p.authorized, "flagged, not refused: {:?} {:?}", p.reasons, p.preconditions);
+    assert!(p.raw.contains(&"let with a macro call (vec!): vec![1, 2, 3]".to_string()), "{:?}", p.raw);
+    assert!(p.raw.contains(&"value with a closure: xs.into_iter().map(|x| x * 2).collect()".to_string()), "{:?}", p.raw);
+    assert!(p.flags.contains(&"raw".to_string()), "{:?}", p.flags);
+    assert_eq!(custodian_kit::change::code_in_value("println!(\"{}\", f(|y| y))"), (1, vec!["println".to_string()]));
+    assert_eq!(custodian_kit::change::code_in_value("a + b.len()"), (0, vec![]));
+}
