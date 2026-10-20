@@ -368,9 +368,30 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                 let feat = spec.feature.clone().unwrap_or_default();
                 let declared = f.k.features.get(&l.package).is_some_and(|m| m.features.contains_key(&feat));
                 pre.push(Check { what: format!("{} declares the feature {feat}", l.package), holds: declared, detail: if declared { "declared".into() } else { "declare it first (code_passenger's features document)".into() } });
-                // every use outside the item itself stops compiling without the feature
+                // a use outside the item stops compiling without the feature, unless it is gated by the feature too, or
+                // sits in a crate whose dependency on this one turns the feature on
                 let item = l.item.clone().unwrap_or_default();
-                let uses: Vec<String> = kind_rows("use-site").iter().filter(|r| r.attributes.get("item").is_none_or(|i| *i != item && !i.starts_with(&format!("{item}::")))).map(|r| format!("{}:{} ({})", r.path.clone().unwrap_or_default(), r.line.unwrap_or(0), r.attributes.get("item").cloned().unwrap_or_default())).collect();
+                let needs = |c: &klepto::CfgPredicate| -> bool {
+                    fn needs(c: &klepto::CfgPredicate, feat: &str) -> bool {
+                        match c {
+                            klepto::CfgPredicate::Feature(x) => x == feat,
+                            klepto::CfgPredicate::All(v) => v.iter().any(|c| needs(c, feat)),
+                            _ => false,
+                        }
+                    }
+                    needs(c, &feat)
+                };
+                let turned_on = |pkg: &str| f.k.features.get(pkg).is_some_and(|m| m.dependencies.iter().any(|d| d.package.replace('-', "_") == l.package && d.features.contains(&feat)));
+                let ungated = |r: &crate::CodeQueryResult| {
+                    let user = r.attributes.get("item").cloned().unwrap_or_default();
+                    if user == item || user.starts_with(&format!("{item}::")) {
+                        return false;
+                    }
+                    let gated = crate::change::item_named(&f.k, &user).is_some_and(|d| needs(&d.cfg)) || f.k.functions.iter().any(|x| x.fq_name == user && needs(&x.cfg));
+                    let pkg = r.path.as_deref().and_then(|p| f.package_of_rel(p)).map(|p| p.name.clone()).unwrap_or_default();
+                    !gated && !(pkg != l.package && turned_on(&pkg))
+                };
+                let uses: Vec<String> = kind_rows("use-site").iter().filter(|r| ungated(r)).map(|r| format!("{}:{} ({})", r.path.clone().unwrap_or_default(), r.line.unwrap_or(0), r.attributes.get("item").cloned().unwrap_or_default())).collect();
                 for u in &uses {
                     listed.push(format!("use {u}: stops compiling without {feat} unless it is gated too"));
                 }

@@ -154,6 +154,11 @@ fn the_preflight_refuses_what_the_exercise_found_on_the_features_fixture() {
     let c = p.preconditions.iter().find(|c| c.what == "nothing outside store::Store uses it ungated").unwrap();
     assert!(!c.holds, "{c:?}");
     assert!(p.listed.iter().any(|l| l.starts_with("use api/src/lib.rs:") && l.contains("stops compiling without metrics")), "{:?}", p.listed);
+    // a crate whose dependency turns the feature on keeps compiling (api enables store's `log`); the store's own impl
+    // does not
+    let p = custodian_kit::preflight::run_preflight(&ctx, &write("j", &gate.replace("name = \"h\"", "name = \"j\"").replace("metrics", "log")), None, custodian_kit::runs::Runner::InProcess(&ws)).unwrap().preflight;
+    assert!(!p.listed.iter().any(|l| l.starts_with("use api/")), "{:?}", p.listed);
+    assert!(p.listed.iter().any(|l| l.starts_with("use store/src/lib.rs:") && l.contains("<impl Store>")), "{:?}", p.listed);
     // a compatibility break gates it anyway
     let p = custodian_kit::preflight::run_preflight(&ctx, &write("i", &gate.replace("name = \"h\"", "name = \"i\"").replace("feature = ", "compatibility = \"break\"\nfeature = ")), None, custodian_kit::runs::Runner::InProcess(&ws)).unwrap().preflight;
     assert!(p.preconditions.iter().all(|c| c.holds), "{:?}", p.preconditions);

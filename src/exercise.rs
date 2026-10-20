@@ -767,7 +767,7 @@ impl Summary {
             cell.findings += c.findings.len();
         }
         let mut slow: Vec<&Case> = cases.iter().filter(|c| c.status != "not run").collect();
-        slow.sort_by(|a, b| b.millis.cmp(&a.millis));
+        slow.sort_by_key(|c| std::cmp::Reverse(c.millis));
         let mut groups: BTreeMap<(String, String), (usize, String)> = BTreeMap::new();
         for f in &findings {
             let g = groups.entry((f.code.as_str().to_string(), f.operation.clone())).or_insert((0, f.detail.clone()));
@@ -1292,7 +1292,7 @@ impl CaseTask {
         let name = format!("exercise-{:03}-intent", self.case.n);
         if !exec::on_path("claude") {
             self.case.status = "not run".into();
-            self.case.note = Some("not run: no model (claude is not on PATH)".into());
+            self.case.note = Some("no model (claude is not on PATH)".into());
             return Ok(None);
         }
         let prompt = prompt(intent, &env.offered);
@@ -1306,7 +1306,7 @@ impl CaseTask {
         if w.code != Some(0) {
             let why = format!("{} {}", w.stdout.trim(), w.stderr.trim());
             self.case.status = "not run".into();
-            self.case.note = Some(format!("not run: no model ({}; receipt #{})", why.trim().lines().next().unwrap_or("no answer"), r.seq));
+            self.case.note = Some(format!("no model ({}; receipt #{})", why.trim().lines().next().unwrap_or("no answer"), r.seq));
             return Ok(None);
         }
         let text = strip_fences(&w.stdout);
