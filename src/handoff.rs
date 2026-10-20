@@ -167,6 +167,10 @@ pub struct Handoff {
     pub pre_existing: Vec<String>,
     /// The job's first transform receipt: the change a failure is measured against.
     pub first_change: Option<i64>,
+    /// Where the closing receipt judged the failures against the job's base (`baseline`, `base <commit>`): when set,
+    /// `pre_existing` is the close's own judgement, not measured here.
+    #[serde(default)]
+    pub judged_at_base: Option<String>,
     pub readings_made: Vec<String>,
     pub readings_reused: Vec<String>,
     /// Reading runs refused (their receipts).
@@ -373,7 +377,17 @@ pub fn of_job(root: &Path, store: &Store, folder: &Path, receipts: &[Receipt], s
         .filter(|r| r.command == "test" && r.runner == crate::receipts::RUNNER_LINE && !r.accepted && !reported.contains(&r.seq) && after(r.seq))
         .map(|r| Stopped { seq: r.seq, utc: r.utc.clone(), name: r.name.clone(), code: r.exit_code })
         .collect();
-    if let Some(first) = h.first_change {
+    let judged = closing.as_ref().filter(|c| c.base_commit.is_some() || !c.pre_existing.is_empty() || !c.failing.is_empty());
+    if let Some(c) = judged {
+        // the close ran the failures at the job's base: its judgement is the record
+        h.pre_existing = c.pre_existing.iter().filter(|p| tests.iter().any(|t| failed(t) && t.package == p.package && t.test == p.test)).map(|p| format!("{} {} {}", p.package, p.target, p.test)).collect();
+        h.judged_at_base = Some(c.pre_existing.first().map(|p| p.from.clone()).or_else(|| c.base_commit.as_ref().map(|b| format!("base {}", b.get(..10).unwrap_or(b)))).unwrap_or_else(|| "base".into()));
+        for (f, by) in &c.touched_files {
+            if by == "hand" && !h.uncovered.contains(f) {
+                h.uncovered.push(f.clone());
+            }
+        }
+    } else if let Some(first) = h.first_change {
         let before: BTreeSet<(String, String, String)> = all_closed_tests(store).into_iter().filter(|t| t.seq < first && failed(t)).map(|t| (t.package, t.target, t.test)).collect();
         h.pre_existing = tests.iter().filter(|t| failed(t) && before.contains(&(t.package.clone(), t.target.clone(), t.test.clone()))).map(|t| format!("{} {} {}", t.package, t.target, t.test)).collect();
     }
@@ -590,11 +604,14 @@ pub fn render(h: &Handoff, reader: Reader) -> String {
         bad.extend(h.stopped.iter().map(|t| format!("{}: stopped with exit {} before any test reported (receipt #{})", t.name, t.code.map(|c| c.to_string()).unwrap_or_else(|| "none".into()), t.seq)));
         out.extend(listed(&bad, "test lines with failures"));
         if failed > 0 {
-            match h.first_change {
-                Some(first) if h.pre_existing.len() == failed => out.push(format!("All {failed} failed before the job's first change too (a run before receipt #{first}): they are pre-existing.")),
-                Some(first) if !h.pre_existing.is_empty() => out.push(format!("{} of the {failed} failed before the job's first change too (a run before receipt #{first}); the rest are not known to be pre-existing.", h.pre_existing.len())),
-                Some(first) => out.push(format!("None of the {failed} is known to be pre-existing: no run of them comes before the job's first change (receipt #{first}).")),
-                None => out.push(format!("The job wrote no transform, so the {failed} failures are not measured against a change of its own.")),
+            match (h.first_change, &h.judged_at_base) {
+                (_, Some(at)) if h.pre_existing.len() == failed => out.push(format!("All {failed} fail the same way at the job's base ({at}): they are pre-existing.")),
+                (_, Some(at)) if !h.pre_existing.is_empty() => out.push(format!("{} of the {failed} fail the same way at the job's base ({at}): they are pre-existing; the rest are the job's.", h.pre_existing.len())),
+                (_, Some(at)) => out.push(format!("None of the {failed} fails at the job's base ({at}): they are the job's.")),
+                (Some(first), None) if h.pre_existing.len() == failed => out.push(format!("All {failed} failed before the job's first change too (a run before receipt #{first}): they are pre-existing.")),
+                (Some(first), None) if !h.pre_existing.is_empty() => out.push(format!("{} of the {failed} failed before the job's first change too (a run before receipt #{first}); the rest are not known to be pre-existing.", h.pre_existing.len())),
+                (Some(first), None) => out.push(format!("None of the {failed} is known to be pre-existing: no run of them comes before the job's first change (receipt #{first}).")),
+                (None, None) => out.push(format!("The job wrote no transform, so the {failed} failures are not measured against a change of its own.")),
             }
         }
     }
@@ -699,6 +716,15 @@ mod tests {
         assert_eq!(failed_line(&t), "cargo test -p fleet_ops --test stop_rules -- a::b c --exact");
         assert_eq!(when("2026-10-19T21:19:31Z"), "2026-10-19 21:19Z");
         assert_eq!(seqs(&[46, 47, 48, 51, 60, 61]), "#46–#48, #51, #60–#61");
+    }
+
+    /// When the close ran the failures at the job's base, its judgement is the one said; the measure here is not.
+    #[test]
+    fn the_closes_base_judgement_is_what_pre_existing_says() {
+        let t = TestLine { package: "p".into(), target: "lib".into(), seq: 3, utc: "2026-10-20T01:00:00Z".into(), passed: 1, ignored: 0, failed: vec!["a".into(), "b".into()] };
+        let h = Handoff { id: "job-1".into(), name: "n".into(), state: "done".into(), result: "failed_test".into(), tests: vec![t], first_change: Some(2), pre_existing: vec!["p lib a".into()], judged_at_base: Some("baseline".into()), ..Handoff::default() };
+        let text = render(&h, Reader::James);
+        assert!(text.contains("1 of the 2 fail the same way at the job's base (baseline): they are pre-existing; the rest are the job's."), "{text}");
     }
 
     #[test]
