@@ -111,6 +111,8 @@ pub enum IndexSource {
     FromCache { millis: u64 },
     /// Held open by `custodian serve`, from a run before this one.
     FromDaemon,
+    /// klepto parsed the workspace, and the model was not kept: compressed it is `bytes`, over [`INDEX_CACHE_MAX_BYTES`].
+    ParsedNotKept { millis: u64, bytes: u64 },
 }
 
 impl IndexSource {
@@ -120,6 +122,7 @@ impl IndexSource {
             IndexSource::Parsed { millis } => format!("parsed ({millis} ms)"),
             IndexSource::FromCache { millis } => format!("from cache ({millis} ms)"),
             IndexSource::FromDaemon => "from daemon".to_string(),
+            IndexSource::ParsedNotKept { millis, bytes } => format!("parsed ({millis} ms; not kept: {} MB, over the {} MB the cache holds)", bytes / 1_000_000, INDEX_CACHE_MAX_BYTES / 1_000_000),
         }
     }
 }
@@ -134,29 +137,42 @@ pub fn index_cache_key(root: &Path, opts: &crate::ScanOptions) -> std::result::R
 /// How many parsed indexes the cache keeps: the newest, and the one before it (a job's base and its tree).
 pub const INDEX_CACHE_KEEP: usize = 2;
 
-/// The model written to its cache file whole (a temporary beside it, then renamed), and the cache cut to the newest
-/// [`INDEX_CACHE_KEEP`]. A model that cannot be written is not kept; the scan's answer stands.
-fn keep_index(file: &Path, k: &Klepto) {
-    let Some(dir) = file.parent() else { return };
-    if std::fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    let tmp = file.with_extension("cbor.tmp");
-    let written = std::fs::File::create(&tmp).ok().is_some_and(|f| {
-        let mut w = std::io::BufWriter::new(f);
-        ciborium::into_writer(k, &mut w).is_ok() && std::io::Write::flush(&mut w).is_ok()
+/// The most a kept model may take on disk, compressed: a larger one is not kept, the scan says so, and the next
+/// scan parses again.
+pub const INDEX_CACHE_MAX_BYTES: u64 = 256 * 1_000_000;
+
+/// How hard the model is compressed (zstd's level): its CBOR repeats paths and names, and level 3 is the fast one.
+pub const INDEX_CACHE_ZSTD_LEVEL: i32 = 3;
+
+/// The file 0.3.3 kept, uncompressed: let go when a scan keeps the compressed one.
+const UNCOMPRESSED_0_3_3: &str = "model.cbor";
+
+/// The model written to its cache file whole, zstd-compressed CBOR (a temporary beside it, then renamed), and the
+/// cache cut to the newest [`INDEX_CACHE_KEEP`]. A model that cannot be written, or is over
+/// [`INDEX_CACHE_MAX_BYTES`] compressed, is not kept: its size, when it was over. The scan's answer stands either way.
+fn keep_index(file: &Path, k: &Klepto) -> Option<u64> {
+    let dir = file.parent()?;
+    std::fs::create_dir_all(dir).ok()?;
+    let tmp = file.with_extension("tmp");
+    let written = std::fs::File::create(&tmp).ok().and_then(|f| zstd::stream::Encoder::new(std::io::BufWriter::new(f), INDEX_CACHE_ZSTD_LEVEL).ok()).is_some_and(|mut z| {
+        ciborium::into_writer(k, &mut z).is_ok() && z.finish().is_ok_and(|mut w| std::io::Write::flush(&mut w).is_ok())
     });
-    if !written || std::fs::rename(&tmp, file).is_err() {
+    let bytes = std::fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0);
+    if !written || bytes > INDEX_CACHE_MAX_BYTES || std::fs::rename(&tmp, file).is_err() {
         let _ = std::fs::remove_file(&tmp);
-        return;
+        return (written && bytes > INDEX_CACHE_MAX_BYTES).then_some(bytes);
     }
     // the cache's own folders, newest first; the older ones are parsed again if their code comes back
-    let Some(index) = dir.parent() else { return };
+    let index = dir.parent()?;
     let mut held: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(index).map(|rd| rd.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()).map(|e| (e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), e.path())).collect()).unwrap_or_default();
     held.sort_by_key(|h| std::cmp::Reverse(h.0));
+    for (_, d) in &held {
+        let _ = std::fs::remove_file(d.join(UNCOMPRESSED_0_3_3));
+    }
     for (_, old) in held.into_iter().skip(INDEX_CACHE_KEEP) {
         let _ = std::fs::remove_dir_all(old);
     }
+    None
 }
 
 impl Scope {
@@ -176,7 +192,7 @@ impl Facts {
         // the parsed index, held once per code digest when the project has a folder
         let cached = crate::store::Store::find(&root).and_then(|s| index_cache_key(&root, &opts).ok().and_then(|key| s.path(&crate::store::named::INDEX_MODEL, &[("digest", &key)]).ok()));
         if let Some(file) = &cached {
-            if let Some(k) = std::fs::File::open(file).ok().and_then(|f| ciborium::from_reader::<Klepto, _>(std::io::BufReader::new(f)).ok()) {
+            if let Some(k) = std::fs::File::open(file).ok().and_then(|f| zstd::stream::Decoder::new(f).ok()).and_then(|z| ciborium::from_reader::<Klepto, _>(std::io::BufReader::new(z)).ok()) {
                 let mut f = Self::from_klepto(root, k, how)?;
                 f.index = IndexSource::FromCache { millis: started.elapsed().as_millis() as u64 };
                 f.trees = false;
@@ -184,11 +200,13 @@ impl Facts {
             }
         }
         let k = klepto_scan(&root, &opts).map_err(|e| ReadingRefusal::Scan.refuse(e))?;
-        if let Some(file) = &cached {
-            keep_index(file, &k);
-        }
+        let over = cached.as_ref().and_then(|file| keep_index(file, &k));
         let mut f = Self::from_klepto(root, k, how)?;
-        f.index = IndexSource::Parsed { millis: started.elapsed().as_millis() as u64 };
+        let millis = started.elapsed().as_millis() as u64;
+        f.index = match over {
+            Some(bytes) => IndexSource::ParsedNotKept { millis, bytes },
+            None => IndexSource::Parsed { millis },
+        };
         Ok(f)
     }
 

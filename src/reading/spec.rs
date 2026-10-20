@@ -119,10 +119,11 @@ vocabulary! {
 }
 
 impl ReadingKind {
-    /// Whether the kind walks the syntax trees (the count's test lines and inline modules, the bundle's cfg windows):
-    /// an index read back from the cache holds none, so these are answered over a parse.
+    /// Whether the kind walks the code itself (the count's test lines and inline modules, the bundle's cfg windows,
+    /// the duplicates' function bodies): an index read back from the cache holds no syntax trees, so these are
+    /// answered over a parse.
     pub fn walks_trees(self) -> bool {
-        matches!(self, ReadingKind::Count | ReadingKind::Bundle)
+        matches!(self, ReadingKind::Count | ReadingKind::Bundle | ReadingKind::Duplicates)
     }
 
     /// The kind in code_passenger.query.v1 results this reading writes.

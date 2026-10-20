@@ -63,6 +63,7 @@ change_history = "0.1.0"
 diff_history = "0.1.0"
 # the parsed index held once per code digest: klepto's model as CBOR (pathgen's FileCbor endpoint)
 ciborium = "0.2.2"
+zstd = "0.13"
 # context windows of secret items held redacted
 classified = "0.2.1"
 # level and boundary rules stated as constraints

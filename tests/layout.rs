@@ -32,7 +32,7 @@ const GOLDEN: &[(&str, &str)] = &[
     ("custodian.linkage", "data/linkage/v1.{name}.1o.linkage"),
     ("custodian.intent_plan", "data/plans/intent/{name}.json"),
     ("custodian.tree", "data/trees/{point}.json"),
-    ("custodian.index", "state/index/{digest}/model.cbor"),
+    ("custodian.index", "state/index/{digest}/model.cbor.zst"),
 ];
 
 #[test]

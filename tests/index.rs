@@ -45,9 +45,14 @@ fn the_second_scan_of_the_same_code_reads_the_index_back_and_a_change_parses_aga
     // the same answers
     assert_eq!(second.k.items.len(), first.k.items.len());
     assert_eq!(serde_json::to_value(&second.k.graph).unwrap(), serde_json::to_value(&first.k.graph).unwrap());
-    // one model on disk, under the folder's state
+    // one model on disk, under the folder's state, compressed; 0.3.3's uncompressed file beside it is let go
     let index = store.root.join(".custodian/state/index");
     assert_eq!(std::fs::read_dir(&index).unwrap().count(), 1);
+    let folder = std::fs::read_dir(&index).unwrap().next().unwrap().unwrap().path();
+    let kept = folder.join("model.cbor.zst");
+    let size = std::fs::metadata(&kept).unwrap().len();
+    assert!(size > 0 && size < custodian_kit::reading::facts::INDEX_CACHE_MAX_BYTES, "{size}");
+    std::fs::write(folder.join("model.cbor"), b"0.3.3's form").unwrap();
     // a changed file: parsed again, kept beside the first
     let lib = store.root.join("crates/core_lib/src/lib.rs");
     std::fs::write(&lib, std::fs::read_to_string(&lib).unwrap() + "\npub fn changed() {}\n").unwrap();
@@ -55,6 +60,7 @@ fn the_second_scan_of_the_same_code_reads_the_index_back_and_a_change_parses_aga
     assert!(matches!(third.index, IndexSource::Parsed { .. }), "{:?}", third.index);
     assert!(third.k.items.iter().any(|d| d.id == "core_lib::changed"));
     assert_eq!(std::fs::read_dir(&index).unwrap().count(), 2);
+    assert!(!folder.join("model.cbor").exists() && kept.exists(), "the uncompressed form goes, the kept model stays");
     // a third code: the oldest is let go, two kept
     std::fs::write(&lib, std::fs::read_to_string(&lib).unwrap() + "\npub fn changed_again() {}\n").unwrap();
     Facts::build(&store.root, &Scope::default(), Resolving::Free).unwrap();
@@ -77,6 +83,14 @@ fn a_reading_from_the_cache_says_so_and_a_count_parses_for_its_trees() {
     std::fs::write(&count, "name = \"count-core\"\nquestion = \"q\"\nkind = \"count\"\ntarget = \"crate:core_lib\"\n").unwrap();
     let ran = custodian_kit::runs::run_reading_by(&ctx, &count, true, None, Runner::InProcess(&w)).unwrap();
     assert!(ran.receipt.unwrap().reason.contains("index parsed ("));
+    // and so do the duplicates: their shapes are the function bodies
+    let dup = store.root.join("dup.toml");
+    std::fs::write(&dup, "name = \"dup\"\nquestion = \"q\"\nkind = \"duplicates\"\ntarget = \"*\"\n").unwrap();
+    let ran = custodian_kit::runs::run_reading_by(&ctx, &dup, true, None, Runner::InProcess(&w)).unwrap();
+    assert!(ran.receipt.unwrap().reason.contains("index parsed ("));
+    // a model over what the cache holds is not kept, and the line says so
+    let line = IndexSource::ParsedNotKept { millis: 35901, bytes: 300_000_000 }.line();
+    assert_eq!(line, "parsed (35901 ms; not kept: 300 MB, over the 256 MB the cache holds)");
 }
 
 #[test]
