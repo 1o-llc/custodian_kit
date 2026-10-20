@@ -77,4 +77,4 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 
 [dev-dependencies]
 # the toolkit the change pieces are declared against: change::tests reads its macros from the registry
-simple_impl = "0.1.11"
+simple_impl = "0.1.12"

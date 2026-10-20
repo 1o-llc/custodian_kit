@@ -101,8 +101,8 @@ enum; a test holds the two equal.
 
 ### The toolkit's shapes (`patterns`)
 
-The `patterns` kind matches every function body against the simple_impl 0.1.11 toolkit. Its catalog,
-`schema/toolkit/simple_impl-0.1.11.shapes.json`, is one call of each piece on placeholder arguments (written by the
+The `patterns` kind matches every function body against the simple_impl 0.1.12 toolkit. Its catalog,
+`schema/toolkit/simple_impl-0.1.12.shapes.json`, is one call of each piece on placeholder arguments (written by the
 change vocabulary's own renderer), expanded by `cargo expand` as rustc does it, or by klepto where the expansion
 holds a std macro (`vec!`, `format!`, `write!`, `matches!`) that hand-written code keeps as the macro. A statement
 matches a piece when its tokens are the expansion's with the holes filled, and the filling put back into the
@@ -290,7 +290,7 @@ transform are bound to.
 | `wrap` | a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched |
 
 A function body is never free text the tool trusts. It is a list of pieces,
-each one of simple_impl 0.1.11's toolkit macros (123 of them, the table is
+each one of simple_impl 0.1.12's toolkit macros (130 of them, the table is
 `change::PIECES` and a test holds it equal to the published registry), or
 `let`, `value`, or `raw`. A `raw` piece is allowed and the preflight flags it.
 A whole function can come from a toolkit generator instead.

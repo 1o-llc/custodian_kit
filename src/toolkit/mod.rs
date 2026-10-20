@@ -1,6 +1,6 @@
 // Copyright © 2026 1o. All rights reserved.
 
-//! The toolkit's shapes: every simple_impl 0.1.11 toolkit piece ([`crate::change::PIECES`]) called once on
+//! The toolkit's shapes: every simple_impl 0.1.12 toolkit piece ([`crate::change::PIECES`]) called once on
 //! placeholder arguments, expanded, and kept as the catalog the `patterns` reading matches function bodies against.
 //!
 //! How the catalog is made ([`probe`]): a probe crate holds one call of each piece, its arguments placeholders
@@ -141,7 +141,7 @@ pub struct ToolkitShape {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Catalog {
     pub schema: String,
-    /// `simple_impl 0.1.11`.
+    /// `simple_impl 0.1.12`.
     pub toolkit: String,
     pub shapes: Vec<ToolkitShape>,
     /// A piece with no shape here, and why (`ensure_all`: several statements, matched one `ensure` at a time).
@@ -150,7 +150,7 @@ pub struct Catalog {
 
 /// The catalog shipped with this crate (made by `examples/toolkit_shapes.rs`; `toolkit::tests` holds it equal to
 /// a fresh expansion of the probe crate).
-pub const CATALOG_JSON: &str = include_str!("../../schema/toolkit/simple_impl-0.1.11.shapes.json");
+pub const CATALOG_JSON: &str = include_str!("../../schema/toolkit/simple_impl-0.1.12.shapes.json");
 
 /// The shipped catalog, read once.
 pub fn catalog() -> &'static Catalog {

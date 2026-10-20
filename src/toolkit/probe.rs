@@ -57,7 +57,7 @@ const SELF_FIELD: &[(&str, &[&str])] = &[("field", &["__sid_field"])];
 const SELF_PATH: &[(&str, &[&str])] = &[("field", &["__sif_field"])];
 
 /// Every call the catalog is made of. A piece's slots and its function follow its macro's matcher in
-/// simple_impl 0.1.11 (`src/macros/toolkit.rs`, `src/macros/mod.rs`): an `$x:ident` is a `__sid_` placeholder, a
+/// simple_impl 0.1.12 (`src/macros/toolkit.rs`, `src/macros/mod.rs`): an `$x:ident` is a `__sid_` placeholder, a
 /// `$x:ty` a `__Si` one, `$first:ident $(.$rest:ident)*` a `__sif_` one.
 const PROBES: &[Probe] = &[
     // pure checks: values
@@ -98,6 +98,8 @@ const PROBES: &[Probe] = &[
     p("ensure_at_most_one", "2 conditions", Step, &[("error", &["__si_error"]), ("conditions", C2)], None),
     p("ensure_implies", "", Step, &[("left", &["__si_left"]), ("right", &["__si_right"]), ("error", &["__si_error"])], None),
     p("ensure_excludes", "", Step, &[("left", &["__si_left"]), ("right", &["__si_right"]), ("error", &["__si_error"])], None),
+    p("ensure_valid", "", Step, &[("value", &["__si_value"])], None),
+    p("ensure_valid", "with map_error", Step, &[("value", &["__si_value"]), ("map_error", &["__si_map_error"])], None),
     // extraction and early flow
     p("require_some", "", Value, &[("option", &["__si_option"]), ("error", &["__si_error"])], None),
     p("require_ok", "", Value, &[("result", &["__si_result"]), ("map_error", &["__si_map_error"])], None),
@@ -111,6 +113,16 @@ const PROBES: &[Probe] = &[
     p("continue_if", "", Step, &[("condition", &["__si_condition"])], None),
     p("some_or_continue", "", Value, &[("option", &["__si_option"])], None),
     p("some_or_break", "", Value, &[("option", &["__si_option"])], None),
+    p("require_ok_into", "", Value, &[("result", &["__si_result"]), ("map_error", &["__si_map_error"])], None),
+    p("require_ok_into", "a statement", Step, &[("result", &["__si_result"]), ("map_error", &["__si_map_error"])], None),
+    p("require_some_into", "ok_or", Value, &[("option", &["__si_option"]), ("error", &["__si_error"])], None),
+    p("require_some_into", "ok_or_else", Value, &[("option", &["__si_option"]), ("error", &["|| __si_error"])], None),
+    p("ok_or_else_return", "", Value, &[("result", &["__si_result"]), ("item", &["__sid_item"]), ("return_value", &["__si_return_value"])], None),
+    p("return_if_err", "", Step, &[("result", &["__si_result"]), ("item", &["__sid_item"]), ("return_value", &["__si_return_value"])], None),
+    // values chosen
+    p("if_else", "", Value, &[("condition", &["__si_condition"]), ("left", &["__si_left"]), ("right", &["__si_right"])], None),
+    p("table", "3 entries", Value, &[("value", &["__si_value"]), ("candidates", &["__sip_candidates_0", "__sip_candidates_1", "__sip_candidates_2"]), ("args", &["__si_args_0", "__si_args_1", "__si_args_2"])], None),
+    p("table", "4 entries", Value, &[("value", &["__si_value"]), ("candidates", &["__sip_candidates_0", "__sip_candidates_1", "__sip_candidates_2", "__sip_candidates_3"]), ("args", &["__si_args_0", "__si_args_1", "__si_args_2", "__si_args_3"])], None),
     // collections
     p("push_if", "", Step, &[("collection", &["__si_collection"]), ("condition", &["__si_condition"]), ("value", &["__si_value"])], None),
     p("push_some", "", Step, &[("collection", &["__si_collection"]), ("option", &["__si_option"])], None),
@@ -633,6 +645,13 @@ pub fn pieces_accounted() -> (Vec<String>, Vec<String>) {
     let missing = all.iter().filter(|p| !probed.contains(p.as_str()) && !left.contains(p.as_str())).cloned().collect();
     let both = all.iter().filter(|p| probed.contains(p.as_str()) && left.contains(p.as_str())).cloned().collect();
     (missing, both)
+}
+
+/// The text a probe's slot holds around one of its placeholders, when the slot is more than the placeholder:
+/// `require_some_into`'s `ok_or_else` call takes `|| __si_error`, so the code a body holds there (`|| make()`)
+/// is written back into the call as the closure, never as the bare `make()` (which is the `ok_or` call).
+pub fn written_in(index: usize, placeholder: &str) -> Option<&'static str> {
+    PROBES.get(index)?.slots.iter().flat_map(|(_, texts)| texts.iter().copied()).find(|t| *t != placeholder && rename_word(t, placeholder, "\u{0}") != *t)
 }
 
 /// How many calls the probe makes.

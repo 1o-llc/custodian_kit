@@ -196,3 +196,37 @@ fn ne(a: u8, b: u8) -> Result<(), &'static str> {
     assert!(m.differences().iter().any(|d| d.contains("without its `;`")), "{:?}", m.differences());
     assert!(all[0].2.is_none(), "no spec swaps a near match");
 }
+
+/// simple_impl 0.1.12's seven pieces: each probe's placeholder call, expanded (the catalog's expansion, cargo
+/// expand's of the call), is matched as that piece and that call exactly, and the spec the reading proposes writes
+/// the probe's call back (`require_some_into`'s `|| __si_error` kept as the closure, so the `ok_or_else` call is not
+/// written as the `ok_or` one).
+#[test]
+fn each_new_probe_expands_and_matches_its_own_shape() {
+    const NEW: [&str; 7] = ["ensure_valid", "require_ok_into", "require_some_into", "ok_or_else_return", "return_if_err", "if_else", "table"];
+    let c = catalog();
+    assert_eq!(c.toolkit, "simple_impl 0.1.12");
+    let mut seen = std::collections::BTreeSet::new();
+    let mut probes = 0;
+    for (i, s) in c.shapes.iter().enumerate().filter(|(_, s)| NEW.contains(&s.piece.as_str())) {
+        probes += 1;
+        let body = match s.position {
+            Position::Step => s.expansion.clone(),
+            Position::Value => format!("let __si_bound = {};\n__si_bound", s.expansion),
+            other => panic!("{} {}: a new piece is a statement or a value, not {other:?}", s.piece, s.variant),
+        };
+        let text = format!("fn probe() {{\n{body}\n}}\n");
+        let all = matched(&text);
+        let (_, m, spec) = &all[0];
+        let found: Vec<(String, String, Level)> = m.steps.iter().map(|st| (st.matched.shape().piece.clone(), st.matched.shape().variant.clone(), st.matched.level)).collect();
+        let step = m.steps.iter().find(|st| st.matched.shape == i).unwrap_or_else(|| panic!("{} {}: matched {found:?} in\n{text}", s.piece, s.variant));
+        assert_eq!(step.matched.level, Level::Exact, "{} {}: {:?}", s.piece, s.variant, step.matched.differences);
+        let spec = spec.as_ref().unwrap_or_else(|| panic!("{} {}: no spec", s.piece, s.variant));
+        let rendered = crate::change::render_body(spec.function.as_ref().unwrap(), "").unwrap();
+        let call = s.call.trim().trim_end_matches(';');
+        assert!(rendered.contains(call), "{} {}: the spec writes\n{rendered}\nnot {call}", s.piece, s.variant);
+        seen.insert(s.piece.clone());
+    }
+    assert_eq!(seen.len(), NEW.len(), "{seen:?}");
+    assert_eq!(probes, 11, "the seven pieces' eleven probes");
+}

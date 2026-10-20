@@ -1,4 +1,4 @@
-//! Makes the toolkit's shape catalog (`schema/toolkit/simple_impl-0.1.11.shapes.json`): writes the probe crate
+//! Makes the toolkit's shape catalog (`schema/toolkit/simple_impl-0.1.12.shapes.json`): writes the probe crate
 //! (one call of each toolkit piece on placeholders) under DIR, expands it with klepto (in rounds) and with
 //! `cargo expand` (a declared line), and writes the catalog.
 //!
@@ -8,7 +8,7 @@ use custodian_kit::toolkit::{probe, Position};
 fn main() {
     let dir = std::path::PathBuf::from(std::env::args().nth(1).expect("a new directory for the probe crate"));
     let cat = probe::build_catalog(&dir).expect("the probe expands");
-    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schema/toolkit/simple_impl-0.1.11.shapes.json");
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schema/toolkit/simple_impl-0.1.12.shapes.json");
     std::fs::write(&out, serde_json::to_string_pretty(&cat).unwrap() + "\n").unwrap();
     let by = |p: Position| cat.shapes.iter().filter(|s| s.position == p).count();
     let cargo = cat.shapes.iter().filter(|s| s.expanded_by == "cargo expand").count();

@@ -446,7 +446,13 @@ pub fn piece_of(m: &Matched, src: &Source) -> Piece {
     let mut lists: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for h in shape.holes.iter().filter(|h| h.kind != HoleKind::Binder) {
         let Some(fill) = m.bindings.map.get(&h.placeholder) else { continue };
-        lists.entry(h.slot.clone()).or_default().push((h.placeholder.clone(), src.filling(fill)));
+        let filling = src.filling(fill);
+        // a slot written around its placeholder (`|| __si_error`) takes the filling in its place
+        let written = match super::probe::written_in(m.shape, &h.placeholder) {
+            Some(text) => super::probe::rename_word(text, &h.placeholder, &filling),
+            None => filling,
+        };
+        lists.entry(h.slot.clone()).or_default().push((h.placeholder.clone(), written));
     }
     let mut p = Piece { piece: shape.piece.clone(), ..Piece::default() };
     for (slot, mut values) in lists {

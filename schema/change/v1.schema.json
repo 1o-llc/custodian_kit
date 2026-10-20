@@ -222,6 +222,7 @@
                     "ensure_at_most_one",
                     "ensure_implies",
                     "ensure_excludes",
+                    "ensure_valid",
                     "require_some",
                     "require_ok",
                     "some_or_return",
@@ -233,6 +234,12 @@
                     "continue_if",
                     "some_or_continue",
                     "some_or_break",
+                    "require_ok_into",
+                    "require_some_into",
+                    "ok_or_else_return",
+                    "return_if_err",
+                    "if_else",
+                    "table",
                     "push_if",
                     "push_some",
                     "extend_if",
@@ -319,7 +326,7 @@
                     "value",
                     "raw"
                   ],
-                  "description": "The toolkit piece (simple_impl 0.1.11's macro of that name) or a step: let, value, raw."
+                  "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
                 },
                 "bind": {
                   "type": "string",
@@ -636,6 +643,7 @@
                     "ensure_at_most_one",
                     "ensure_implies",
                     "ensure_excludes",
+                    "ensure_valid",
                     "require_some",
                     "require_ok",
                     "some_or_return",
@@ -647,6 +655,12 @@
                     "continue_if",
                     "some_or_continue",
                     "some_or_break",
+                    "require_ok_into",
+                    "require_some_into",
+                    "ok_or_else_return",
+                    "return_if_err",
+                    "if_else",
+                    "table",
                     "push_if",
                     "push_some",
                     "extend_if",
@@ -733,7 +747,7 @@
                     "value",
                     "raw"
                   ],
-                  "description": "The toolkit piece (simple_impl 0.1.11's macro of that name) or a step: let, value, raw."
+                  "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
                 },
                 "bind": {
                   "type": "string",
@@ -978,6 +992,7 @@
                     "ensure_at_most_one",
                     "ensure_implies",
                     "ensure_excludes",
+                    "ensure_valid",
                     "require_some",
                     "require_ok",
                     "some_or_return",
@@ -989,6 +1004,12 @@
                     "continue_if",
                     "some_or_continue",
                     "some_or_break",
+                    "require_ok_into",
+                    "require_some_into",
+                    "ok_or_else_return",
+                    "return_if_err",
+                    "if_else",
+                    "table",
                     "push_if",
                     "push_some",
                     "extend_if",
@@ -1075,7 +1096,7 @@
                     "value",
                     "raw"
                   ],
-                  "description": "The toolkit piece (simple_impl 0.1.11's macro of that name) or a step: let, value, raw."
+                  "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
                 },
                 "bind": {
                   "type": "string",
@@ -1392,6 +1413,7 @@
                     "ensure_at_most_one",
                     "ensure_implies",
                     "ensure_excludes",
+                    "ensure_valid",
                     "require_some",
                     "require_ok",
                     "some_or_return",
@@ -1403,6 +1425,12 @@
                     "continue_if",
                     "some_or_continue",
                     "some_or_break",
+                    "require_ok_into",
+                    "require_some_into",
+                    "ok_or_else_return",
+                    "return_if_err",
+                    "if_else",
+                    "table",
                     "push_if",
                     "push_some",
                     "extend_if",
@@ -1489,7 +1517,7 @@
                     "value",
                     "raw"
                   ],
-                  "description": "The toolkit piece (simple_impl 0.1.11's macro of that name) or a step: let, value, raw."
+                  "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
                 },
                 "bind": {
                   "type": "string",
@@ -1734,6 +1762,7 @@
                     "ensure_at_most_one",
                     "ensure_implies",
                     "ensure_excludes",
+                    "ensure_valid",
                     "require_some",
                     "require_ok",
                     "some_or_return",
@@ -1745,6 +1774,12 @@
                     "continue_if",
                     "some_or_continue",
                     "some_or_break",
+                    "require_ok_into",
+                    "require_some_into",
+                    "ok_or_else_return",
+                    "return_if_err",
+                    "if_else",
+                    "table",
                     "push_if",
                     "push_some",
                     "extend_if",
@@ -1831,7 +1866,7 @@
                     "value",
                     "raw"
                   ],
-                  "description": "The toolkit piece (simple_impl 0.1.11's macro of that name) or a step: let, value, raw."
+                  "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
                 },
                 "bind": {
                   "type": "string",
@@ -2198,6 +2233,7 @@
                 "ensure_at_most_one",
                 "ensure_implies",
                 "ensure_excludes",
+                "ensure_valid",
                 "require_some",
                 "require_ok",
                 "some_or_return",
@@ -2209,6 +2245,12 @@
                 "continue_if",
                 "some_or_continue",
                 "some_or_break",
+                "require_ok_into",
+                "require_some_into",
+                "ok_or_else_return",
+                "return_if_err",
+                "if_else",
+                "table",
                 "push_if",
                 "push_some",
                 "extend_if",
@@ -2295,7 +2337,7 @@
                 "value",
                 "raw"
               ],
-              "description": "The toolkit piece (simple_impl 0.1.11's macro of that name) or a step: let, value, raw."
+              "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
             },
             "bind": {
               "type": "string",

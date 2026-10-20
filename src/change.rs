@@ -13,7 +13,7 @@
 //! the postconditions, and the decisions it leaves open.
 //!
 //! A function's body is not free text. It is a declared sequence of
-//! simple_impl 0.1.11 toolkit pieces (`ensure`, `require_some`, `push_if`,
+//! simple_impl 0.1.12 toolkit pieces (`ensure`, `require_some`, `push_if`,
 //! ...), each by name with its arguments ([`PIECES`]), rendered by
 //! [`render_fn`] into `simple_impl::<piece>!(...)` lines; three structural
 //! steps (`let`, `value`, `raw`) carry what no piece does, and `raw` (and any
@@ -647,7 +647,7 @@ pub struct PieceDecl {
 
 macro_rules! pieces {
     ($($name:literal => $family:ident, $binds:literal, $template:literal;)*) => {
-        /// Every piece a spec may name: the toolkit of simple_impl 0.1.11 (each macro by its name) and the three
+        /// Every piece a spec may name: the toolkit of simple_impl 0.1.12 (each macro by its name) and the three
         /// structural steps.
         pub const PIECES: &[PieceDecl] = &[$(PieceDecl { name: $name, family: Family::$family, template: $template, binds: $binds },)*];
     };
@@ -686,6 +686,7 @@ pieces! {
     "ensure_at_most_one" => Guard, false, "{error}; {conditions*,}";
     "ensure_implies" => Guard, false, "{left} => {right}, {error}";
     "ensure_excludes" => Guard, false, "{left}, {right}, {error}";
+    "ensure_valid" => Guard, false, "{value}[, {map_error}]";
     // extraction and early flow
     "require_some" => Flow, true, "{option}, {error}";
     "require_ok" => Flow, true, "{result}, {map_error}";
@@ -698,6 +699,13 @@ pieces! {
     "continue_if" => Flow, false, "{condition}";
     "some_or_continue" => Flow, true, "{option}";
     "some_or_break" => Flow, true, "{option}";
+    "require_ok_into" => Flow, true, "{result}, {map_error}";
+    "require_some_into" => Flow, true, "{option}, {error}";
+    "ok_or_else_return" => Flow, true, "{result}, {item} => {return_value}";
+    "return_if_err" => Flow, false, "{result}, {item} => {return_value}";
+    // values chosen
+    "if_else" => Expression, true, "{condition} => {left}, {right}";
+    "table" => Expression, true, "{value}; {candidates=>args*}";
     // collections
     "push_if" => Collection, false, "{collection}, {condition} => {value}";
     "push_some" => Collection, false, "{collection}, {option}";
@@ -793,7 +801,7 @@ pieces! {
 }
 
 /// The crate the toolkit's macros come from, and the version the pieces are declared against.
-pub const TOOLKIT: (&str, &str) = ("simple_impl", "0.1.11");
+pub const TOOLKIT: (&str, &str) = ("simple_impl", "0.1.12");
 
 /// A piece's declaration by name.
 pub fn piece(name: &str) -> Option<&'static PieceDecl> {
@@ -1625,10 +1633,10 @@ mod tests {
                 assert!(SLOTS.contains(&s.as_str()), "{}: slot {s} is not a field of Piece", p.name);
             }
         }
-        assert_eq!(PIECES.iter().filter(|p| p.family != Family::Step).count(), 123);
+        assert_eq!(PIECES.iter().filter(|p| p.family != Family::Step).count(), 130);
     }
 
-    /// Every toolkit piece is a `macro_rules!` of simple_impl 0.1.11 by that name, and every macro there is a piece:
+    /// Every toolkit piece is a `macro_rules!` of simple_impl 0.1.12 by that name, and every macro there is a piece:
     /// the vocabulary loses none and invents none. The source is the dev-dependency's, in cargo's registry.
     #[test]
     fn the_pieces_are_the_toolkit_exactly() {
@@ -1638,7 +1646,7 @@ mod tests {
             .filter_map(|e| e.ok())
             .map(|e| e.path().join(format!("{}-{}", TOOLKIT.0, TOOLKIT.1)))
             .find(|p| p.is_dir())
-            .expect("simple_impl 0.1.11 in cargo's registry (a dev-dependency)");
+            .expect("simple_impl 0.1.12 in cargo's registry (a dev-dependency)");
         let mut macros = Vec::new();
         for f in ["src/macros/mod.rs", "src/macros/toolkit.rs"] {
             let text = std::fs::read_to_string(src.join(f)).unwrap();
