@@ -1,5 +1,141 @@
 # Changelog
 
+## 0.3.3 (2026-10-20)
+
+Two real runs found these. The first bounded job in the kit (item-hold) did its work and closed `failed_test`: 26
+tests failed, every one the same way at the commit it opened at (they need root, systemctl, getent), and the close
+could not tell a test that was already failing from one the job broke. The exercise (custodian trying every
+operation on copies of three projects, built on this branch and released here with it) found the rest. Nothing is
+removed from the API: the rustdoc JSON of 0.3.2 and 0.3.3 differ only by added items. New code is pinned to 5a9fc99 (the inline rule's last two
+checks to eb506f2); the exercise to f286e90.
+
+### A test that fails the same way at the base is not the job's
+
+- Was: any `FAILED` test the job ran made it `failed_test` ([src/jobs.rs#L918 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/jobs.rs#L918)).
+- A job opens at a commit: `job start` records `base_commit` (`git rev-parse HEAD`, through the kit's declared git
+  line) in the job file ([src/jobs.rs#L207](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L207), [src/jobs.rs#L610](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L610)).
+- At close every failing test (its last outcome in the job) is run again on the job's tree for its first failing
+  line, then looked up at the base: in the baseline when the job file says `baseline true`, else run on a worktree
+  of the repository at the base commit, outside the project and kept for the next close at the same commit
+  (`baseline::judge`, [src/baseline.rs#L252](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/baseline.rs#L252); `baseline::base_tree`, [src/baseline.rs#L217](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/baseline.rs#L217)). The same first
+  failing line there makes it `pre-existing`; passing at the base, failing there another way, or passing when run
+  again, makes it the job's, with why ([src/jobs.rs#L981](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L981)).
+- The first failing line is the panic's message, not its place, the trees' own paths written `<root>`, so a job
+  that edits the file a failing test sits in still matches ([src/baseline.rs#L94](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/baseline.rs#L94)).
+- The baseline: with `baseline true`, `job start` runs the tests the target reaches (and every test of a crate it
+  names) on the tree as it opens, and keeps them in `data/baseline.json` ([src/baseline.rs#L238](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/baseline.rs#L238),
+  [src/jobs.rs#L674](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L674)). Its runs' receipts are `baseline`, never `test`, so they are never the job's tests.
+- The closing receipt names each pre-existing test with its line and where it was judged, and the job's own
+  failures with why (`pre_existing`, `failing`, `base_commit`: [src/jobs.rs#L847-L857](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L847-L857)). `failed_test` now means
+  a test the job broke ([src/jobs.rs#L1031](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L1031)).
+- `exec::CargoTest` takes `--bin`, so a binary's unit tests are run as cargo names them.
+
+### Every file the job touched
+
+- Was: the bounded check read only the counts' Rust and TOML digests, so a `.stderr` edit passed unseen
+  ([src/jobs.rs#L1090 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/jobs.rs#L1090)).
+- The closing receipt lists every file changed since the base (git's, new files too; a file that already differed
+  at open counts from its state then, kept in `data/open_files.json`), each with what carries it: `transform
+  #<seq>`, `allow_file <glob>`, `cargo` (the lock file cargo writes from the manifests), or `hand`
+  ([src/jobs.rs#L1250-L1290](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L1250-L1290)).
+- A bounded job's file that no operation writes must be named by an `allow_file` glob in its job file, else the
+  close is refused, `[CUST0041]`, `rejected` ([src/reading/refusal.rs#L92](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/refusal.rs#L92)). `jobs::declare_allow` adds one to
+  a running job with an `allow` receipt ([src/jobs.rs#L1409](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L1409)).
+
+### Lines touched, exact
+
+- Was: a count against a count, net per file: "+18 −0" for a 55-line diff ([src/jobs.rs#L806 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/jobs.rs#L806)).
+- The job's figure is git's: `git diff --numstat` against the base, new files counted whole, cargo's lock file
+  aside, said with the commit it is measured from ([src/jobs.rs#L1291](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L1291)). A step's figure is still the counts'
+  and says `net`.
+
+### The two facts, as set at open
+
+- Was: the closing record said only when each became known, "open" for both ([src/jobs.rs#L1163 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/jobs.rs#L1163)).
+- The closing record carries `target_known` and `outcome_known` as `job start` set them, and the page says
+  `target_known: true at open · outcome_known: false at open, known at #128` ([src/jobs.rs#L819](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L819),
+  [src/jobs.rs#L1394](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/jobs.rs#L1394)).
+
+### A reading stored once
+
+- Was: every reading was written twice, `latest.md` and `latest.json` beside the stamped files
+  ([src/reading/mod.rs#L308-L310 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/reading/mod.rs#L308-L310)); the kit job's record was 33 MB.
+- A spec's readings folder keeps `index.json`, naming the latest and every reading by stem; nothing is copied
+  ([src/reading/mod.rs#L311-L317](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/mod.rs#L311-L317), [src/reading/mod.rs#L338](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/mod.rs#L338)).
+
+### The parsed index, held once per code digest
+
+- Was: every scan parsed the whole workspace and threw it away ([src/reading/facts.rs#L113 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/reading/facts.rs#L113)): 29 to 36 s and
+  about 5.5 GB on the kit, for a reading of milliseconds.
+- A scan in a project with a folder keeps klepto's model (klepto 0.3.3's serde form) as CBOR under
+  `.custodian/state/index/<digest>/model.cbor`, keyed by klepto's model version, the scan options and the code
+  digest, and the next scan of the same code reads it back; the newest two are kept
+  ([src/reading/facts.rs#L129](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/facts.rs#L129), [src/reading/facts.rs#L139](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/facts.rs#L139), [src/reading/facts.rs#L177](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/facts.rs#L177);
+  `store::named::INDEX_MODEL`, pathgen's `FileCbor`, [src/store.rs#L85](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/store.rs#L85)).
+- The model holds no syntax trees, so `count` and `bundle`, which walk them, are answered over a parse
+  (`ReadingKind::walks_trees`, [src/reading/spec.rs#L124](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/spec.rs#L124); `Facts::build_parsed`, [src/reading/facts.rs#L196](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/facts.rs#L196)).
+- Where the index came from is on the reading's record (`index`) and its receipt's reason: `read · index from cache
+  (3314 ms)` (`IndexSource`, [src/reading/facts.rs#L107](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/facts.rs#L107); [src/runs.rs#L201](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/runs.rs#L201)).
+- On the kit's workspace (release build): parsed in 35.9 s at 5.7 GB; read back in 3.3 s at 1.8 GB, 64,133 items
+  and 1,936 files the same; 1.1 GB on disk.
+
+### Change operations
+
+- `inline` and `wrap` ([src/change.rs#L61-L62](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/change.rs#L61-L62)). `inline`: each call becomes a block binding the parameters
+  to its arguments, then the body; the function goes when it is not `pub`. What stops it is one rule the preflight
+  and code_passenger read, `change::inline_blockers` (self, generics, async or unsafe, `return` or `?` in the body,
+  calling itself, named as a value, `Self` in the body, a call from another file, where the body's names would not
+  resolve: [src/change.rs#L1268](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/change.rs#L1268)). `wrap`: the spec's pieces first, then the body as it
+  was as the block's value; none of the pieces may give the value (`render_wrapped`, [src/change.rs#L1223](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/change.rs#L1223);
+  `render_inlined`, [src/change.rs#L1243](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/change.rs#L1243)). Their preflight checks: [src/preflight.rs#L471-L496](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/preflight.rs#L471-L496). The last two came from the exercise (`api::open` inlined into `cli`, `store::Store::new` into `api`) and are
+  pinned to eb506f2: [src/change.rs#L1297](https://github.com/1o-llc/custodian_kit/blob/eb506f28675bdd7f4440e4c97b7bc86781d89053/src/change.rs#L1297),
+  [src/change.rs#L1313](https://github.com/1o-llc/custodian_kit/blob/eb506f28675bdd7f4440e4c97b7bc86781d89053/src/change.rs#L1313).
+- An attribute macro that rewrites a struct (`#[bitpack]` through `use big_bad_bool::bitpack`) refuses `add_field`
+  and `add_constructor`, by the macro's name, `[CUST0040]`: an attribute whose path resolves to a crate's macro,
+  the compiler's own attributes aside (`attribute_macros`, `rewritten_by`: [src/change.rs#L1364-L1400](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/change.rs#L1364-L1400);
+  [src/preflight.rs#L497](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/preflight.rs#L497)).
+- A binary's items land in its package, not its crate root: `stored::main` is `cli`'s (`change::package_of`,
+  [src/change.rs#L1460](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/change.rs#L1460), [src/change.rs#L1535](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/change.rs#L1535); was [src/change.rs#L1349 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/change.rs#L1349)).
+- A method's receiver is not a parameter when a signature change counts what it adds (`change::is_receiver`,
+  [src/change.rs#L1259](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/change.rs#L1259); was [src/preflight.rs#L377 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/preflight.rs#L377)).
+- `plan` offers `replace_body`, `wrap` and `inline` for a function and `change_dependency` for a crate.
+
+### Readings
+
+- `impact` answers for `*`, the whole workspace (was CUST0010: [src/reading/impact.rs#L79 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/reading/impact.rs#L79),
+  [src/reading/impact.rs#L122 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/reading/impact.rs#L122); now [src/reading/impact.rs#L80](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/impact.rs#L80), [src/reading/impact.rs#L178](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/impact.rs#L178)).
+- `affected_tests`: a changed file that holds no Rust (a manifest, a test's expected output) reaches every test of
+  its crate ([src/reading/kinds.rs#L1276](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/kinds.rs#L1276); was [src/reading/kinds.rs#L1262 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/reading/kinds.rs#L1262)); a package with no library is
+  never asked for `--lib`: its test's target is its binary ([src/reading/kinds.rs#L1197-L1202](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/src/reading/kinds.rs#L1197-L1202); was
+  [src/reading/kinds.rs#L1198 at 0.3.2](https://github.com/1o-llc/custodian_kit/blob/a359c9f880b65a89de84b269c60dac6d873c7d63/src/reading/kinds.rs#L1198)).
+
+### The exercise (job kind `exercise`, built on the branch `exercise`)
+
+- Every operation tried on N targets of each unit kind it applies to, each on a copy of the project in the job's
+  data folder: spec, preflight, transform, cargo check, the tests, the closing check; every result a receipt and
+  every finding a diagnosis record of the job's task; the summary and the report ([src/exercise.rs](https://github.com/1o-llc/custodian_kit/blob/f286e904b89a4b2ba72561a33316cea625e0a93e/src/exercise.rs)).
+- The preflight refuses a private field a struct literal elsewhere cannot name, and a `gate` while code outside the
+  item uses it ungated; a job whose target is `*` resolves.
+
+### Proof
+
+- tests/close.rs: [tests/close.rs#L66](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/close.rs#L66) `a_test_failing_the_same_way_at_the_base_is_pre_existing_and_the_job_is_accepted`
+  (a git repository, a test that always fails and one that passes; the job edits by hand; close: `accepted`,
+  pre-existing `needs_the_gate` "the gate is not set" from `base <commit>`, the file listed, `job: +4 −0 across 1
+  files ... (git diff --numstat ...)`); [tests/close.rs#L94](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/close.rs#L94) `a_test_the_job_breaks_is_the_jobs_and_the_baseline_answers_for_the_base`
+  (the job breaks `vault_key`: `failed_test`, its test "ok at the base", the other pre-existing from the baseline);
+  [tests/close.rs#L129](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/close.rs#L129) `a_bounded_job_names_every_file_it_touched_and_a_file_no_operation_writes_needs_allow_file`
+  (`CUST0041`, then allowed).
+- tests/index.rs: [tests/index.rs#L36](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/index.rs#L36) the second scan from the cache under 1 s, a changed file parsed again,
+  two kept; [tests/index.rs#L65](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/index.rs#L65) the receipt says `index from cache`, a count parses; [tests/index.rs#L83](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/index.rs#L83)
+  stored once; [tests/index.rs#L102](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/index.rs#L102) the impact of `*`; [tests/index.rs#L116](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/index.rs#L116) a manifest's and a
+  `.stderr`'s change reach the crate's tests.
+- tests/operations.rs: [tests/operations.rs#L44](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/operations.rs#L44) `#[keep] (marks::keep)` refused for both operations, a method
+  authorized; [tests/operations.rs#L62](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/operations.rs#L62) inline authorized, refused on `return`, on a call from another crate and on `Self`; [tests/operations.rs#L75](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/operations.rs#L75) wrap.
+- tests/bounded.rs: [tests/bounded.rs#L162](https://github.com/1o-llc/custodian_kit/blob/5a9fc991fe0bc53e3f4fc01406b2ad5e4abb5897/tests/bounded.rs#L162) the four combinations, the two facts as set at open.
+- `baseline::tests::the_first_failing_line_is_the_panics_message_with_the_root_written_root`.
+- Every suite passes: 151 lib tests and every integration file.
+
 ## 0.3.2 (2026-10-19)
 
 Two operations the first real bounded job in the kit needed, and the change
