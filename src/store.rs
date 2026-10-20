@@ -83,11 +83,13 @@ pub mod named {
     /// The parsed index, held once per code digest (klepto's model in its serde form, as zstd-compressed CBOR): the
     /// next scan of the same code reads it instead of parsing.
     pub const INDEX_MODEL: ArtifactOutputDescriptor = file("custodian.index", "index", ArtifactEndpoint::FileCbor, AppPathRole::State, "index/{digest}/model.cbor.zst", PathMutability::Writable);
+    /// A reading's or a reuse's cost record (`crate::cost`), under its receipt's number.
+    pub const COST: ArtifactOutputDescriptor = part("custodian.cost.v1", "custodian.cost", "cost", ArtifactEndpoint::FileJson, AppPathRole::Data, "costs/{seq}.json", PathMutability::AppendOnly);
 
     /// Every part of the folder, each once: what `custodian list` prints and what the golden test pins.
     pub const ALL: &[ArtifactOutputDescriptor] = &[
         SETTINGS, PATHS, SCHEMA, THRESHOLDS, JOB_TEMPLATE, QUEUED_SPEC, DONE_SPEC, READING_PAGE, RECEIPT, INVENTORY, PLAN, HISTORY_INDEX, JOURNAL, JOB_FILE, SOCKET,
-        READING_RECORD, CHECK_RUN, LOG, WRITER, CHANGE_SPEC, PREFLIGHT, TRANSFORM, LINKAGE, INTENT_PLAN, TREE, INDEX_MODEL,
+        READING_RECORD, CHECK_RUN, LOG, WRITER, CHANGE_SPEC, PREFLIGHT, TRANSFORM, LINKAGE, INTENT_PLAN, TREE, INDEX_MODEL, COST,
     ];
 
     /// The folder's policy for the project at `root`: pathgen's dev policy whose base is the root and whose app

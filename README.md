@@ -418,6 +418,32 @@ itself; each is re-exported where it was, so nothing moved out of this crate's A
 [differences_kit](https://crates.io/crates/differences_kit) composes them, one call per kind, and the
 [differences](https://crates.io/crates/differences) command line shows any of them side by side.
 
+## After a job: handoff, why, cost
+
+Three modules read the records and write nothing but a cost record.
+
+- `handoff`: `job_folder(store, name)` finds a job (the one closed last by default), `of_job(root, store, folder,
+  receipts, since)` reads its job file, closing receipt, receipts, task history, transform records and count diff
+  into a `Handoff`, and `render(&h, Reader::James | Reader::Agent)` writes it in a fixed order: what waits on a
+  person (open decisions, change specs a preflight refused, verifications not satisfied, a refused close), what
+  it was for, what changed (lines per crate, the change specs and their operations), what was decided and by
+  whom, what was verified (tests passed and failed, which failures are pre-existing: the same test failed in a
+  closed job's run before this job's first transform), and what runs next. `Reader::Agent` adds the exact lines
+  and the routes. Lists stop at `SHOWN` (5), next steps at `NEXT_SHOWN` (8), the text at `MAX_LINES` (60).
+- `why`: `of(root, store, route, readings)` for a `crate:` or `decl:` route: the task revisions whose change
+  records touch its files, the linkage records binding it, the readings naming it. `exec::git_log_paths` is the
+  declared `git log` line for its first and last commit; the caller runs it with a receipt and hands its text to
+  `commits_of` and `ends`. `render` says "no record" for an empty section.
+- `cost`: a reading's cost is the files its answer names (each row's file, else a crate row's `Cargo.toml`), their
+  bytes when the reading is made, and tokens estimated as bytes / 4 (`BYTES_PER_TOKEN`; no tokenizer runs).
+  `read_record` and `reuse_record` make the record of a reading and of a reuse (the reuse's `saved` is the reading's
+  `cost`); `keep` writes it as `data/costs/<seq>.json` (`store::named::COST`) under the receipt's number, and the
+  reading runner keeps one for every reading and reuse it runs. `sum` adds them per reading kind and per job;
+  `brief_line` is `tokens: ~N read, ~M saved by reuse (estimate: bytes/4 of the files each reading touched)`.
+
+`receipts::is_reading_run` is the one rule for which receipts are reading runs, whatever word an older custodian
+wrote (`reading`; `run`; `count`, `diagnostics`, `bundle`, `sweep` with a spec's hash).
+
 ## Refusals
 
 A refusal is a liaise code (`CUST0001`…`CUST0039`, `ReadingRefusal`) and one

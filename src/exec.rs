@@ -3,7 +3,7 @@
 //! here, as fleet_commands declares the kit's (a `CompositeShell` root, a
 //! `SimpleSubCommand` leaf per way it is called, its exit statuses named):
 //! custodian itself (`exec-reading`, the reading as a child process), cargo
-//! (`test`, `check`), git (`diff --name-only`), code-passenger (`gate`,
+//! (`test`, `check`), git (`diff --name-only`, `log`), code-passenger (`gate`,
 //! `transform`), the cheap model's command line (`claude -p`, the exercise's
 //! intents) and maintenance (its own declared lines, from its runner). A plan of lines is walked from
 //! the first by each line's exit-status policy, and every line walked leaves
@@ -167,6 +167,17 @@ pub fn git_diff_names(root: &Path, git_ref: &str) -> GitInRooted<Git> {
 /// `git -C ROOT rev-parse HEAD`: the commit the tree is at.
 pub fn git_head(root: &Path) -> GitInRooted<Git> {
     Git::in_dir(root.as_os_str()).words(["rev-parse", "HEAD"])
+}
+
+/// The format `git log` writes each commit in for [`git_log_paths`]: hash, author, date (strict ISO 8601), subject,
+/// tab-separated (`crate::why::commits_of` reads it back).
+pub const GIT_LOG_FORMAT: &str = "--format=%H%x09%an%x09%aI%x09%s";
+
+/// `git -C ROOT log --format=... -- PATH...`: every commit touching the paths, newest first.
+pub fn git_log_paths(root: &Path, paths: &[String]) -> GitInRooted<Git> {
+    let mut words: Vec<OsString> = vec!["log".into(), GIT_LOG_FORMAT.into(), "--".into()];
+    words.extend(paths.iter().map(OsString::from));
+    Git::in_dir(root.as_os_str()).words(words)
 }
 
 /// code_passenger's program.

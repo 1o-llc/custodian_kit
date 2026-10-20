@@ -54,6 +54,16 @@ pub fn keep(store: &Store, r: Receipt) -> Result<(Receipt, PathBuf)> {
 }
 
 
+/// The words a reading run's receipt was written with besides the kit's `reading`: before the command line took the
+/// kit's word, its own subcommand (`run`; and `count`, `diagnostics`, `bundle`, `sweep` when they answered a spec).
+pub const OLDER_READING_WORDS: &[&str] = &["run", "count", "diagnostics", "bundle", "sweep"];
+
+/// Whether a receipt is a reading run, made, reused or refused: the kit's word `reading`; `run`, the command line's
+/// reading line before it; or another older word when the run answered a spec (it carries the spec's hash).
+pub fn is_reading_run(r: &Receipt) -> bool {
+    r.command == "reading" || r.command == "run" || (OLDER_READING_WORDS.contains(&r.command.as_str()) && r.spec_hash.is_some())
+}
+
 /// Where a reading's files are, relative to the project root: its record (the facts) and its page.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ReadingFiles {

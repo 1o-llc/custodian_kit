@@ -61,6 +61,9 @@ pub mod plan;
 pub mod tasks;
 pub mod exercise;
 pub mod baseline;
+pub mod cost;
+pub mod why;
+pub mod handoff;
 
 #[cfg(test)]
 mod tests;

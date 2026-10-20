@@ -33,6 +33,7 @@ const GOLDEN: &[(&str, &str)] = &[
     ("custodian.intent_plan", "data/plans/intent/{name}.json"),
     ("custodian.tree", "data/trees/{point}.json"),
     ("custodian.index", "state/index/{digest}/model.cbor.zst"),
+    ("custodian.cost", "data/costs/{seq}.json"),
 ];
 
 #[test]
@@ -52,6 +53,7 @@ fn a_part_resolves_under_the_projects_folder_and_never_leaves_it() {
     assert_eq!(named::resolve(&p, &named::READING_RECORD, &[("name", "env"), ("stamp", "s")]).unwrap(), Path::new("/p/.custodian/data/readings/env/s.json"));
     assert_eq!(named::resolve(&p, &named::JOB_FILE, &[("state", "done"), ("job", "j")]).unwrap(), Path::new("/p/.custodian/state/jobs/done/j/v1.job.1o.job"));
     assert_eq!(named::resolve(&p, &named::TREE, &[("point", "one")]).unwrap(), Path::new("/p/.custodian/data/trees/one.json"));
+    assert_eq!(named::resolve(&p, &named::COST, &[("seq", "12")]).unwrap(), Path::new("/p/.custodian/data/costs/12.json"));
     assert!(named::resolve(&p, &named::QUEUED_SPEC, &[("name", "../x")]).is_err(), "a template value cannot leave the folder");
     // the store resolves through the same two functions
     let d = std::env::temp_dir().join(format!("kit-layout-{}", std::process::id()));

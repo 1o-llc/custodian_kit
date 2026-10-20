@@ -142,6 +142,12 @@ pub fn run_reading_by(ctx: &Ctx, spec_path: &Path, again: bool, job: Option<&InJ
             }
             let reuse = Receipt { seq: 0, utc: now_utc(), reused_seq: Some(prev.seq), job: job.map(|j| j.id.clone()), outputs, millis: 0, ..prev.clone() };
             let (r, f) = keep(store, reuse)?;
+            // the reuse saves what the reading cost
+            if let Some(c) = crate::cost::reading_cost(&ctx.root, store, &prev) {
+                let saved = crate::cost::reuse_record(r.seq, &r.utc, r.job.as_deref(), &c);
+                crate::cost::keep(store, &saved)?;
+                said.push(crate::cost::said(&saved));
+            }
             said.push(format!(
                 "this is search #{} from {}: same spec ({}), same code — reused, not read again (--again reads again)",
                 prev.seq,
@@ -213,6 +219,12 @@ pub fn run_reading_by(ctx: &Ctx, spec_path: &Path, again: bool, job: Option<&InJ
             let (r, f) = keep(store, receipt)?;
             if let Some(s) = &summary {
                 said.push(format!("reading: {}", s.page.as_ref().map(|p| ctx.rel(p)).unwrap_or_default()));
+                // what reading the same files by hand would have cost, kept under the receipt's number
+                if let Some(report) = s.json.as_ref().and_then(|j| crate::reading::load(j).ok()) {
+                    let c = crate::cost::read_record(&ctx.root, r.seq, &r.utc, r.job.as_deref(), &report);
+                    crate::cost::keep(store, &c)?;
+                    said.push(crate::cost::said(&c));
+                }
             }
             said.push(format!("receipt: {}", ctx.rel(&f)));
             said.push(format!("journal: run #{} {} {} ({} ms, {})", r.seq, r.command, r.name, r.millis, r.reason));
