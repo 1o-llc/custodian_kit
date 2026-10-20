@@ -421,6 +421,9 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                     let pkg = r.path.as_deref().and_then(|p| f.package_of_rel(p)).map(|p| p.name.clone()).unwrap_or_default();
                     !gated && !(pkg != l.package && turned_on(&pkg))
                 };
+                // an item the feature gates already: a second gate writes a second, identical #[cfg] line
+                let own = crate::change::item_named(&f.k, &item).map(|d| needs(&d.cfg)).unwrap_or(false) || f.k.functions.iter().any(|x| x.fq_name == item && needs(&x.cfg));
+                pre.push(Check { what: format!("{item} is not gated by {feat} yet"), holds: !own, detail: if own { format!("its cfg already needs {feat}: nothing to gate") } else { "ungated".into() } });
                 let uses: Vec<String> = kind_rows("use-site").iter().filter(|r| ungated(r)).map(|r| format!("{}:{} ({})", r.path.clone().unwrap_or_default(), r.line.unwrap_or(0), r.attributes.get("item").cloned().unwrap_or_default())).collect();
                 for u in &uses {
                     listed.push(format!("use {u}: stops compiling without {feat} unless it is gated too"));

@@ -154,3 +154,16 @@ fn add_test_into_a_module_the_file_does_not_have_says_it_is_made() {
     assert!(p.authorized, "{:?} {:?}", p.reasons, p.preconditions);
     assert!(p.listed.iter().any(|l| l == "the test module shop::pantry_tests is made: #[cfg(test)] mod pantry_tests at the end of shop/src/lib.rs"), "{:?}", p.listed);
 }
+
+#[test]
+fn gate_refuses_an_item_its_feature_gates_already() {
+    let (store, ctx, _) = project("gated");
+    write(&store.root, "shop/Cargo.toml", "[package]\nname = \"shop\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nmarks = { path = \"../marks\" }\n\n[features]\njson = []\n");
+    let lib = std::fs::read_to_string(store.root.join("shop/src/lib.rs")).unwrap();
+    write(&store.root, "shop/src/lib.rs", &(lib + "\n#[cfg(feature = \"json\")]\npub fn to_json() -> u8 {\n    1\n}\n\npub fn plain() -> u8 {\n    2\n}\n"));
+    let w = Workspace::open_with(&store.root, &Scope::default(), Resolving::Free).unwrap();
+    let twice = preflight::run_preflight(&ctx, &spec(&store.root, "g", "name = \"g\"\nobjective = \"o\"\noperation = \"gate\"\ntarget = \"shop::to_json\"\nfeature = \"json\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(!twice.authorized && twice.preconditions.iter().any(|c| !c.holds && c.detail == "its cfg already needs json: nothing to gate"), "{:?}", twice.preconditions);
+    let once = preflight::run_preflight(&ctx, &spec(&store.root, "g2", "name = \"g2\"\nobjective = \"o\"\noperation = \"gate\"\ntarget = \"shop::plain\"\nfeature = \"json\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(once.authorized, "{:?} {:?}", once.reasons, once.preconditions);
+}

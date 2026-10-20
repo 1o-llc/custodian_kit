@@ -54,7 +54,7 @@ vocabulary! {
         Rename = "rename" : "an item renamed (target: the item) at its declaration and every use klepto resolves to it",
         Move = "move" : "an item moved to another module (target: the item, `to`: the module route), re-exported where it was so its paths still resolve",
         Extract = "extract" : "items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were",
-        Gate = "gate" : "an item put behind a crate feature the crate declares (target: the item, `feature`)",
+        Gate = "gate" : "an item put behind a crate feature the crate declares (target: the item, `feature`); an item already gated by it is refused. Code that compiles only with the feature on gets its gate as it is made, in the same step: `#[cfg(feature = \"..\")]` in the function's `attrs` (add_method, make_fn, add_test)",
         Anchor = "anchor" : "a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name)",
         ReplaceBody = "replace_body" : "a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched; with a toolkit method generator (`function.generator`) the whole function is written as the call, its signature, docs and attributes inside it",
         ChangeDependency = "change_dependency" : "a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features",
