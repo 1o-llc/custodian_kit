@@ -278,7 +278,7 @@ transform are bound to.
 | `add_test` | a test function (target: the function it proves): in the file's tests module (`to`: another inline test module of the file, by name; one the file does not have is made, `#[cfg(test)]`), its body from toolkit pieces |
 | `add_constructor` | a constructor for a type (target: the type): `Self { field: param, .. }`, or a toolkit constructor generator |
 | `add_trait_impl` | `impl Trait for Type` (target: the type): a toolkit impl generator, or the trait's functions |
-| `change_signature` | a function's signature changed (target: the function): a new parameter with the expression its call sites pass, a new name, a new return type; with `function.body`, its body written in the same step (a body that compiles only against the new signature) |
+| `change_signature` | a function's signature changed (target: the function): a new parameter with the expression its call sites pass (inside a macro's arguments too; refused while a call site is unresolved, unless `call_sites.allow_unresolved`), a new name, a new return type; with `function.body`, its body written in the same step (a body that compiles only against the new signature) |
 | `rename` | an item renamed (target: the item) at its declaration and every use klepto resolves to it |
 | `move` | an item moved to another module (target: the item, `to`: the module route), re-exported where it was so its paths still resolve |
 | `extract` | items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were |

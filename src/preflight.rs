@@ -34,7 +34,7 @@ use crate::runs::{Ctx, InJob, Runner};
 use crate::store::{named, write_whole, Receipt, Store, RECEIPT_SCHEMA};
 use crate::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub const PREFLIGHT_SCHEMA: &str = "custodian.preflight.v1";
@@ -145,15 +145,52 @@ pub struct Preflight {
     pub authorized: bool,
     /// The rules the facts break, when not authorized.
     pub reasons: Vec<String>,
+    /// Why it is not authorized, in words: each precondition that does not hold, each name taken, each file outside
+    /// the scope, each decision open. The rules in `reasons` are what decide it; these are what a person fixes.
+    #[serde(default)]
+    pub why: Vec<String>,
+    /// What the spec asks for is in the code already (the item gated by the feature, the dependency named, the
+    /// feature declared as asked, the library there): the refusal is a change already made, not one waiting.
+    #[serde(default)]
+    pub in_place: Vec<String>,
     pub utc: String,
     pub millis: i64,
 }
 
 impl Preflight {
+    /// Why it is not authorized, in one line: what is in place already, else each reason in words, else the rules
+    /// it breaks; `None` when it is authorized.
+    pub fn headline_why(&self) -> Option<String> {
+        if self.authorized {
+            return None;
+        }
+        Some(if !self.in_place.is_empty() {
+            format!("already in place: {}", self.in_place.join("; "))
+        } else if !self.why.is_empty() {
+            self.why.join("; ")
+        } else {
+            self.reasons.join("; ")
+        })
+    }
+
+    /// The receipt's reason: `authorized`, `not authorized`, or `not authorized: already in place`.
+    pub fn reason(&self) -> &'static str {
+        if self.authorized {
+            AUTHORIZED
+        } else if !self.in_place.is_empty() {
+            ALREADY_IN_PLACE
+        } else {
+            NOT_AUTHORIZED
+        }
+    }
+
     /// The page a person reads: the decision first.
     pub fn markdown(&self) -> String {
         let mut s = format!("# preflight — {} ({})\n\n", self.spec_name, self.operation);
-        s.push_str(&format!("- decision: **{}**{}\n", if self.authorized { "authorized" } else { "not authorized" }, if self.reasons.is_empty() { String::new() } else { format!(" — {}", self.reasons.join("; ")) }));
+        s.push_str(&format!("- decision: **{}**{}\n", if self.authorized { "authorized" } else { "not authorized" }, self.headline_why().map(|w| format!(" — {w}")).unwrap_or_default()));
+        if !self.reasons.is_empty() {
+            s.push_str(&format!("- the rules it breaks: {}\n", self.reasons.join("; ")));
+        }
         s.push_str(&format!("- objective: {}\n- target: `{}`\n", self.objective, self.target));
         if let Some(l) = &self.landing {
             s.push_str(&format!("- lands: {}\n", l.line()));
@@ -246,6 +283,8 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
     let mut collisions = Vec::new();
     let mut listed = Vec::new();
     let mut write: BTreeSet<String> = BTreeSet::new();
+    // the checks that, failing, say the change is in the code already
+    let mut in_place_checks: Vec<String> = Vec::new();
     let mut questions: Vec<crate::questions::Question> = spec.decisions.iter().map(|q| crate::questions::question(&q.question, &q.options, q.why.as_deref(), &format!("change:{}", spec.name))).collect();
     let land = landing(&f.k, &f.root, spec);
     let resolved = land.is_ok();
@@ -287,6 +326,7 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
             Operation::MakeLib => {
                 let lib = f.k.packages.get(&l.package.replace('-', "_")).and_then(|p| p.targets.iter().find(|t| t.kind == "lib" || t.kind == "proc-macro"));
                 pre.push(Check { what: format!("{} has no library yet", l.package), holds: lib.is_none(), detail: match lib { Some(t) => format!("it has one: {}", t.src_path.display()), None => "its binary is its only root".into() } });
+                in_place_checks.push(format!("{} has no library yet", l.package));
                 if f.root.join(&l.file).exists() {
                     collisions.push(format!("{} already exists", l.file));
                 }
@@ -377,6 +417,7 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                 let dep = spec.dependency.as_ref().map(|d| d.name.replace('-', "_")).unwrap_or_default();
                 let has = f.k.features.get(&l.package).is_some_and(|m| m.dependencies.iter().any(|d| d.name.replace('-', "_") == dep));
                 pre.push(Check { what: format!("{} does not depend on {dep} yet", l.package), holds: !has, detail: if has { "it does: nothing to add".into() } else { "a new line".into() } });
+                in_place_checks.push(format!("{} does not depend on {dep} yet", l.package));
                 if spec.dependency.as_ref().and_then(|d| d.optional) == Some(true) {
                     listed.push(format!("{dep} is optional: cargo gives it the feature {dep} until a feature names it dep:{dep} (declare_feature)"));
                 }
@@ -387,7 +428,11 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                         Some(w) => format!("declared now as {w:?}, becomes {:?}", d.enables),
                         None => format!("a new feature: {:?}", d.enables),
                     };
+                    let same = d.was.as_ref() == Some(&d.enables);
                     pre.push(Check { what: format!("{} can declare {} as asked", d.package, d.feature), holds: d.problems.is_empty(), detail: if d.problems.is_empty() { was } else { d.problems.join("; ") } });
+                    if same && d.problems.len() == 1 {
+                        in_place_checks.push(format!("{} can declare {} as asked", d.package, d.feature));
+                    }
                     for n in &d.made_optional {
                         listed.push(format!("{n} becomes optional: dep:{n} turns it on, so code that uses it compiles only with {} on", d.feature));
                     }
@@ -433,6 +478,7 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                 // an item the feature gates already: a second gate writes a second, identical #[cfg] line
                 let own = crate::change::item_named(&f.k, &item).map(|d| needs(&d.cfg)).unwrap_or(false) || f.k.functions.iter().any(|x| x.fq_name == item && needs(&x.cfg));
                 pre.push(Check { what: format!("{item} is not gated by {feat} yet"), holds: !own, detail: if own { format!("its cfg already needs {feat}: nothing to gate") } else { "ungated".into() } });
+                in_place_checks.push(format!("{item} is not gated by {feat} yet"));
                 let uses: Vec<String> = kind_rows("use-site").iter().filter(|r| ungated(r)).map(|r| format!("{}:{} ({})", r.path.clone().unwrap_or_default(), r.line.unwrap_or(0), r.attributes.get("item").cloned().unwrap_or_default())).collect();
                 for u in &uses {
                     listed.push(format!("use {u}: stops compiling without {feat} unless it is gated too"));
@@ -464,18 +510,59 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                 if let Some(n) = spec.function.as_ref().map(|f| f.body.len()).filter(|n| *n > 0) {
                     listed.push(format!("its body is written with the signature: {n} pieces, proved together"));
                 }
+                let item = l.item.clone().unwrap_or_default();
+                // the calls: klepto's resolved ones, and the ones inside a macro's arguments whose path resolves to it
+                // (crate::change::macro_calls, the rule the writer rewrites by)
                 let calls: Vec<_> = kind_rows("use-site");
+                let in_macros = crate::change::macro_calls(&f.k, &item);
+                let mut places: BTreeSet<(String, u32)> = calls.iter().filter_map(|r| Some((r.path.clone()?, r.line?))).collect();
+                let resolved_n = places.len();
+                places.extend(in_macros.iter().map(|m| (f.rel(&m.file), m.line)));
+                let macro_n = places.len() - resolved_n;
+                // what klepto could not resolve that could be a call of it, less the places a call is known at
+                let mut unresolved: BTreeMap<(String, u32), String> = BTreeMap::new();
+                for r in rows.iter().filter(|r| r.kind != "macro-token" && r.kind.ends_with("unresolved")) {
+                    let at = (r.path.clone().unwrap_or_default(), r.line.unwrap_or(0));
+                    if !places.contains(&at) {
+                        unresolved.entry(at).or_insert_with(|| r.label.clone());
+                    }
+                }
+                for m in crate::change::unresolved_macro_paths(&f.k, &item) {
+                    let at = (f.rel(&m.file), m.line);
+                    if !places.contains(&at) {
+                        unresolved.entry(at).or_insert_with(|| format!("{} in {}!", m.paths.join(", "), m.macro_path));
+                    }
+                }
                 let pass = spec.call_sites.as_ref().and_then(|c| c.pass.clone());
-                let adds = spec.function.as_ref().is_some_and(|nf| f.k.functions.iter().find(|x| Some(x.fq_name.as_str()) == land.as_ref().ok().and_then(|l| l.item.as_deref())).is_some_and(|old| nf.params.len() > old.args.iter().filter(|a| !crate::change::is_receiver(a)).count()));
+                let allow = spec.call_sites.as_ref().is_some_and(|c| c.allow_unresolved);
+                let adds = spec.function.as_ref().is_some_and(|nf| f.k.functions.iter().find(|x| x.fq_name == item).is_some_and(|old| nf.params.len() > old.args.iter().filter(|a| !crate::change::is_receiver(a)).count()));
                 if adds {
                     match &pass {
-                        Some(_) => calls.iter().filter_map(|r| r.path.clone()).for_each(|p| {
-                            write.insert(p);
+                        Some(_) => places.iter().for_each(|(p, _)| {
+                            write.insert(p.clone());
                         }),
-                        None => calls.iter().for_each(|r| listed.push(format!("call {}:{}: needs the new argument", r.path.clone().unwrap_or_default(), r.line.unwrap_or(0)))),
+                        None => places.iter().for_each(|(p, line)| listed.push(format!("call {p}:{line}: needs the new argument"))),
                     }
-                    pre.push(Check { what: "every call site gets the new argument".into(), holds: !preserve || pass.is_some() || calls.is_empty(), detail: format!("{} call sites", calls.len()) });
+                    pre.push(Check { what: "every call site gets the new argument".into(), holds: !preserve || pass.is_some() || places.is_empty(), detail: format!("{} call sites ({resolved_n} resolved by klepto, {macro_n} inside a macro's arguments)", places.len()) });
                 }
+                let shown: Vec<String> = unresolved.iter().take(8).map(|((p, line), what)| format!("{p}:{line} ({what})")).collect();
+                for ((p, line), what) in &unresolved {
+                    listed.push(format!("unresolved call site {p}:{line} ({what}): klepto could not resolve it{}", if allow { ", not changed (call_sites.allow_unresolved)" } else { "" }));
+                }
+                pre.push(Check {
+                    what: "every call site resolves".into(),
+                    holds: unresolved.is_empty() || allow || !preserve,
+                    detail: if unresolved.is_empty() {
+                        "unresolved: 0".into()
+                    } else {
+                        format!(
+                            "unresolved: {} — {}{}",
+                            unresolved.len(),
+                            shown.join(", "),
+                            if allow { " (allowed by call_sites.allow_unresolved: listed, not changed)" } else { "; a call no one resolved is not rewritten and stops compiling: name it so it resolves, or set call_sites.allow_unresolved = true to go ahead and list them" }
+                        )
+                    },
+                });
             }
             Operation::Move => {
                 let to = spec.to.clone().unwrap_or_default();
@@ -538,6 +625,15 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
             }
             Operation::AddAttribute => {}
         }
+        // code that names an optional dependency builds only with a feature that turns it on (crate::change::optional_uses,
+        // the rule the writer's refusal names too)
+        for u in crate::change::optional_uses(&f.k, spec, l) {
+            pre.push(Check {
+                what: format!("the code names the optional dependency {} only under a feature that turns it on", u.dependency),
+                holds: u.gated,
+                detail: if u.gated { format!("gated by {}", u.features.join(" or ")) } else { u.fix() },
+            });
+        }
         // an attribute macro that rewrites the item: an operation that writes it as declared does not know what the
         // macro makes of it
         if let Some(why) = l.item.as_deref().and_then(|i| crate::change::rewritten_by(&f.k, op, i)) {
@@ -583,6 +679,26 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
     let bounded = job.as_ref().is_some_and(|j| j.mode == JobMode::Bounded);
     let (tk, ok) = job.as_ref().map(|j| (j.target_known || resolved, j.outcome_known)).unwrap_or((resolved, true));
     let preconditions = pre.iter().all(|c| c.holds);
+    // the configurations to check are the ones the change leaves: a feature declared, a dependency made optional
+    let mut impact = impact;
+    if let (Some((i, _, _)), Ok(l)) = (impact.as_mut(), land.as_ref()) {
+        let packages: Vec<String> = if i.packages.is_empty() { vec![l.package.clone()] } else { i.packages.clone() };
+        let after: usize = packages.iter().filter_map(|p| crate::change::model_after(&f.k, &f.root, spec, p)).map(|m| klepto::check_matrix(&m).len()).sum();
+        if after != i.feature_configurations && after > 0 {
+            let before = i.feature_configurations;
+            i.feature_configurations = after;
+            for d in i.dimensions.iter_mut() {
+                match d.name.as_str() {
+                    "feature configurations to check" => {
+                        d.value = Some(after as u64);
+                        d.note = format!("klepto's check matrix over each affected crate's features as the change leaves them ({before} before it)");
+                    }
+                    "cargo check runs" => d.value = Some(after.max(packages.len()) as u64),
+                    _ => {}
+                }
+            }
+        }
+    }
     let word = PreflightWord::from_raw(0)
         .set("resolved", resolved)
         .set("preconditions", preconditions)
@@ -595,11 +711,22 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
         .set("outcome_known", ok)
         .set("bounded_ready", !bounded || (tk && ok));
     let (word, mut reasons) = word.decide();
+    let authorized = word.names().contains(&"authorized");
+    // the reasons in words, and whether the change is in the code already
+    let mut why: Vec<String> = pre.iter().filter(|c| !c.holds).map(|c| format!("{}: {}", c.what, c.detail)).collect();
+    why.extend(collisions.iter().map(|c| format!("a name is taken: {c}")));
+    if !outside.is_empty() {
+        why.push(format!("it writes outside its scope: {}", outside.join(", ")));
+    }
+    why.extend(open.iter().map(|q| format!("a decision is open: {}", q.question)));
+    let in_place: Vec<String> = if authorized { Vec::new() } else { pre.iter().filter(|c| !c.holds && in_place_checks.contains(&c.what)).map(|c| c.detail.clone()).collect() };
     if bounded && !tk {
         reasons.push("bounded: the job's target is not known (target_known)".into());
+        why.push("the job's target is not known".into());
     }
     if bounded && !ok {
         reasons.push("bounded: the job declares no verification (outcome_known): job start --verify, or answer what done looks like".into());
+        why.push("the bounded job declares no verification: job start --verify, or answer what done looks like".into());
     }
     Ok(Preflight {
         schema: PREFLIGHT_SCHEMA.into(),
@@ -626,8 +753,10 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
         job,
         word: word.raw(),
         flags: word.names().into_iter().map(str::to_string).collect(),
-        authorized: word.names().contains(&"authorized"),
+        authorized,
         reasons,
+        why: if authorized { Vec::new() } else { why },
+        in_place,
         utc: crate::runs::now_utc(),
         millis: started.elapsed().as_millis() as i64,
     })
@@ -693,7 +822,7 @@ pub fn run_preflight(ctx: &Ctx, spec_path: &Path, job: Option<&InJob>, runner: R
                 let json = receipt.as_ref().and_then(|x| x.outputs.iter().find(|o| o.ends_with(".json")).cloned());
                 let report = json.and_then(|j| crate::reading::load(&ctx.root.join(j)).ok());
                 let seq = receipt.as_ref().map(|x| x.reused_seq.unwrap_or(x.seq));
-                report.map(|rep| (ImpactRecord::of(&rep), seq, rep.query.results.clone()))
+                report.map(|rep| (ImpactRecord::of(&rep), seq, rep.query.results.iter().chain(&rep.unresolved).cloned().collect()))
             }
             Err(e) => {
                 said.push(format!("impact not read: {e}"));
@@ -703,12 +832,15 @@ pub fn run_preflight(ctx: &Ctx, spec_path: &Path, job: Option<&InJob>, runner: R
     } else {
         // free mode: answered here, nothing stored
         let rep = crate::reading::read_facts(facts, &ipath, &ispec, &crate::runs::stamp())?;
-        Some((ImpactRecord::of(&rep), None, rep.query.results.clone()))
+        Some((ImpactRecord::of(&rep), None, rep.query.results.iter().chain(&rep.unresolved).cloned().collect()))
     };
     let (code_digest, index_key) = (key.code_digest.clone(), impact.as_ref().and_then(|(i, _, _)| i.index_key.clone()));
     let view = store.and_then(job_view).map(|(v, _)| v);
     let p = assess(facts, store, &spec_rel, &spec, impact, view, &code_digest, index_key)?;
-    said.push(format!("preflight {}: {} — {}", spec.name, if p.authorized { "authorized" } else { "not authorized" }, if p.reasons.is_empty() { p.flags.join(", ") } else { p.reasons.join("; ") }));
+    said.push(format!("preflight {}: {} — {}", spec.name, if p.authorized { "authorized" } else { "not authorized" }, p.headline_why().unwrap_or_else(|| p.flags.join(", "))));
+    if !p.reasons.is_empty() {
+        said.push(format!("  the rules it breaks: {}", p.reasons.join("; ")));
+    }
     let Some(store) = store else {
         return Ok(Ran { preflight: p, receipt: None, receipt_file: None, outputs: Vec::new(), said });
     };
@@ -751,7 +883,7 @@ pub fn run_preflight(ctx: &Ctx, spec_path: &Path, job: Option<&InJob>, runner: R
         exit_code: Some(if p.authorized { 0 } else { 1 }),
         accepted: true,
         disposition: "Continue".into(),
-        reason: if p.authorized { AUTHORIZED.into() } else { NOT_AUTHORIZED.into() },
+        reason: p.reason().into(),
         outputs: outputs.clone(),
         job: job.map(|j| j.id.clone()),
         reused_seq: None,
@@ -766,6 +898,8 @@ pub fn run_preflight(ctx: &Ctx, spec_path: &Path, job: Option<&InJob>, runner: R
 /// A preflight receipt's reason when the change is authorized.
 pub const AUTHORIZED: &str = "authorized";
 pub const NOT_AUTHORIZED: &str = "not authorized";
+/// A preflight receipt's reason when what the spec asks for is in the code already: nothing waits on a person.
+pub const ALREADY_IN_PLACE: &str = "not authorized: already in place";
 
 /// The step-input gate of a code-changing step: the newest preflight receipt of this spec (its digest now) over
 /// this code (its digest now). Go only when it authorized the change; a spec edited or code moved since is

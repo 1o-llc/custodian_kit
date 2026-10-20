@@ -190,6 +190,8 @@ pub fn reading_cost(root: &Path, store: &Store, r: &crate::store::Receipt) -> Op
 /// One line saying a record: `cost: 3 files, 1,243 bytes, ~311 tokens (estimate: ...)`, or what a reuse saved.
 pub fn said(rec: &CostRecord) -> String {
     match (&rec.cost, &rec.saved) {
+        // a count reads every file for its lines and names none: it is no reading of files an agent would read
+        (Some(c), _) if c.files == 0 && rec.kind == crate::reading::spec::ReadingKind::Count.as_str() => format!("cost: not a file reading (a count of lines by language names no file) — .custodian/data/costs/{}.json", rec.seq),
         (Some(c), _) => format!("cost: {} files, {} bytes, ~{} tokens ({ESTIMATE}) — .custodian/data/costs/{}.json", grouped(c.files as u64), grouped(c.bytes), grouped(c.tokens), rec.seq),
         (None, Some(s)) => format!("saved by reuse: ~{} tokens, the cost of reading #{} ({ESTIMATE})", grouped(s.tokens), rec.reused_seq.unwrap_or_default()),
         _ => "cost: not measured".into(),
@@ -320,6 +322,15 @@ pub fn render(s: &Sums, job: Option<&str>, since: Option<i64>) -> String {
 mod tests {
     use super::*;
     use crate::CodeQueryResult;
+
+    /// A count reads lines and names no file: its line says it is not a file reading, never "0 files, 0 bytes".
+    #[test]
+    fn a_count_says_it_is_not_a_file_reading() {
+        let rec = |kind: &str, files: usize| CostRecord { seq: 147, kind: kind.into(), cost: Some(Tokens { files, bytes: (files * 40) as u64, tokens: (files * 10) as u64 }), estimate: ESTIMATE.into(), ..CostRecord::default() };
+        assert_eq!(said(&rec("count", 0)), "cost: not a file reading (a count of lines by language names no file) — .custodian/data/costs/147.json");
+        assert!(said(&rec("impact", 1)).starts_with("cost: 1 files, 40 bytes, ~10 tokens"));
+        assert!(said(&rec("impact", 0)).starts_with("cost: 0 files, 0 bytes"), "an empty answer of a file reading still says its zero");
+    }
 
     fn row(path: Option<&str>, krate: Option<&str>, dir: Option<&str>) -> CodeQueryResult {
         CodeQueryResult {

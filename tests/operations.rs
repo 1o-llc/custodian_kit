@@ -166,6 +166,133 @@ fn gate_refuses_an_item_its_feature_gates_already() {
     assert!(!twice.authorized && twice.preconditions.iter().any(|c| !c.holds && c.detail == "its cfg already needs json: nothing to gate"), "{:?}", twice.preconditions);
     let once = preflight::run_preflight(&ctx, &spec(&store.root, "g2", "name = \"g2\"\nobjective = \"o\"\noperation = \"gate\"\ntarget = \"shop::plain\"\nfeature = \"json\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
     assert!(once.authorized, "{:?} {:?}", once.reasons, once.preconditions);
+    // the refusal is a change already made: its receipt says so, and its top line is what is in place, the rule beneath
+    assert_eq!(twice.in_place, ["its cfg already needs json: nothing to gate"]);
+    assert_eq!(twice.reason(), preflight::ALREADY_IN_PLACE);
+    assert_eq!(twice.headline_why().unwrap(), "already in place: its cfg already needs json: nothing to gate");
+    let page = twice.markdown();
+    let decision = page.lines().find(|l| l.starts_with("- decision:")).unwrap();
+    assert!(decision.contains("already in place") && !decision.contains("`facts`"), "{decision}");
+    assert!(page.lines().any(|l| l.starts_with("- the rules it breaks:") && l.contains("`facts`=authorized requires `facts`=preconditions")), "{page}");
+    assert!(once.in_place.is_empty() && once.reason() == preflight::AUTHORIZED);
+}
+
+/// A refusal's top line is the reason in words: the precondition that does not hold and why, never the word's rule.
+#[test]
+fn a_refusals_top_line_is_the_reason_and_the_rule_is_beneath() {
+    let (store, ctx, w) = project("why");
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "e", "name = \"e\"\nobjective = \"o\"\noperation = \"inline\"\ntarget = \"shop::early\"\n"), None, Runner::InProcess(&w)).unwrap();
+    let pf = &p.preflight;
+    assert!(!pf.authorized && pf.in_place.is_empty() && pf.reason() == preflight::NOT_AUTHORIZED);
+    let top = p.said.iter().find(|l| l.starts_with("preflight e:")).unwrap();
+    assert!(top.starts_with("preflight e: not authorized — the function can be inlined: ") && !top.contains("`facts`"), "{top}");
+    assert!(p.said.iter().any(|l| l.trim_start().starts_with("the rules it breaks: `facts`=authorized requires `facts`=preconditions")), "{:?}", p.said);
+}
+
+/// shop's `list` is called inside the arguments of macros klepto does not expand: through the test module's
+/// `use super::*` (a call of it), and through a path that resolves to nothing (`nowhere::list`, which no one can
+/// tell is it). Two more macros write the name and call nothing: a declaration (`fn list`) and a value.
+fn macro_calls(tag: &str, nowhere: bool) -> (Store, Ctx, Workspace) {
+    let (store, ctx, _) = project(tag);
+    let lib = std::fs::read_to_string(store.root.join("shop/src/lib.rs")).unwrap();
+    let extra = if nowhere { "        wrapped!(nowhere::list(2), \"what nowhere is, no one says\");\n" } else { "" };
+    write(&store.root, "shop/src/lib.rs", &format!("{lib}\npub fn list(n: u32) -> u32 {{\n    n\n}}\n\n#[cfg(test)]\nmod tests {{\n    use super::*;\n\n    #[test]\n    fn lists() {{\n        wrapped!(list(1) == 1, \"one\");\n        wrapped!(\n            crate::list(3) == 3,\n            \"three\"\n        );\n        wrapped!(fn list(), \"a declaration, not a call\");\n        wrapped!(list_of(list), \"a value named list, not a call\");\n{extra}    }}\n}}\n"));
+    let w = Workspace::open_with(&store.root, &Scope { tests: true, ..Scope::default() }, Resolving::Free).unwrap();
+    (store, ctx, w)
+}
+
+const LIST_WIDER: &str = "name = \"s\"\nobjective = \"o\"\noperation = \"change_signature\"\ntarget = \"shop::list\"\n\n[function]\nname = \"list\"\nvis = \"pub\"\nreturns = \"u32\"\nparams = [{ name = \"n\", ty = \"u32\" }, { name = \"m\", ty = \"u32\" }]\n\n[call_sites]\npass = \"0\"\n";
+
+#[test]
+fn change_signature_counts_the_calls_inside_macro_arguments_and_refuses_while_one_is_unresolved() {
+    // every call resolves: the two inside macro arguments are calls of it, through `use super::*` and `crate::`
+    let (store, ctx, w) = macro_calls("sig-macros", false);
+    let calls = custodian_kit::change::macro_calls(w.klepto(), "shop::list");
+    assert_eq!(calls.iter().map(|c| (c.line, c.paths.clone())).collect::<Vec<_>>(), [(47, vec!["list".to_string()]), (48, vec!["crate::list".to_string()])], "{calls:?}");
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "s", LIST_WIDER), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(p.authorized, "{:?} {:?}", p.why, p.preconditions);
+    assert!(p.preconditions.iter().any(|c| c.what == "every call site gets the new argument" && c.detail == "2 call sites (0 resolved by klepto, 2 inside a macro's arguments)"), "{:?}", p.preconditions);
+    assert!(p.preconditions.iter().any(|c| c.what == "every call site resolves" && c.holds && c.detail == "unresolved: 0"), "{:?}", p.preconditions);
+    // a path no one resolves: refused, `unresolved: 1`, until the spec allows it
+    let (store, ctx, w) = macro_calls("sig-nowhere", true);
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "s", LIST_WIDER), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(!p.authorized, "{:?}", p.preconditions);
+    let c = p.preconditions.iter().find(|c| c.what == "every call site resolves").unwrap();
+    assert!(!c.holds && c.detail.starts_with("unresolved: 1 — shop/src/lib.rs:54 (nowhere::list in wrapped!)") && c.detail.contains("call_sites.allow_unresolved = true"), "{}", c.detail);
+    assert!(p.headline_why().unwrap().contains("every call site resolves: unresolved: 1"), "{:?}", p.headline_why());
+    let allowed = format!("{LIST_WIDER}allow_unresolved = true\n");
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "s2", &allowed.replace("name = \"s\"", "name = \"s2\"")), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(p.authorized, "{:?}", p.why);
+    assert!(p.listed.iter().any(|l| l.starts_with("unresolved call site shop/src/lib.rs:54 (nowhere::list in wrapped!)") && l.ends_with("not changed (call_sites.allow_unresolved)")), "{:?}", p.listed);
+}
+
+#[test]
+fn code_naming_an_optional_dependency_needs_a_feature_that_turns_it_on() {
+    let (store, ctx, w) = forms("optional-use");
+    let bare = "name = \"m\"\nobjective = \"o\"\noperation = \"make_fn\"\ntarget = \"crate:p\"\n\n[function]\nname = \"from_b\"\nvis = \"pub\"\nreturns = \"u8\"\nbody = [{ piece = \"value\", value = \"b::b()\" }]\n";
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "m", bare), None, Runner::InProcess(&w)).unwrap().preflight;
+    let c = p.preconditions.iter().find(|c| c.what == "the code names the optional dependency b only under a feature that turns it on").unwrap();
+    assert!(!p.authorized && !c.holds, "{:?}", p.preconditions);
+    assert_eq!(c.detail, "b is an optional dependency of p (turned on by b): give the code `attrs = ['#[cfg(feature = \"b\")]']`, or gate the place it lands");
+    let gated = bare.replace("returns = \"u8\"\n", "returns = \"u8\"\nattrs = ['#[cfg(feature = \"b\")]']\n").replace("name = \"m\"", "name = \"m2\"");
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "m2", &gated), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(p.authorized, "{:?} {:?}", p.why, p.preconditions);
+    assert!(p.preconditions.iter().any(|c| c.holds && c.detail == "gated by b"), "{:?}", p.preconditions);
+    // a derive inside a cfg_attr on the feature is gated by it; a required dependency's path needs nothing
+    let spec_of = |text: &str| -> custodian_kit::change::ChangeSpec { toml::from_str(text).unwrap() };
+    let land = custodian_kit::change::landing(w.klepto(), &store.root, &spec_of(bare)).unwrap();
+    let derive = spec_of("name = \"d\"\nobjective = \"o\"\noperation = \"make_struct\"\ntarget = \"crate:p\"\n\n[item]\nname = \"S\"\nattrs = ['#[cfg_attr(feature = \"b\", derive(b::B))]']\n");
+    assert!(custodian_kit::change::optional_uses(w.klepto(), &derive, &land).iter().all(|u| u.gated));
+    let required = spec_of(&bare.replace("b::b()", "a::a()"));
+    assert!(custodian_kit::change::optional_uses(w.klepto(), &required, &land).is_empty());
+}
+
+#[test]
+fn the_preflight_counts_the_configurations_the_change_leaves() {
+    let (store, ctx, _) = forms("configs");
+    // p's optional b and c are cargo's implicit features b and c; one feature naming both `dep:` takes both away:
+    // the matrix the transform checks is the one with f and without b and c, smaller than the one before
+    write(&store.root, "p/Cargo.toml", "[package]\nname = \"p\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\na = { path = \"../a\" }\nb = { path = \"../b\", optional = true }\nc = { path = \"../c\", optional = true }\n\n[features]\ng = []\n");
+    let w = Workspace::open_with(&store.root, &Scope::default(), Resolving::Free).unwrap();
+    let text = "name = \"f\"\nobjective = \"o\"\noperation = \"declare_feature\"\ntarget = \"crate:p\"\nfeature = \"f\"\nenables = [\"dep:b\", \"dep:c\"]\n";
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "f", text), None, Runner::InProcess(&w)).unwrap().preflight;
+    let spec_v: custodian_kit::change::ChangeSpec = toml::from_str(text).unwrap();
+    let after = klepto::check_matrix(&custodian_kit::change::model_after(w.klepto(), &store.root, &spec_v, "p").unwrap()).len();
+    let before = klepto::check_matrix(&w.klepto().features["p"]).len();
+    let i = p.impact.as_ref().unwrap();
+    assert_eq!(i.feature_configurations, after, "{}", i.line());
+    assert!(after < before, "{after} after, {before} before");
+    let d = i.dimensions.iter().find(|d| d.name == "feature configurations to check").unwrap();
+    assert_eq!((d.value, d.note.clone()), (Some(after as u64), format!("klepto's check matrix over each affected crate's features as the change leaves them ({before} before it)")));
+    assert!(i.line().contains(&format!("{after} configurations to check")), "{}", i.line());
+}
+
+/// Every `enables` form the feature graph of p offers is a case of its own, and `optional` is one more case of
+/// add_dependency and change_dependency.
+#[test]
+fn the_exercise_makes_a_case_for_each_form_the_feature_graph_offers() {
+    let (store, _, w) = forms("exercise-forms");
+    let k = w.klepto();
+    let forms = custodian_kit::exercise::feature_forms(k, "p");
+    assert_eq!(forms.iter().map(|(l, e)| (l.as_str(), e.clone())).collect::<Vec<_>>(), [("dep:b", vec!["dep:b".to_string()]), ("a/x", vec!["a/x".to_string()]), ("b?/y", vec!["b?/y".to_string()])]);
+    let t = custodian_kit::exercise::Target { unit: custodian_kit::exercise::Unit::Crate, route: "crate:p".into(), package: "p".into() };
+    let crates = vec!["p".to_string()];
+    let specs = custodian_kit::exercise::specs_for(k, &store.root, custodian_kit::change::Operation::DeclareFeature, &t, 5, &crates);
+    assert_eq!(specs.iter().map(|(n, f, s)| (*n, f.clone(), s.enables.clone(), s.name.clone())).collect::<Vec<_>>(), [
+        (5, None, vec![], "exercise-005-declare-feature".to_string()),
+        (6, Some("enables dep:b".into()), vec!["dep:b".to_string()], "exercise-006-declare-feature".into()),
+        (7, Some("enables a/x".into()), vec!["a/x".to_string()], "exercise-007-declare-feature".into()),
+        (8, Some("enables b?/y".into()), vec!["b?/y".to_string()], "exercise-008-declare-feature".into()),
+    ]);
+    // each form's spec is one the preflight authorizes
+    let ctx = custodian_kit::runs::Ctx { root: store.root.clone(), store: Some(store.clone()), exe: PathBuf::from("custodian") };
+    for (_, form, s) in &specs {
+        let path = spec(&store.root, &s.name, &s.to_toml().unwrap());
+        let p = preflight::run_preflight(&ctx, &path, None, Runner::InProcess(&w)).unwrap().preflight;
+        assert!(p.authorized, "{form:?}: {:?}", p.why);
+    }
+    let adds = custodian_kit::exercise::specs_for(k, &store.root, custodian_kit::change::Operation::AddDependency, &t, 1, &crates);
+    assert_eq!(adds.iter().map(|(_, f, s)| (f.clone(), s.dependency.as_ref().and_then(|d| d.optional))).collect::<Vec<_>>(), [(None, None), (Some("optional".into()), Some(true))]);
 }
 
 /// p depends on a (and a on c), and optionally on b; a declares x = ["c/z"], c declares z, b declares y.

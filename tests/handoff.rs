@@ -4,7 +4,10 @@
 //! change specs through transforms, had one refused by its preflight, answered one decision and left one open,
 //! ran three test lines (two tests failed, one of them failed before the job's first change too, one line stopped
 //! before any test reported), and moved lines in one crate; an earlier closed job whose test run is the evidence
-//! for "pre-existing". The rendered handoff is pinned whole, for a person and for an agent.
+//! for "pre-existing". The rendered handoff is pinned whole, for a person and for an agent. One more spec's
+//! preflight found what it asks for in the code already (`not authorized: already in place`): it is told as done,
+//! never as waiting. The closing line's numbers are git's and differ from the job's counts: the handoff says one
+//! number, the counts', and says so.
 
 use custodian_kit::jobs::{Closing, JobFile, JobMode, Touched};
 use custodian_kit::store::{Mode, Receipt, Store, TestRow, RECEIPT_SCHEMA};
@@ -54,6 +57,11 @@ fn job_folder(store: &Store, name: &str, jf: &JobFile, closing: &Closing) -> Pat
     dir
 }
 
+const PREFLIGHT_IN_PLACE: &str = r#"{"schema": "custodian.preflight.v1", "spec_name": "gate-hold", "spec": ".custodian/data/specs/changes/gate-hold.toml", "spec_digest": "d", "operation": "gate",
+"objective": "o", "target": "core_lib::Config::hold", "code_digest": "c", "preconditions": [{"what": "core_lib::Config::hold is not gated by log yet", "holds": false, "detail": "its cfg already needs log: nothing to gate"}],
+"collisions": [], "write_set": [], "authorized_scope": [], "outside": [], "listed": [], "raw": [], "decisions": [], "answered": [], "word": 0, "flags": [], "authorized": false,
+"reasons": ["`facts`=authorized requires `facts`=preconditions"], "why": ["core_lib::Config::hold is not gated by log yet: its cfg already needs log: nothing to gate"], "in_place": ["its cfg already needs log: nothing to gate"], "utc": "2026-10-19T21:08:00Z", "millis": 1}"#;
+
 const TRANSFORM: &str = r#"{"schema": "custodian.transform.v1", "spec_name": "SPEC", "spec": ".custodian/data/specs/changes/SPEC.toml", "spec_digest": "d", "operation": "OP",
 "target": "TARGET", "files": [{"path": "crates/core_lib/src/lib.rs", "before": "a", "after": "b", "lines": [[1, 4]]}], "checks": [], "postconditions": [], "written": true}"#;
 
@@ -100,6 +108,7 @@ fn project() -> (PathBuf, Store, Vec<Receipt>) {
         receipt(9, "2026-10-19T21:30:00Z", "test", "core_lib lib", j, false, "unaccepted status: stop", &[]),
         receipt(10, "2026-10-19T21:31:00Z", "test", "app lib", j, false, "unaccepted status: stop", &[]),
         receipt(11, "2026-10-19T21:32:00Z", "test", "core_lib test:metrics", j, true, "accepted status: continue", &[]),
+        receipt(12, "2026-10-19T21:08:00Z", "preflight", "gate-hold", j, false, custodian_kit::preflight::ALREADY_IN_PLACE, &[".custodian/data/preflight/gate-hold/x.json"]),
     ];
     receipts[1].line = format!("custodian decide {} the anchor's --why the restart already waits on it", which.id);
     // the bounded job's folder: its file, its transforms, its count diff, its closing receipt
@@ -115,8 +124,8 @@ fn project() -> (PathBuf, Store, Vec<Receipt>) {
         ..JobFile::default()
     };
     let touched: Touched = serde_json::from_value(serde_json::json!({"label": "job", "route": "*", "before_digest": "a", "after_digest": "b", "diff_digest": "d",
-        "moved": {"added": {"lines": 6, "code": 5, "comments": 0, "blanks": 1}, "removed": {"lines": 1, "code": 1, "comments": 0, "blanks": 0}},
-        "files": 2, "crates": 2, "line": "job: +6 −1 across 2 files in 2 crates", "diff": "data/counts/job-workspace.diff.json"}))
+        "moved": {"added": {"lines": 8, "code": 7, "comments": 0, "blanks": 1}, "removed": {"lines": 1, "code": 1, "comments": 0, "blanks": 0}},
+        "files": 2, "crates": 2, "line": "job: +8 −1 across 2 files in 2 crates (git diff --numstat 0123456789ab)", "diff": "data/counts/job-workspace.diff.json"}))
     .unwrap();
     let closing = Closing {
         schema: "custodian.job_closing.v1".into(),
@@ -139,6 +148,7 @@ fn project() -> (PathBuf, Store, Vec<Receipt>) {
     write(&dir.join("data/counts/job-workspace.diff.json"), DIFF);
     write(&dir.join("data/transforms/hold-lock.json"), &TRANSFORM.replace("SPEC", "hold-lock").replace("OP", "add_method").replace("TARGET", "core_lib::Config"));
     write(&dir.join("data/transforms/hold-test.json"), &TRANSFORM.replace("SPEC", "hold-test").replace("OP", "add_test").replace("TARGET", "core_lib::Config::hold"));
+    write(&root.join(".custodian/data/preflight/gate-hold/x.json"), PREFLIGHT_IN_PLACE);
     (root, store, receipts)
 }
 
@@ -156,12 +166,14 @@ the restart holds its lock while it runs.
 Its target was core_lib::Config.
 
 ## What changed
-6 lines added and 1 removed, across 2 files in 2 crates.
+6 lines added and 1 removed, across 2 files in 2 crates (the job's counts at open and close).
 - core_lib: +6 −1 in 1 file
 - app: +0 −0 in 1 file
 2 change specs were written through transforms, by 2 operations: add_method, add_test.
 - hold-lock (add_method on core_lib::Config, 1 file) at 2026-10-19 21:10Z, receipt #7
 - hold-test (add_test on core_lib::Config::hold, 1 file) at 2026-10-19 21:20Z, receipt #8
+1 change spec was in the code already, so its preflight refused it with nothing to do:
+- gate-hold: its cfg already needs log: nothing to gate (receipt #12)
 
 ## What was decided
 - QWHICH: which lock file? → the anchor's. Why: the restart already waits on it. By: the record names no one. At 2026-10-19 21:00Z, receipt #3.
@@ -207,6 +219,8 @@ fn a_handoff_is_made_from_the_records_in_its_order_and_pinned() {
     let ids = |s: &str| s.replace(&custodian_kit::questions::id_of("does the stop wait too?"), "QOPEN").replace(&custodian_kit::questions::id_of("which lock file?"), "QWHICH");
     let james = ids(&custodian_kit::handoff::render(&h, custodian_kit::handoff::Reader::James));
     assert_eq!(james, FOR_JAMES, "the handoff moved; made now:\n{james}");
+    // three things wait (the open decision, the refused spec, the unchanged reading); the spec already in place does not
+    assert_eq!((h.waiting(), h.in_place.len(), h.refused.len()), (3, 1, 1));
     let agent = ids(&custodian_kit::handoff::render(&h, custodian_kit::handoff::Reader::Agent));
     assert_eq!(agent, format!("{FOR_JAMES}{AGENT_TAIL}"), "made now:\n{agent}");
     // the job closed last is the one named by default; --since keeps only what came after

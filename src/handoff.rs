@@ -145,6 +145,10 @@ pub struct Handoff {
     // waiting on a person
     pub decisions_open: Vec<Question>,
     pub refused: Vec<Refused>,
+    /// Change specs whose newest preflight found what they ask for in the code already (`not authorized: already in
+    /// place`): done, not waiting; `reason` is what the preflight found in place.
+    #[serde(default)]
+    pub in_place: Vec<Refused>,
     /// Each declared verification and its state at close (`satisfied`, `failed`, `not run`, `unchanged`; `open`
     /// while the job runs).
     pub verify: Vec<(String, String)>,
@@ -152,6 +156,9 @@ pub struct Handoff {
     pub uncovered: Vec<String>,
     // what changed
     pub lines: Option<String>,
+    /// Where `added`, `removed` and `files_changed` come from, said with them: the job's counts at open and close.
+    #[serde(default)]
+    pub lines_from: Option<String>,
     /// How many counts the job took (`data/counts.json`): with fewer than two, no lines were counted.
     pub counts_taken: usize,
     pub added: usize,
@@ -324,6 +331,14 @@ pub fn of_job(root: &Path, store: &Store, folder: &Path, receipts: &[Receipt], s
     for (spec, rs) in preflights {
         let authorized = rs.iter().any(|r| r.reason.contains("authorized") && !r.reason.contains("not authorized"));
         let written = h.written.iter().any(|w| w.spec == spec);
+        // the newest preflight's own receipt (not the command line's around it) found the change in the code already:
+        // done, nothing waits
+        let newest = rs.iter().rev().find(|r| r.reason == crate::preflight::AUTHORIZED || r.reason.starts_with(crate::preflight::NOT_AUTHORIZED));
+        if let Some(r) = newest.filter(|r| r.reason == crate::preflight::ALREADY_IN_PLACE && !authorized && !written && after(r.seq)) {
+            let found = r.outputs.iter().find(|o| o.ends_with(".json")).and_then(|o| std::fs::read_to_string(root.join(o)).ok()).and_then(|t| serde_json::from_str::<crate::preflight::Preflight>(&t).ok()).map(|p| p.in_place.join("; ")).filter(|x| !x.is_empty());
+            h.in_place.push(Refused { seq: r.seq, utc: r.utc.clone(), spec, reason: found.unwrap_or_else(|| r.reason.clone()), file: r.spec.clone() });
+            continue;
+        }
         if let Some(r) = rs.iter().find(|r| r.reason.contains("not authorized") || r.reason.contains("refused")) {
             if !authorized && !written && after(r.seq) {
                 let file = rs.iter().find_map(|x| x.spec.clone());
@@ -331,14 +346,20 @@ pub fn of_job(root: &Path, store: &Store, folder: &Path, receipts: &[Receipt], s
             }
         }
     }
-    // lines touched: the job's count diff, per crate
+    // lines touched: one number from one source, the job's counts at open and close (their diff, whole and per
+    // crate); the closing line's own numbers only when that diff is not there
     h.counts_taken = change_history::taken(folder).len();
     if let Some(t) = closing.as_ref().and_then(|c| c.lines_touched.iter().find(|t| t.label == "job")) {
         h.lines = Some(t.line.clone());
         h.added = t.moved.added.lines;
         h.removed = t.moved.removed.lines;
         h.files_changed = t.files;
+        h.lines_from = Some(t.line.rsplit_once(" (").map(|(_, w)| w.trim_end_matches(')').to_string()).unwrap_or_else(|| "the job's closing receipt".into()));
         if let Some(d) = std::fs::read_to_string(folder.join(&t.diff)).ok().and_then(|x| serde_json::from_str::<crate::reading::count::CountDiff>(&x).ok()) {
+            h.added = d.moved.added.lines;
+            h.removed = d.moved.removed.lines;
+            h.files_changed = d.files().len();
+            h.lines_from = Some(COUNTS.into());
             h.crates = d
                 .crates
                 .iter()
@@ -412,6 +433,17 @@ pub fn of_job(root: &Path, store: &Store, folder: &Path, receipts: &[Receipt], s
     }
     h.routes = routes.into_iter().collect();
     Ok(h)
+}
+
+/// Where a handoff's line numbers come from.
+pub const COUNTS: &str = "the job's counts at open and close";
+
+impl Handoff {
+    /// How many things wait on a person: open decisions, change specs refused (not those already in place),
+    /// verifications not satisfied, a refused close, files touched by hand. The handoff's exit is 1 when any does.
+    pub fn waiting(&self) -> usize {
+        self.decisions_open.len() + self.refused.len() + self.verify.iter().filter(|(_, s)| s != "satisfied").count() + usize::from(self.close_refusal.is_some()) + self.uncovered.len()
+    }
 }
 
 /// Up to [`SHOWN`] of a list, then "… and N more".
@@ -536,7 +568,14 @@ pub fn render(h: &Handoff, reader: Reader) -> String {
     out.push("## What changed".into());
     match &h.lines {
         Some(_) => {
-            out.push(format!("{} added and {} removed, across {} in {}.", plural(h.added, "line", "lines"), h.removed, plural(h.files_changed, "file", "files"), plural(h.crates.len(), "crate", "crates")));
+            out.push(format!(
+                "{} added and {} removed, across {} in {} ({}).",
+                plural(h.added, "line", "lines"),
+                h.removed,
+                plural(h.files_changed, "file", "files"),
+                plural(h.crates.len(), "crate", "crates"),
+                h.lines_from.clone().unwrap_or_else(|| COUNTS.into())
+            ));
             let crates: Vec<String> = h.crates.iter().map(|c| format!("{}: +{} −{} in {}", c.name, c.added, c.removed, plural(c.files, "file", "files"))).collect();
             out.extend(listed(&crates, "crates"));
         }
@@ -550,6 +589,11 @@ pub fn render(h: &Handoff, reader: Reader) -> String {
         out.push(format!("{} written through transforms, by {}: {}.", plural(h.written.len(), "change spec was", "change specs were"), plural(ops.len(), "operation", "operations"), ops.into_iter().collect::<Vec<_>>().join(", ")));
         let w: Vec<String> = h.written.iter().map(|w| format!("{} ({} on {}, {}) at {}, receipt #{}", w.spec, w.operation, w.target, plural(w.files, "file", "files"), when(&w.utc), w.seq)).collect();
         out.extend(listed(&w, "change specs"));
+    }
+    if !h.in_place.is_empty() {
+        out.push(format!("{} in the code already, so {} with nothing to do:", plural(h.in_place.len(), "change spec was", "change specs were"), if h.in_place.len() == 1 { "its preflight refused it" } else { "their preflights refused them" }));
+        let done: Vec<String> = h.in_place.iter().map(|r| format!("{}: {} (receipt #{})", r.spec, r.reason, r.seq)).collect();
+        out.extend(listed(&done, "change specs"));
     }
     // 4. what was decided
     out.push(String::new());

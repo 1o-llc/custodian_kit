@@ -50,7 +50,7 @@ vocabulary! {
         AddTest = "add_test" : "a test function (target: the function it proves): in the file's tests module (`to`: another inline test module of the file, by name; one the file does not have is made, `#[cfg(test)]`), its body from toolkit pieces",
         AddConstructor = "add_constructor" : "a constructor for a type (target: the type): `Self { field: param, .. }`, or a toolkit constructor generator",
         AddTraitImpl = "add_trait_impl" : "`impl Trait for Type` (target: the type): a toolkit impl generator, or the trait's functions",
-        ChangeSignature = "change_signature" : "a function's signature changed (target: the function): a new parameter with the expression its call sites pass, a new name, a new return type; with `function.body`, its body written in the same step (a body that compiles only against the new signature)",
+        ChangeSignature = "change_signature" : "a function's signature changed (target: the function): a new parameter with the expression its call sites pass (inside a macro's arguments too; refused while a call site is unresolved, unless `call_sites.allow_unresolved`), a new name, a new return type; with `function.body`, its body written in the same step (a body that compiles only against the new signature)",
         Rename = "rename" : "an item renamed (target: the item) at its declaration and every use klepto resolves to it",
         Move = "move" : "an item moved to another module (target: the item, `to`: the module route), re-exported where it was so its paths still resolve",
         Extract = "extract" : "items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were",
@@ -412,6 +412,10 @@ pub struct CallSites {
     /// The expression each call passes for the new parameter (the last one).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass: Option<String>,
+    /// `true`: the change goes ahead with call sites klepto could not resolve, listed for a person; unset, the
+    /// preflight refuses while any is unresolved (`unresolved: N`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_unresolved: bool,
 }
 
 /// One change spec.
@@ -1721,6 +1725,392 @@ fn enable_text(e: &klepto::FeatureEnable) -> String {
         klepto::FeatureEnable::Dep(d) => format!("dep:{d}"),
         klepto::FeatureEnable::DepFeature { dep, feature, weak } => format!("{dep}{}/{feature}", if *weak { "?" } else { "" }),
     }
+}
+
+/// A package's feature model as `spec` leaves its manifest: `declare_feature`'s feature and the dependencies it makes
+/// optional, and `optional` on `add_dependency`/`change_dependency` (cargo's implicit features read again); the
+/// model as it is for any other operation. `None` when the scan has no model of the package. The one rule the
+/// preflight counts configurations by and the writer checks them by.
+pub fn model_after(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec, package: &str) -> Option<klepto::FeatureModel> {
+    let mut m = k.features.get(package)?.clone();
+    let mut asked = klepto::PackageSpec::default();
+    match spec.op() {
+        Operation::DeclareFeature => {
+            if let Some(d) = feature_declaration(k, root, spec).ok().filter(|d| d.package == package && d.problems.is_empty()) {
+                asked.features.insert(d.feature.clone(), d.enables.clone());
+                asked.optional.extend(d.made_optional.iter().cloned());
+            }
+        }
+        Operation::AddDependency | Operation::ChangeDependency => {
+            for d in spec.dependencies_named() {
+                if let Some(o) = d.optional {
+                    for x in m.dependencies.iter_mut().filter(|x| x.name == d.name.replace('-', "_")) {
+                        x.optional = o;
+                    }
+                }
+            }
+        }
+        _ => return Some(m),
+    }
+    m = m.apply_spec(&asked);
+    Some(m)
+}
+
+// ---------------------------------------------------------------------------
+// calls inside a macro's arguments, one rule for the preflight and the writer
+
+/// A call of a function written inside a macro's arguments, where klepto records the paths the tokens name and
+/// resolves none: the invocation's place, and the paths in its tokens that resolve to the function from the
+/// invocation's module (an item of the module, an import of it, a glob import's module, `crate::`, `self::`,
+/// `super::`, `Self::`, a crate's name).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MacroCall {
+    /// The file, as klepto records it.
+    pub file: std::path::PathBuf,
+    pub line: u32,
+    pub column: Option<u32>,
+    /// The macro as written (`simple_impl::ensure_eq`).
+    pub macro_path: String,
+    /// The paths in its tokens that name the function (`shopping_list`, `kitchen::shopping_list`).
+    pub paths: Vec<String>,
+}
+
+/// Every macro invocation whose tokens name `item` by a path that resolves to it, one per place: a macro klepto
+/// expanded into another (`ensure_eq!` into `ensure!`) is the same place, its paths merged.
+pub fn macro_calls(k: &klepto::Klepto, item: &str) -> Vec<MacroCall> {
+    macro_paths(k, item).0
+}
+
+/// Every macro invocation whose tokens name `item`'s last segment by a path that resolves to nothing from its
+/// module: a call of it or not, which nothing in the tokens tells. A path that resolves to another item is not it.
+pub fn unresolved_macro_paths(k: &klepto::Klepto, item: &str) -> Vec<MacroCall> {
+    macro_paths(k, item).1
+}
+
+/// The macro invocations naming `item`'s last segment: those whose path resolves to it, and those whose path
+/// resolves to nothing.
+fn macro_paths(k: &klepto::Klepto, item: &str) -> (Vec<MacroCall>, Vec<MacroCall>) {
+    let tail = item.rsplit("::").next().unwrap_or(item);
+    let (mut calls, mut unknown): (Vec<MacroCall>, Vec<MacroCall>) = (Vec::new(), Vec::new());
+    let add = |out: &mut Vec<MacroCall>, m: &klepto::MacroInvocation, line: u32, paths: Vec<String>| match out.iter_mut().find(|c| c.file == m.location.path && c.line == line && c.column == m.location.column) {
+        Some(c) => {
+            for p in paths {
+                if !c.paths.contains(&p) {
+                    c.paths.push(p);
+                }
+            }
+        }
+        None => out.push(MacroCall { file: m.location.path.clone(), line, column: m.location.column, macro_path: m.path.clone().unwrap_or_else(|| m.name.clone()), paths }),
+    };
+    // a method with a receiver can be called by method syntax (`x.count()`), which no token says the type of
+    let receiver = k.functions.iter().find(|f| f.fq_name == item).is_some_and(|f| f.args.iter().any(|a| is_receiver(a)));
+    for m in &k.macros_inv {
+        let Some(line) = m.location.line else { continue };
+        if !m.token_paths.iter().any(|p| p.rsplit("::").next() == Some(tail)) {
+            continue;
+        }
+        let module = module_of_invocation(k, &m.location.path, &m.module_path);
+        let (mut to_it, mut to_none) = (Vec::new(), Vec::new());
+        for named in names_in_tokens(&m.tokens, tail) {
+            match named {
+                // a declaration (`fn new` in a generator's tokens), a value, a field: no call
+                Named::Other => {}
+                Named::Method if receiver => to_none.push(format!(".{tail}")),
+                Named::Method => {}
+                Named::Call(p) => match module.as_deref().and_then(|md| resolve_in(k, md, &p, m.enclosing_fn.as_deref(), m.enclosing_item.as_deref())) {
+                    Some(id) if id == item => to_it.push(p),
+                    Some(_) => {}
+                    None => to_none.push(p),
+                },
+            }
+        }
+        to_it.dedup();
+        to_none.dedup();
+        if !to_it.is_empty() {
+            add(&mut calls, m, line, to_it);
+        }
+        if !to_none.is_empty() {
+            add(&mut unknown, m, line, to_none);
+        }
+    }
+    // a place one of its paths names it is a call: the others there are the same call's
+    unknown.retain(|u| !calls.iter().any(|c| c.file == u.file && c.line == u.line && c.column == u.column));
+    (calls, unknown)
+}
+
+/// What a name is where a macro's tokens write it.
+enum Named {
+    /// A path followed by its argument list: `list(1)`, `crate::list(3)`, `Type::new(..)`.
+    Call(String),
+    /// A method call: `.name(..)`.
+    Method,
+    /// A declaration (`fn name`), a value, a field: not a call.
+    Other,
+}
+
+/// Each place `tail` is written in a macro's tokens (its text as klepto keeps it), and what it is there.
+fn names_in_tokens(tokens: &str, tail: &str) -> Vec<Named> {
+    use proc_macro2::TokenTree;
+    fn walk(ts: proc_macro2::TokenStream, tail: &str, out: &mut Vec<Named>) {
+        let tts: Vec<TokenTree> = ts.into_iter().collect();
+        let punct = |i: usize, c: char| matches!(tts.get(i), Some(TokenTree::Punct(p)) if p.as_char() == c);
+        for (i, t) in tts.iter().enumerate() {
+            match t {
+                TokenTree::Group(g) => walk(g.stream(), tail, out),
+                TokenTree::Ident(id) if id == tail => {
+                    // the path it ends: the segments before it, `a::b::tail`
+                    let mut start = i;
+                    while start >= 3 && punct(start - 1, ':') && punct(start - 2, ':') && matches!(tts.get(start - 3), Some(TokenTree::Ident(_))) {
+                        start -= 3;
+                    }
+                    let path: Vec<String> = tts[start..=i].iter().filter_map(|t| match t { TokenTree::Ident(x) => Some(x.to_string()), _ => None }).collect();
+                    let before = start.checked_sub(1).and_then(|j| tts.get(j));
+                    // its arguments, after a turbofish when it has one
+                    let mut j = i + 1;
+                    if punct(j, ':') && punct(j + 1, ':') && punct(j + 2, '<') {
+                        let mut depth = 0;
+                        j += 2;
+                        while j < tts.len() {
+                            if punct(j, '<') {
+                                depth += 1;
+                            } else if punct(j, '>') {
+                                depth -= 1;
+                                if depth == 0 {
+                                    j += 1;
+                                    break;
+                                }
+                            }
+                            j += 1;
+                        }
+                    }
+                    let called = matches!(tts.get(j), Some(TokenTree::Group(g)) if g.delimiter() == proc_macro2::Delimiter::Parenthesis);
+                    out.push(match before {
+                        Some(TokenTree::Ident(x)) if x == "fn" => Named::Other,
+                        Some(TokenTree::Punct(p)) if p.as_char() == '.' => {
+                            if called {
+                                Named::Method
+                            } else {
+                                Named::Other
+                            }
+                        }
+                        _ if called => Named::Call(path.join("::")),
+                        _ => Named::Other,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if let Ok(ts) = tokens.parse::<proc_macro2::TokenStream>() {
+        walk(ts, tail, &mut out);
+    }
+    out
+}
+
+/// The module an invocation sits in: its file's crate and the invocation's module path (`pantry::kitchen::tests`).
+fn module_of_invocation(k: &klepto::Klepto, file: &Path, module_path: &[String]) -> Option<String> {
+    let krate = k.files.iter().find(|f| f.path == file).and_then(|f| f.module.as_deref()).and_then(|m| m.split("::").next())?.to_string();
+    let module = std::iter::once(krate).chain(module_path.iter().cloned()).collect::<Vec<_>>().join("::");
+    k.modules.modules.contains_key(&module).then_some(module)
+}
+
+fn resolution_id(r: &Option<klepto::Resolution>) -> Option<&str> {
+    match r {
+        Some(klepto::Resolution::Local(id) | klepto::Resolution::External(id)) => Some(id),
+        _ => None,
+    }
+}
+
+/// What one name means in a module: its own item, an import naming it (by its last segment or its alias), an item of
+/// a glob-imported module, a crate.
+fn name_in(k: &klepto::Klepto, module: &str, name: &str, enclosing_fn: Option<&str>) -> Option<String> {
+    if k.modules.modules.get(module).is_some_and(|m| m.items.contains_key(name)) {
+        return Some(format!("{module}::{name}"));
+    }
+    let krate = module.split("::").next().unwrap_or(module);
+    let segs: Vec<&str> = module.split("::").skip(1).collect();
+    let here = |i: &klepto::StolenPath| {
+        i.module_path.iter().map(String::as_str).eq(segs.iter().copied())
+            && (i.enclosing_fn.is_none() || i.enclosing_fn.as_deref() == enclosing_fn)
+            && k.files.iter().find(|f| f.path == i.location.path).and_then(|f| f.module.as_deref()).and_then(|m| m.split("::").next()) == Some(krate)
+    };
+    let mut glob = None;
+    for i in k.imports.iter().filter(|i| here(i)) {
+        let Some(id) = resolution_id(&i.resolution) else { continue };
+        match &i.kind {
+            klepto::UseKind::Name if i.segments.last().map(String::as_str) == Some(name) => return Some(id.to_string()),
+            klepto::UseKind::Rename { alias } if alias == name => return Some(id.to_string()),
+            klepto::UseKind::Glob if glob.is_none() && k.modules.modules.get(id).is_some_and(|m| m.items.contains_key(name)) => glob = Some(format!("{id}::{name}")),
+            _ => {}
+        }
+    }
+    glob.or_else(|| k.modules.modules.contains_key(name).then(|| name.to_string()))
+}
+
+/// A path written in `module` (inside `enclosing_fn`, in `enclosing_item`), resolved as the compiler would for the
+/// forms [`MacroCall`] names; `None` when it does not resolve that way.
+fn resolve_in(k: &klepto::Klepto, module: &str, path: &str, enclosing_fn: Option<&str>, enclosing_item: Option<&str>) -> Option<String> {
+    let segs: Vec<&str> = path.split("::").map(str::trim).filter(|s| !s.is_empty()).collect();
+    let (first, rest) = segs.split_first()?;
+    let parent = |m: &str| m.rsplit_once("::").map(|(p, _)| p.to_string());
+    let mut at = match *first {
+        "crate" => module.split("::").next()?.to_string(),
+        "self" => module.to_string(),
+        "super" => parent(module)?,
+        "Self" => {
+            let e = enclosing_item?;
+            let ty = parent(e)?;
+            k.type_decl(&ty).map(|_| ty).or_else(|| k.type_decl(e).map(|_| e.to_string()))?
+        }
+        name => name_in(k, module, name, enclosing_fn)?,
+    };
+    for s in rest {
+        at = if *s == "super" { parent(&at)? } else { format!("{at}::{s}") };
+    }
+    Some(at)
+}
+
+// ---------------------------------------------------------------------------
+// optional dependencies the code a spec writes names, one rule for the preflight and the writer
+
+/// An optional dependency the code a spec writes names by path (`chrono::NaiveDate`): the features that turn it on,
+/// and whether the code is built only when one of them is on (a `#[cfg(feature = ..)]` among the spec's attributes,
+/// a `cfg_attr` around the path, or the item or module it lands in gated so already).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OptionalUse {
+    pub dependency: String,
+    pub package: String,
+    pub features: Vec<String>,
+    pub gated: bool,
+}
+
+impl OptionalUse {
+    /// The attribute that builds the code only with the dependency on: `#[cfg(feature = "chrono")]`.
+    pub fn attr(&self) -> String {
+        format!("#[cfg(feature = \"{}\")]", self.features.first().cloned().unwrap_or_else(|| self.dependency.clone()))
+    }
+
+    /// The fix said for a person: what to add to the spec.
+    pub fn fix(&self) -> String {
+        format!(
+            "{} is an optional dependency of {} (turned on by {}): give the code `attrs = ['{}']`, or gate the place it lands",
+            self.dependency,
+            self.package,
+            if self.features.is_empty() { "no feature".to_string() } else { self.features.join(", ") },
+            self.attr()
+        )
+    }
+}
+
+/// Whether a cfg predicate holds only when `feature` is on.
+fn requires_feature(p: &klepto::CfgPredicate, feature: &str) -> bool {
+    match p {
+        klepto::CfgPredicate::Feature(f) => f == feature,
+        klepto::CfgPredicate::All(v) => v.iter().any(|c| requires_feature(c, feature)),
+        _ => false,
+    }
+}
+
+/// The heads of the paths written in `ts` (`chrono` of `chrono::NaiveDate`), each with the cfg predicates around it:
+/// a `#[cfg(..)]` before it at the top level of the chunk, a `#[cfg_attr(PRED, ..)]` it sits inside.
+fn path_heads(ts: proc_macro2::TokenStream, around: &[klepto::CfgPredicate], out: &mut Vec<(String, Vec<klepto::CfgPredicate>)>) {
+    use proc_macro2::{Delimiter, TokenTree};
+    let tts: Vec<TokenTree> = ts.into_iter().collect();
+    let mut chunk_cfg: Vec<klepto::CfgPredicate> = around.to_vec();
+    let mut i = 0;
+    while i < tts.len() {
+        match &tts[i] {
+            TokenTree::Punct(p) if p.as_char() == '#' => {
+                if let Some(TokenTree::Group(g)) = tts.get(i + 1).filter(|t| matches!(t, TokenTree::Group(g) if g.delimiter() == Delimiter::Bracket)) {
+                    let inner: Vec<TokenTree> = g.stream().into_iter().collect();
+                    match (inner.first(), inner.get(1)) {
+                        (Some(TokenTree::Ident(id)), Some(TokenTree::Group(args))) if id == "cfg" => {
+                            chunk_cfg.push(klepto::CfgPredicate::parse_tokens(&args.stream()));
+                            i += 2;
+                            continue;
+                        }
+                        (Some(TokenTree::Ident(id)), Some(TokenTree::Group(args))) if id == "cfg_attr" => {
+                            let parts: Vec<TokenTree> = args.stream().into_iter().collect();
+                            let comma = parts.iter().position(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ','));
+                            let (pred, rest) = match comma {
+                                Some(c) => (parts[..c].iter().cloned().collect::<proc_macro2::TokenStream>(), parts[c + 1..].iter().cloned().collect::<proc_macro2::TokenStream>()),
+                                None => (args.stream(), proc_macro2::TokenStream::new()),
+                            };
+                            let mut inside = chunk_cfg.clone();
+                            inside.push(klepto::CfgPredicate::parse_tokens(&pred));
+                            path_heads(rest, &inside, out);
+                            i += 2;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            TokenTree::Ident(id) => {
+                let before = i.checked_sub(1).and_then(|j| tts.get(j));
+                let after_colons = matches!((tts.get(i + 1), tts.get(i + 2)), (Some(TokenTree::Punct(a)), Some(TokenTree::Punct(b))) if a.as_char() == ':' && b.as_char() == ':');
+                let led = matches!(before, Some(TokenTree::Punct(p)) if p.as_char() == ':' || p.as_char() == '.');
+                if after_colons && !led {
+                    out.push((id.to_string(), chunk_cfg.clone()));
+                }
+            }
+            TokenTree::Group(g) => path_heads(g.stream(), &chunk_cfg, out),
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+/// The code `spec` writes, as text: its function or functions, its item, field or variant, its derives, its
+/// attribute line, its associated items.
+fn written_code(spec: &ChangeSpec) -> Vec<String> {
+    let mut out = Vec::new();
+    out.extend(spec.function.iter().chain(&spec.functions).filter_map(|f| render_fn(f, "").ok()));
+    if let Some(i) = &spec.item {
+        out.extend(if i.variants.is_empty() { render_struct(i).ok() } else { Some(render_enum(i)) });
+    }
+    out.extend(spec.field.iter().map(|f| render_field(f, "")));
+    out.extend(spec.variant.iter().map(|v| render_variant(v, "")));
+    out.extend(spec.derive.iter().map(|d| format!("#[derive({d})] struct X;")));
+    out.extend(spec.attribute.iter().map(|a| format!("{a} struct X;")));
+    out.extend(spec.assoc.iter().cloned());
+    out
+}
+
+/// Every optional dependency of the landing crate the code `spec` writes names by path, and whether that code is
+/// gated by a feature that turns it on. A dependency with a declaration that is not optional is always there and
+/// is not one.
+pub fn optional_uses(k: &klepto::Klepto, spec: &ChangeSpec, land: &Landing) -> Vec<OptionalUse> {
+    let Some(m) = k.features.get(&land.package) else { return Vec::new() };
+    let mut heads = Vec::new();
+    for code in written_code(spec) {
+        if let Ok(ts) = code.parse::<proc_macro2::TokenStream>() {
+            path_heads(ts, &[], &mut heads);
+        }
+    }
+    // the place it lands: the item it works on, else the module
+    let mut place: Vec<klepto::CfgPredicate> = Vec::new();
+    if let Some(d) = land.item.as_deref().and_then(|i| item_named(k, i)) {
+        place.push(d.cfg.clone());
+    }
+    if let Some(md) = k.modules.modules.get(&land.module) {
+        place.push(md.cfg.clone());
+    }
+    let mut out: Vec<OptionalUse> = Vec::new();
+    for (head, around) in heads {
+        let decls: Vec<&klepto::DepInfo> = m.dependencies.iter().filter(|d| d.name == head && d.kind != klepto::DepKind::Dev).collect();
+        if decls.is_empty() || decls.iter().any(|d| !d.optional) {
+            continue;
+        }
+        let features: Vec<String> = m.features_enabling(&head).into_iter().collect();
+        let gated = around.iter().chain(&place).any(|p| features.iter().any(|f| requires_feature(p, f)));
+        match out.iter_mut().find(|u| u.dependency == head) {
+            Some(u) => u.gated &= gated,
+            None => out.push(OptionalUse { dependency: head, package: land.package.clone(), features, gated }),
+        }
+    }
+    out
 }
 
 /// Where `spec`'s operation lands in the scan, or why it cannot.

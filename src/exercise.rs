@@ -623,7 +623,7 @@ pub fn spec_for(k: &Klepto, root: &Path, op: Operation, t: &Target, n: u64, crat
                 is_unsafe: f.is_unsafe,
                 ..FnSpec::default()
             });
-            s.call_sites = Some(CallSites { pass: Some("0".into()) });
+            s.call_sites = Some(CallSites { pass: Some("0".into()), ..CallSites::default() });
         }
         ReplaceBody => s.function = Some(FnSpec { name: last(&t.route).to_string(), doc: Some("replaced by an exercise".into()), ..FnSpec::default() }),
         Inline => {}
@@ -637,6 +637,93 @@ pub fn spec_for(k: &Klepto, root: &Path, op: Operation, t: &Target, n: u64, crat
         }
     }
     Some(s)
+}
+
+/// The forms of `enables` a crate's feature graph offers a `declare_feature`, each `(what it is, the list)`: `dep:<x>`
+/// for an optional dependency, `<a>/<x>` for a dependency and a feature of it, `<b>?/<y>` for an optional one. A
+/// dependency's feature is one that resolves with no new package: one the manifest already asks of it, else
+/// `default` when its default features are on, else (a crate of the workspace) any feature it declares. A form the
+/// graph has no dependency for is not made.
+pub fn feature_forms(k: &Klepto, package: &str) -> Vec<(String, Vec<String>)> {
+    let Some(m) = k.features.get(package) else { return Vec::new() };
+    let mut deps: Vec<&klepto::DepInfo> = m.dependencies.iter().filter(|d| d.kind != klepto::DepKind::Dev && d.target.is_none()).collect();
+    deps.sort_by(|a, b| a.name.cmp(&b.name));
+    let member = |d: &klepto::DepInfo| k.packages.contains_key(&d.package.replace('-', "_"));
+    let safe_feature = |d: &klepto::DepInfo| -> Option<String> {
+        // a feature the manifest already asks of it exists (cargo took the manifest), known or not
+        let Some(have) = k.dependency_feature_names(package, &d.name) else { return d.features.first().cloned() };
+        d.features.iter().find(|f| have.contains(*f)).cloned().or_else(|| (d.default_features && have.contains("default")).then(|| "default".to_string())).or_else(|| {
+            let own = k.features.get(&d.package.replace('-', "_"))?;
+            member(d).then(|| own.features.iter().find(|(n, i)| n.as_str() != "default" && !i.implicit).map(|(n, _)| n.clone())).flatten()
+        })
+    };
+    let mut out = Vec::new();
+    if let Some(d) = deps.iter().find(|d| d.optional) {
+        out.push((format!("dep:{}", d.name), vec![format!("dep:{}", d.name)]));
+    }
+    let strong = deps.iter().filter(|d| !d.optional).chain(deps.iter().filter(|d| d.optional)).find_map(|d| safe_feature(d).map(|f| (d.name.clone(), f)));
+    if let Some((a, x)) = &strong {
+        out.push((format!("{a}/{x}"), vec![format!("{a}/{x}")]));
+    }
+    let weak = deps.iter().filter(|d| d.optional).filter_map(|d| safe_feature(d).map(|f| (d.name.clone(), f))).min_by_key(|(n, _)| strong.as_ref().is_some_and(|(a, _)| a == n));
+    if let Some((b, y)) = weak {
+        out.push((format!("{b}?/{y}"), vec![format!("{b}?/{y}")]));
+    }
+    out
+}
+
+/// An optional dependency a crate names, changed to its locked version exactly and kept optional (`optional =
+/// true` written): the `optional` form of `change_dependency`.
+fn changed_optional_dependency(k: &Klepto, root: &Path, package: &str) -> Option<DependencySpec> {
+    let m = k.features.get(package)?;
+    let lock: toml::Value = std::fs::read_to_string(root.join("Cargo.lock")).ok()?.parse().ok()?;
+    let mut opt: Vec<&klepto::DepInfo> = m.dependencies.iter().filter(|d| d.optional && d.kind == klepto::DepKind::Normal).collect();
+    opt.sort_by(|a, b| a.name.cmp(&b.name));
+    opt.into_iter().find_map(|d| {
+        let v = lock.get("package")?.as_array()?.iter().find(|x| x.get("name").and_then(|n| n.as_str()).map(|n| n.replace('-', "_")) == Some(d.package.replace('-', "_")) && x.get("source").is_some())?.get("version")?.as_str()?.to_string();
+        Some(DependencySpec { name: d.name.clone(), version: Some(format!("={v}")), path: None, features: Vec::new(), optional: Some(true) })
+    })
+}
+
+/// Every change spec a case of `op` at `t` makes: [`spec_for`]'s, then one per form the operation has that the crate
+/// can take (`declare_feature`'s `enables` forms, [`feature_forms`]; `optional` on `add_dependency` and
+/// `change_dependency`), numbered from `n` on; each with the form it tries (`None` for the first).
+pub fn specs_for(k: &Klepto, root: &Path, op: Operation, t: &Target, n: u64, crates: &[String]) -> Vec<(u64, Option<String>, ChangeSpec)> {
+    let mut out: Vec<(u64, Option<String>, ChangeSpec)> = Vec::new();
+    let first = spec_for(k, root, op, t, n, crates);
+    let mut next = n + u64::from(first.is_some());
+    out.extend(first.map(|s| (n, None, s)));
+    let mut form = |label: String, f: &dyn Fn(&mut ChangeSpec) -> bool| {
+        let Some(mut s) = spec_for(k, root, op, t, next, crates) else { return };
+        if f(&mut s) {
+            s.objective = format!("{} ({label})", s.objective);
+            out.push((next, Some(label), s));
+            next += 1;
+        }
+    };
+    match op {
+        Operation::DeclareFeature => {
+            for (label, enables) in feature_forms(k, &t.package) {
+                form(format!("enables {label}"), &|s| {
+                    s.enables = enables.clone();
+                    true
+                });
+            }
+        }
+        Operation::AddDependency => form("optional".into(), &|s| {
+            s.dependency.as_mut().map(|d| d.optional = Some(true)).is_some()
+        }),
+        Operation::ChangeDependency => {
+            if let Some(d) = changed_optional_dependency(k, root, &t.package) {
+                form("optional".into(), &|s| {
+                    s.dependency = Some(d.clone());
+                    true
+                });
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 fn receiver_of_arg(a: &str) -> Option<&str> {
@@ -691,6 +778,9 @@ pub struct Case {
     /// `model` for an intent's case.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    /// The form of the operation the case tries (`enables dep:chrono`, `optional`); none for its plain form.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent: Option<String>,
     /// The spec file and the copy, relative to the exercise's folder (`data/exercise/` in the job's folder).
@@ -710,7 +800,7 @@ pub struct Case {
     /// Lines added and removed, from the copy's counts before and after.
     #[serde(default)]
     pub lines_touched: usize,
-    /// Lines the transform record says it wrote.
+    /// Lines the transform wrote, from its record (none when it wrote nothing): the summary's `lines` column.
     #[serde(default)]
     pub lines_written: usize,
     #[serde(default)]
@@ -754,8 +844,13 @@ pub struct Summary {
     pub matrix: Vec<Cell>,
     /// `(case, operation, target, millis)`, slowest first.
     pub slowest: Vec<(u64, String, String, i64)>,
-    /// What to fix, most findings first: `<count>× <code> on <operation>: <a finding's detail>`.
+    /// What to fix, most findings first: `<count>× <code> on <operation>: <the detail>` when every finding of the
+    /// group says the same, else `<count>× <code> on <operation>, each its own:` with `to_fix_cases`.
     pub to_fix: Vec<String>,
+    /// Each group's findings, one line a case (`case 7 on pantry::kitchen::Ingredient: ...`), in `to_fix`'s order;
+    /// empty for a group whose findings all say the same.
+    #[serde(default)]
+    pub to_fix_cases: Vec<Vec<String>>,
     pub findings: Vec<Finding>,
     pub cases: Vec<Case>,
     /// The `check` receipt named `exercise`.
@@ -781,13 +876,13 @@ impl Summary {
         }
         let mut slow: Vec<&Case> = cases.iter().filter(|c| c.status != "not run").collect();
         slow.sort_by_key(|c| std::cmp::Reverse(c.millis));
-        let mut groups: BTreeMap<(String, String), (usize, String)> = BTreeMap::new();
+        let mut groups: BTreeMap<(String, String), Vec<&Finding>> = BTreeMap::new();
         for f in &findings {
-            let g = groups.entry((f.code.as_str().to_string(), f.operation.clone())).or_insert((0, f.detail.clone()));
-            g.0 += 1;
+            groups.entry((f.code.as_str().to_string(), f.operation.clone())).or_default().push(f);
         }
-        let mut ranked: Vec<((String, String), (usize, String))> = groups.into_iter().collect();
-        ranked.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.0.cmp(&b.0)));
+        let mut ranked: Vec<((String, String), Vec<&Finding>)> = groups.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
+        let same = |fs: &[&Finding]| fs.iter().all(|f| f.detail == fs[0].detail);
         // the order a cell shows in: the vocabulary's, operation then unit
         let order = |c: &Cell| (Operation::ALL.iter().position(|o| o.as_str() == c.operation).unwrap_or(usize::MAX), Unit::ALL.iter().position(|u| u.as_str() == c.unit).unwrap_or(usize::MAX));
         let mut matrix: Vec<Cell> = matrix.into_values().collect();
@@ -804,7 +899,8 @@ impl Summary {
             findings_by_code: by_code,
             matrix,
             slowest: slow.iter().take(5).map(|c| (c.n, c.operation.clone(), c.target.clone(), c.millis)).collect(),
-            to_fix: ranked.into_iter().map(|((code, op), (count, detail))| format!("{count}× {code} on {op}: {detail}")).collect(),
+            to_fix: ranked.iter().map(|((code, op), fs)| if same(fs) { format!("{}× {code} on {op}: {}", fs.len(), fs[0].detail) } else { format!("{}× {code} on {op}, each its own:", fs.len()) }).collect(),
+            to_fix_cases: ranked.iter().map(|(_, fs)| if same(fs) { Vec::new() } else { fs.iter().map(|f| format!("case {} on {}: {}", f.case, f.target, f.detail)).collect() }).collect(),
             findings,
             cases,
             receipt: None,
@@ -840,6 +936,9 @@ pub fn markdown(s: &Summary) -> String {
     }
     for (i, t) in s.to_fix.iter().enumerate() {
         m.push_str(&format!("{}. {t}\n", i + 1));
+        for c in s.to_fix_cases.get(i).into_iter().flatten() {
+            m.push_str(&format!("    - {c}\n"));
+        }
     }
     m.push_str("\n## operation × unit\n\n| operation | unit | cases | passed | findings |\n|---|---|---|---|---|\n");
     for c in &s.matrix {
@@ -860,13 +959,14 @@ pub fn markdown(s: &Summary) -> String {
     for f in &s.findings {
         m.push_str(&format!("- {}\n", f.line()));
     }
-    m.push_str("\n## cases\n\n| case | operation | unit | target | preflight | transform | compile | test | lines | s | status |\n|---|---|---|---|---|---|---|---|---|---|---|\n");
+    m.push_str("\n## cases\n\n`lines`: the lines the transform wrote, from its record.\n\n| case | operation | unit | target | preflight | transform | compile | test | lines | s | status |\n|---|---|---|---|---|---|---|---|---|---|---|\n");
     for c in &s.cases {
         let cell = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".into()).replace('|', "/").chars().take(60).collect::<String>();
         m.push_str(&format!(
-            "| {} | {}{} | {} | `{}` | {} | {} | {} | {} | {} | {:.1} | {}{} |\n",
+            "| {} | {}{}{} | {} | `{}` | {} | {} | {} | {} | {} | {:.1} | {}{} |\n",
             c.n,
             c.operation,
+            c.form.as_ref().map(|f| format!(" ({f})")).unwrap_or_default(),
             c.tag.as_ref().map(|t| format!(" [{t}]")).unwrap_or_default(),
             c.unit,
             c.target,
@@ -874,7 +974,7 @@ pub fn markdown(s: &Summary) -> String {
             cell(&c.transform),
             cell(&c.compile),
             cell(&c.test),
-            c.lines_touched,
+            c.lines_written,
             c.millis as f64 / 1000.0,
             c.status,
             c.note.as_ref().map(|n| format!(": {}", n.chars().take(80).collect::<String>())).unwrap_or_default()
@@ -958,6 +1058,7 @@ pub fn report(ctx: &Ctx, which: Option<&str>) -> Result<(Summary, PathBuf)> {
 #[derive(Debug, Clone)]
 struct Planned {
     n: u64,
+    form: Option<String>,
     op: Option<Operation>,
     unit: Option<Unit>,
     target: Option<Target>,
@@ -1182,7 +1283,7 @@ impl CaseTask {
                 let said: Vec<&str> = text.lines().filter(|l| l.starts_with("does not compile") || l.starts_with("postcondition does not hold") || l.starts_with('[') || l.contains("panicked")).collect();
                 let detail = if said.is_empty() { text.lines().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" / ") } else { said.join(" / ") };
                 self.record = std::fs::read_to_string(&out).ok().and_then(|t| serde_json::from_str(&t).ok());
-                self.case.lines_written = self.record.as_ref().map(|r| r.files.iter().flat_map(|f| f.lines.iter()).map(|(a, b)| (b + 1).saturating_sub(*a) as usize).sum()).unwrap_or(0);
+                self.case.lines_written = self.record.as_ref().filter(|r| r.written).map(|r| r.files.iter().flat_map(|f| f.lines.iter()).map(|(a, b)| (b + 1).saturating_sub(*a) as usize).sum()).unwrap_or(0);
                 match w.code {
                     Some(0) if self.record.as_ref().is_some_and(|r| r.written) => {
                         self.case.transform = Some(format!("written ({} files)", self.record.as_ref().map(|r| r.files.len()).unwrap_or(0)));
@@ -1460,11 +1561,10 @@ pub fn run_in_job(ctx: &Ctx, folder: &Path, job: &InJob, task: &TaskRef) -> Resu
             let all = targets(k, &ctx.root, *op, *unit, options.krate.as_deref());
             let mut made = 0;
             for t in pick(options.seed, *op, all, options.n) {
-                // the next number is taken only by a case that has a spec
-                let n = counter.load() + 1;
-                if let Some(spec) = spec_for(k, &ctx.root, *op, &t, n, &crates) {
+                // the next number is taken only by a case that has a spec; each form of the operation is a case
+                for (n, form, spec) in specs_for(k, &ctx.root, *op, &t, counter.load() + 1, &crates) {
                     counter.increment().map_err(|e| ReadingRefusal::ExerciseRefused.refuse(format!("{e:?}")))?;
-                    planned.push(Planned { n, op: Some(*op), unit: Some(*unit), target: Some(t), spec: Some(spec), intent: None });
+                    planned.push(Planned { n, form, op: Some(*op), unit: Some(*unit), target: Some(t.clone()), spec: Some(spec), intent: None });
                     made += 1;
                 }
             }
@@ -1478,7 +1578,7 @@ pub fn run_in_job(ctx: &Ctx, folder: &Path, job: &InJob, task: &TaskRef) -> Resu
         let text = std::fs::read_to_string(file).map_err(|e| ReadingRefusal::MissingInput.refuse(format!("{}: {e}", file.display())))?;
         for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
             let n = counter.increment().map_err(|e| ReadingRefusal::ExerciseRefused.refuse(format!("{e:?}")))?;
-            planned.push(Planned { n, op: None, unit: None, target: None, spec: None, intent: Some(line.to_string()) });
+            planned.push(Planned { n, form: None, op: None, unit: None, target: None, spec: None, intent: Some(line.to_string()) });
         }
         for unit in Unit::ALL {
             let mut seen = BTreeSet::new();
@@ -1516,6 +1616,7 @@ pub fn run_in_job(ctx: &Ctx, folder: &Path, job: &InJob, task: &TaskRef) -> Resu
                 unit: p.unit.map(|u| u.as_str().to_string()).unwrap_or_default(),
                 target: p.target.as_ref().map(|t| t.route.clone()).unwrap_or_default(),
                 tag: p.intent.as_ref().map(|_| "model".to_string()),
+                form: p.form.clone(),
                 intent: p.intent.clone(),
                 ..Case::default()
             };
@@ -1611,6 +1712,27 @@ mod tests {
         let mut o = Options::from_words(Some("add_field"), None, None, false, None, None, None).unwrap();
         o.tests = true;
         assert!(o.checked().is_err());
+    }
+
+    /// The summary's `lines` column is the lines the transform wrote (its record), and a group of findings that say
+    /// different things shows each case's, not the first one's.
+    #[test]
+    fn the_summary_says_the_lines_written_and_each_finding_of_a_group() {
+        let finding = |case: u64, target: &str, detail: &str| Finding { code: FindingCode::PreflightRefused, tag: None, case, operation: "gate".into(), unit: "item".into(), target: target.into(), detail: detail.into(), receipt: None };
+        let case = |n: u64, op: &str, written: usize, touched: usize, findings: Vec<Finding>| Case { n, operation: op.into(), unit: "item".into(), target: format!("p::T{n}"), lines_written: written, lines_touched: touched, status: if findings.is_empty() { "passed".into() } else { "finding".into() }, findings, ..Case::default() };
+        let cases = vec![
+            case(5, "change_signature", 15, 0, vec![]),
+            case(7, "gate", 0, 0, vec![finding(7, "p::A", "6 uses outside it")]),
+            case(8, "gate", 0, 0, vec![finding(8, "p::B", "2 uses outside it")]),
+            case(9, "add_field", 0, 0, vec![Finding { operation: "add_field".into(), ..finding(9, "p::C", "same") }]),
+            case(10, "add_field", 0, 0, vec![Finding { operation: "add_field".into(), ..finding(10, "p::D", "same") }]),
+        ];
+        let s = Summary::of("job-1", &Options::default(), String::new(), cases, &BTreeMap::new());
+        assert_eq!(s.to_fix, ["2× preflight-refused on add_field: same", "2× preflight-refused on gate, each its own:"]);
+        assert_eq!(s.to_fix_cases, vec![Vec::<String>::new(), vec!["case 7 on p::A: 6 uses outside it".to_string(), "case 8 on p::B: 2 uses outside it".to_string()]]);
+        let page = markdown(&s);
+        assert!(page.contains("2. 2× preflight-refused on gate, each its own:\n    - case 7 on p::A: 6 uses outside it\n    - case 8 on p::B: 2 uses outside it\n"), "{page}");
+        assert!(page.contains("| 5 | change_signature | item | `p::T5` | - | - | - | - | 15 |"), "{page}");
     }
 
     #[test]

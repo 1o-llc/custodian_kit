@@ -224,7 +224,7 @@ fn the_schemas_name_exactly_the_fields_of_the_rust_forms() {
         "function": f.clone(), "functions": [f.clone()], "field": field.clone(), "variant": variant.clone(), "derive": ["Clone"], "attribute": "#[x]", "trait": "Display", "assoc": ["type O = u8;"],
         "generator": piece("impl_std_error"), "module": {"name": "m", "vis": "pub", "doc": "d"}, "dependency": {"name": "d", "version": "1", "path": "p", "features": ["f"], "optional": true},
         "dependencies": [{"name": "d", "version": "1", "path": "p", "features": ["f"], "optional": false}],
-        "new_name": "n", "to": "crate:x/src/y.rs", "items": ["x::a"], "feature": "f", "enables": ["dep:d"], "linkage": "l", "call_sites": {"pass": "0"}, "compatibility": "preserve",
+        "new_name": "n", "to": "crate:x/src/y.rs", "items": ["x::a"], "feature": "f", "enables": ["dep:d"], "linkage": "l", "call_sites": {"pass": "0", "allow_unresolved": true}, "compatibility": "preserve",
         "scope": {"read": ["crate:x"], "write": ["crate:x"]}, "features": ["default"], "validate": ["check"], "postconditions": ["exists x::S"], "decisions": [{"question": "q", "options": ["a"], "why": "w"}]
     });
     let spec: custodian_kit::change::ChangeSpec = serde_json::from_value(change).unwrap();

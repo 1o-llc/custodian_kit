@@ -2660,6 +2660,10 @@
             "pass": {
               "type": "string",
               "description": "The expression each call passes for the new parameter."
+            },
+            "allow_unresolved": {
+              "type": "boolean",
+              "description": "true: go ahead with call sites klepto could not resolve, listed for a person; unset, the preflight refuses while any is unresolved."
             }
           },
           "description": "change_signature: what the call sites get."
