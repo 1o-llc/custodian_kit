@@ -1682,7 +1682,12 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
             Ok(Landing { file: rel(root, &file), module, package, item: None, at: At::EndOfFile })
         }
         _ => {
-            let d = item_named(k, &spec.target).ok_or_else(|| format!("`{}` names no item of the scan", spec.target))?;
+            // a function a dependency's macro writes (a toolkit generator) is seen only when the scan read that
+            // macro: say why it could not
+            let d = item_named(k, &spec.target).ok_or_else(|| match &k.dep_macro_note {
+                Some(note) => format!("`{}` names no item of the scan ({note}: a function a dependency's macro writes is not seen until the lock file names the dependency; cargo writes it, and a transform that changes a manifest writes it too)", spec.target),
+                None => format!("`{}` names no item of the scan", spec.target),
+            })?;
             Ok(match op {
                 AddField | AddVariant => at_item(d, |l| At::Inside { line: l }),
                 AddMethod | AddConstructor => match k.impls_of(&d.id).into_iter().find(|i| i.trait_.is_none()) {

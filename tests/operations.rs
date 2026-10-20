@@ -124,3 +124,17 @@ fn make_lib_is_for_a_crate_with_only_a_binary_and_a_module_named_lib_is_refused(
     let m = preflight::run_preflight(&ctx, &spec(&store.root, "m", "name = \"m\"\nobjective = \"o\"\noperation = \"add_module\"\ntarget = \"crate:tool\"\n\n[module]\nname = \"lib\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
     assert!(!m.authorized && m.preconditions.iter().any(|c| !c.holds && c.detail.contains("make_lib")), "{:?}", m.preconditions);
 }
+
+#[test]
+fn a_target_unseen_while_the_lock_file_is_behind_the_manifests_says_why() {
+    let (store, ctx, _) = project("lock");
+    let ok = std::process::Command::new("cargo").args(["generate-lockfile", "--offline"]).current_dir(&store.root).output().unwrap();
+    assert!(ok.status.success(), "{}", String::from_utf8_lossy(&ok.stderr));
+    // a dependency the manifest names and the lock does not: the frozen scan reads no dependency macro
+    write(&store.root, "app/Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nshop = { path = \"../shop\" }\nmarks = { path = \"../marks\" }\n");
+    let w = Workspace::open_with(&store.root, &Scope::default(), Resolving::Free).unwrap();
+    assert!(w.klepto().dep_macro_note.is_some());
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "t", "name = \"t\"\nobjective = \"o\"\noperation = \"add_test\"\ntarget = \"shop::made_by_a_generator\"\n\n[function]\nname = \"t\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(!p.authorized);
+    assert!(p.preconditions.iter().any(|c| !c.holds && c.detail.contains("dependency macros not harvested") && c.detail.contains("lock file")), "{:?}", p.preconditions);
+}
