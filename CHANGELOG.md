@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.3.8 (2026-10-20)
+
+The kit's half of the proof's new shape. A body swapped in fleet_ops on 0.3.7's rule was proved by compiling every
+crate that depends on fleet_ops, near and far, 227 of them, from an empty build each time: one swap took 19.4
+minutes and 37 GB. A body swap cannot break a crate that does not depend on the changed one directly, so the rule is
+now the crate and its direct dependents. Also James's rule for a repeated shape, which these pieces carry: prove one
+member of a shape fully, then batch the rest of that shape in the crate under one compile, one receipt per member, a
+failing member excluded and named; it holds for every operation with repeated shapes, not only a swap. Nothing is
+removed from the API: the rustdoc JSON of 0.3.7 and 0.3.8 differ by 32 additions and no removal. Every link is pinned to
+9181d87; the lines it replaces to ee3c218 (0.3.7).
+
+- **The packages a proof compiles are one rule.** `change::proof_packages` ([change.rs L1586](https://github.com/1o-llc/custodian_kit/blob/9181d87/src/change.rs#L1586)):
+  the crate the change lands in, with its tests; each crate that depends on it directly; and, for an operation that
+  changes what other code reads of its target (`change::reaches_readers`, [change.rs L1577](https://github.com/1o-llc/custodian_kit/blob/9181d87/src/change.rs#L1577):
+  a signature, a name, a place, a field, a variant, a gate), each crate holding an occurrence klepto resolves to the
+  target. Never the closure of dependents, which code_passenger 0.4.5 walked ([transform.rs L1527 at 0.4.5](https://github.com/jameshuntt/code_passenger/blob/70f0929/src/transform.rs#L1527)).
+  On fleet_ops that is 8 packages, not 227. Proof: tests/operations.rs
+  `a_proof_compiles_the_crate_and_its_direct_dependents_never_a_dependents_dependent` ([L366](https://github.com/1o-llc/custodian_kit/blob/9181d87/tests/operations.rs#L366)):
+  p depends on a, a on c; a body swapped in c compiles c with its tests and a, never p.
+- **A swap says it keeps its expansion.** A change spec's `same_expansion` ([change.rs L504](https://github.com/1o-llc/custodian_kit/blob/9181d87/src/change.rs#L504)): the
+  transform proves `cargo expand` of the function before and after the same tokens as its own postcondition. The
+  matcher sets it on every exact swap ([matcher.rs L878](https://github.com/1o-llc/custodian_kit/blob/9181d87/src/toolkit/matcher.rs#L878)). The expansion is kept
+  beside the transform's record as `transform::Expansion` ([transform.rs L88](https://github.com/1o-llc/custodian_kit/blob/9181d87/src/transform.rs#L88)); the record itself
+  is as it was, so a writer built on 0.3.7 still builds.
+- **A patterns reading's swaps are spec files.** 0.3.7 kept each swap only as JSON inside the reading, with no scope
+  ([patterns.rs L383 at 0.3.7](https://github.com/1o-llc/custodian_kit/blob/ee3c218/src/reading/patterns.rs#L383)). Now each exact match by a named piece (never the
+  catch-all `simple_method`, never a near match) is written beside the reading as `<stamp>.specs/<name>.toml`
+  ([mod.rs L352](https://github.com/1o-llc/custodian_kit/blob/9181d87/src/reading/mod.rs#L352), `patterns::spec_files`, [patterns.rs L57](https://github.com/1o-llc/custodian_kit/blob/9181d87/src/reading/patterns.rs#L57)),
+  its scope the crate it lands in ([patterns.rs L78](https://github.com/1o-llc/custodian_kit/blob/9181d87/src/reading/patterns.rs#L78)), so a preflight, a transform
+  or a batch is driven from the files as they are. Proof: tests/reading.rs
+  `patterns_shape_every_function_and_find_the_shapes_repeated_across_crates` ([L108](https://github.com/1o-llc/custodian_kit/blob/9181d87/tests/reading.rs#L108)): one
+  file per exact match, each a spec that keeps its expansion, scoped to its crate.
+
+`cargo test --all-features` passes; `cargo clippy --all-targets --all-features` warns only where 0.3.7 did.
+
 ## 0.3.7 (2026-10-20)
 
 custodian's exercise ran the new operations on the pantry and on `features_ws` with 0.3.6 and found ten things. The
