@@ -108,7 +108,9 @@ pub fn read(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, how:
     if spec.kind == ReadingKind::Sweep {
         return read_sweep(root, spec_path, spec, stamp, how);
     }
-    let facts = Facts::build(root, &spec.scope, how)?;
+    // a kind that walks the syntax trees is answered over a parse: read straight from one (no index read back
+    // from the cache only to be parsed again, none kept)
+    let facts = if spec.kind.walks_trees() { Facts::build_parsed(root, &spec.scope, how)? } else { Facts::build(root, &spec.scope, how)? };
     read_facts(&facts, spec_path, spec, stamp)
 }
 
