@@ -58,7 +58,76 @@ pub struct ExecReading {
 #[shell(program = "cargo")]
 #[composite(command = "test", method = "test", ty = CargoTest, init = "manifest_path,package")]
 #[composite(command = "check", method = "check", ty = CargoCheck, init = "manifest_path")]
+#[composite(command = "expand", method = "expand", ty = CargoExpand, init = "manifest_path,package")]
+#[composite(command = "generate-lockfile", method = "generate_lockfile", ty = CargoGenerateLockfile, init = "manifest_path")]
 pub struct Cargo;
+
+/// `cargo generate-lockfile --manifest-path M --offline`: a crate's lockfile from the registry already on disk.
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "generate-lockfile")]
+#[exit_status(code = 0, word = "locked")]
+pub struct CargoGenerateLockfile {
+    #[builder(init_required, into)]
+    #[arg(kv = "--manifest-path")]
+    pub manifest_path: OsString,
+    #[arg(flag = "--offline")]
+    pub offline: bool,
+}
+
+/// A crate's lockfile written from the registry on disk, as a declared line.
+pub fn lock_crate(dir: &Path) -> Result<()> {
+    let l = Cargo::generate_lockfile(dir.join("Cargo.toml").as_os_str()).offline();
+    let walked = Plan::new("cargo-generate-lockfile").then(line("lock", &l)?).walk(Watch::Quiet, |_, _| {})?;
+    match walked.first() {
+        Some(w) if w.code == Some(0) => Ok(()),
+        Some(w) => Err(ReadingRefusal::LineRefused.refuse(format!("cargo generate-lockfile: exit {:?}: {}", w.code, w.stderr.trim()))),
+        None => Err(ReadingRefusal::LineNotStarted.refuse("cargo generate-lockfile")),
+    }
+}
+
+/// `cargo expand --manifest-path M -p PACKAGE --lib --ugly [ITEM]`: a crate's code after every macro is expanded,
+/// as rustc expands it (cargo-expand's subcommand).
+#[allow(clippy::duplicated_attributes)]
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "expand")]
+#[exit_status(code = 0, word = "expanded")]
+#[exit_status(code = 101, word = "did not build")]
+pub struct CargoExpand {
+    #[builder(init_required, into)]
+    #[arg(kv = "--manifest-path")]
+    pub manifest_path: OsString,
+    #[builder(init_required, into)]
+    #[arg(kv = "-p")]
+    pub package: OsString,
+    #[arg(flag = "--lib")]
+    pub lib: bool,
+    #[arg(flag = "--tests")]
+    pub tests: bool,
+    #[arg(flag = "--ugly")]
+    pub ugly: bool,
+    /// One item's path inside the crate (`module::Type`), or the whole crate.
+    #[arg(positional)]
+    pub item: Vec<OsString>,
+}
+
+/// `cargo expand` of a crate's library (the whole of it, or one item), run as a declared line: what it printed.
+pub fn expand_crate(dir: &Path, package: &str) -> Result<String> {
+    expand_item(dir, package, None)
+}
+
+/// `cargo expand` of one item of a crate's library (`None`: the whole library), run as a declared line.
+pub fn expand_item(dir: &Path, package: &str, item: Option<&str>) -> Result<String> {
+    let mut l = Cargo::expand(dir.join("Cargo.toml").as_os_str(), package).lib().ugly();
+    if let Some(i) = item {
+        l = l.item([i]);
+    }
+    let walked = Plan::new("cargo-expand").then(line("expand", &l)?).walk(Watch::Quiet, |_, _| {})?;
+    let w = walked.into_iter().next().ok_or_else(|| ReadingRefusal::LineNotStarted.refuse("cargo expand"))?;
+    if w.code != Some(0) {
+        return Err(ReadingRefusal::LineRefused.refuse(format!("cargo expand -p {package}: exit {:?}: {}", w.code, w.stderr.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))));
+    }
+    Ok(w.stdout)
+}
 
 /// `cargo test --manifest-path M -p PACKAGE [--lib --bins | --test T | --bin B] -- FILTER... --exact`.
 #[allow(clippy::duplicated_attributes)]

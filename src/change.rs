@@ -56,7 +56,7 @@ vocabulary! {
         Extract = "extract" : "items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were",
         Gate = "gate" : "an item put behind a crate feature the crate declares (target: the item, `feature`)",
         Anchor = "anchor" : "a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name)",
-        ReplaceBody = "replace_body" : "a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched",
+        ReplaceBody = "replace_body" : "a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched; with a toolkit method generator (`function.generator`) the whole function is written as the call, its signature, docs and attributes inside it",
         ChangeDependency = "change_dependency" : "a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features",
         Inline = "inline" : "a function's body put in place of every call to it (target: a free function, or an associated one without self): each call becomes a block that binds the parameters to the call's arguments with `let`, then the body; the function is removed when it is not `pub` and every use of it was a call",
         Wrap = "wrap" : "a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched",
@@ -902,6 +902,11 @@ fn template_slots(t: &str) -> Vec<(String, bool)> {
         }
     }
     out
+}
+
+/// The slots a piece's macro takes (its template's), by the piece's name; none for a name that is not a piece.
+pub fn slots_of(name: &str) -> Vec<String> {
+    piece(name).map(|d| template_slots(d.template).into_iter().map(|(s, _)| s).collect()).unwrap_or_default()
 }
 
 /// A piece checked against its declaration: known, its required slots given, nothing it does not take.

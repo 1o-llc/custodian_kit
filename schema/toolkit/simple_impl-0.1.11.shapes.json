@@ -1,0 +1,4449 @@
+{
+  "schema": "custodian.toolkit_shapes.v1",
+  "toolkit": "simple_impl 0.1.11",
+  "shapes": [
+    {
+      "piece": "count_true",
+      "family": "expression",
+      "variant": "2 conditions",
+      "position": "value",
+      "call": "simple_impl::count_true!(__si_conditions_0, __si_conditions_1)",
+      "expansion": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize }",
+      "pattern": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize }",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 19,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "count_true",
+      "family": "expression",
+      "variant": "3 conditions",
+      "position": "value",
+      "call": "simple_impl::count_true!(__si_conditions_0, __si_conditions_1, __si_conditions_2)",
+      "expansion": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } + if __si_conditions_2 { 1usize } else { 0usize }",
+      "pattern": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } + if __si_conditions_2 { 1usize } else { 0usize }",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_2",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 28,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "count_true",
+      "family": "expression",
+      "variant": "4 conditions",
+      "position": "value",
+      "call": "simple_impl::count_true!(__si_conditions_0, __si_conditions_1, __si_conditions_2, __si_conditions_3)",
+      "expansion": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } + if __si_conditions_2 { 1usize } else { 0usize } + if __si_conditions_3 { 1usize } else { 0usize }",
+      "pattern": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } + if __si_conditions_2 { 1usize } else { 0usize } + if __si_conditions_3 { 1usize } else { 0usize }",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_2",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_3",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 37,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "all",
+      "family": "expression",
+      "variant": "2 conditions",
+      "position": "value",
+      "call": "simple_impl::all!(__si_conditions_0, __si_conditions_1)",
+      "expansion": "true && (__si_conditions_0) && (__si_conditions_1)",
+      "pattern": "true && __si_conditions_0 && __si_conditions_1",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 3,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "all",
+      "family": "expression",
+      "variant": "3 conditions",
+      "position": "value",
+      "call": "simple_impl::all!(__si_conditions_0, __si_conditions_1, __si_conditions_2)",
+      "expansion": "true && (__si_conditions_0) && (__si_conditions_1) && (__si_conditions_2)",
+      "pattern": "true && __si_conditions_0 && __si_conditions_1 && __si_conditions_2",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_2",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 4,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "all",
+      "family": "expression",
+      "variant": "4 conditions",
+      "position": "value",
+      "call": "simple_impl::all!(__si_conditions_0, __si_conditions_1, __si_conditions_2, __si_conditions_3)",
+      "expansion": "true && (__si_conditions_0) && (__si_conditions_1) && (__si_conditions_2) && (__si_conditions_3)",
+      "pattern": "true && __si_conditions_0 && __si_conditions_1 && __si_conditions_2 && __si_conditions_3",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_2",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_3",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 5,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "any",
+      "family": "expression",
+      "variant": "2 conditions",
+      "position": "value",
+      "call": "simple_impl::any!(__si_conditions_0, __si_conditions_1)",
+      "expansion": "false || (__si_conditions_0) || (__si_conditions_1)",
+      "pattern": "false || __si_conditions_0 || __si_conditions_1",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 3,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "any",
+      "family": "expression",
+      "variant": "3 conditions",
+      "position": "value",
+      "call": "simple_impl::any!(__si_conditions_0, __si_conditions_1, __si_conditions_2)",
+      "expansion": "false || (__si_conditions_0) || (__si_conditions_1) || (__si_conditions_2)",
+      "pattern": "false || __si_conditions_0 || __si_conditions_1 || __si_conditions_2",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_2",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 4,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "any",
+      "family": "expression",
+      "variant": "4 conditions",
+      "position": "value",
+      "call": "simple_impl::any!(__si_conditions_0, __si_conditions_1, __si_conditions_2, __si_conditions_3)",
+      "expansion": "false || (__si_conditions_0) || (__si_conditions_1) || (__si_conditions_2) || (__si_conditions_3)",
+      "pattern": "false || __si_conditions_0 || __si_conditions_1 || __si_conditions_2 || __si_conditions_3",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_2",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_3",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 5,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "exactly_one",
+      "family": "expression",
+      "variant": "2 conditions",
+      "position": "value",
+      "call": "simple_impl::exactly_one!(__si_conditions_0, __si_conditions_1)",
+      "expansion": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } == 1",
+      "pattern": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } == 1",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 21,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "exactly_one",
+      "family": "expression",
+      "variant": "3 conditions",
+      "position": "value",
+      "call": "simple_impl::exactly_one!(__si_conditions_0, __si_conditions_1, __si_conditions_2)",
+      "expansion": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } + if __si_conditions_2 { 1usize } else { 0usize } == 1",
+      "pattern": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } + if __si_conditions_2 { 1usize } else { 0usize } == 1",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_2",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 30,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "at_most_one",
+      "family": "expression",
+      "variant": "2 conditions",
+      "position": "value",
+      "call": "simple_impl::at_most_one!(__si_conditions_0, __si_conditions_1)",
+      "expansion": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } <= 1",
+      "pattern": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } <= 1",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 21,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "at_most_one",
+      "family": "expression",
+      "variant": "3 conditions",
+      "position": "value",
+      "call": "simple_impl::at_most_one!(__si_conditions_0, __si_conditions_1, __si_conditions_2)",
+      "expansion": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } + if __si_conditions_2 { 1usize } else { 0usize } <= 1",
+      "pattern": "0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } + if __si_conditions_2 { 1usize } else { 0usize } <= 1",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_2",
+          "slot": "conditions",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 30,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "implies",
+      "family": "expression",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::implies!(__si_left => __si_right)",
+      "expansion": "! (__si_left) || (__si_right)",
+      "pattern": "! __si_left || __si_right",
+      "holes": [
+        {
+          "placeholder": "__si_left",
+          "slot": "left",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_right",
+          "slot": "right",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 2,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "excludes",
+      "family": "expression",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::excludes!(__si_left, __si_right)",
+      "expansion": "! ((__si_left) && (__si_right))",
+      "pattern": "! (__si_left && __si_right)",
+      "holes": [
+        {
+          "placeholder": "__si_left",
+          "slot": "left",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_right",
+          "slot": "right",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 3,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "in_range",
+      "family": "expression",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::in_range!(__si_value, __si_minimum, __si_maximum)",
+      "expansion": "{ let value = & __si_value ; (__si_minimum ..= __si_maximum) . contains (value) }",
+      "pattern": "{ let __sib_0 = & __si_value ; (__si_minimum ..= __si_maximum) . contains (__sib_0) }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_minimum",
+          "slot": "minimum",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_maximum",
+          "slot": "maximum",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "nonempty",
+      "family": "expression",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::nonempty!(__si_value)",
+      "expansion": "! (__si_value) . is_empty ()",
+      "pattern": "! __si_value . is_empty ()",
+      "holes": [
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 4,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "is_one_of",
+      "family": "expression",
+      "variant": "2 patterns",
+      "position": "value",
+      "call": "simple_impl::is_one_of!(__si_value; __sip_candidates_0 | __sip_candidates_1)",
+      "expansion": ":: core :: matches ! (__si_value , __sip_candidates_0 | __sip_candidates_1)",
+      "pattern": "matches ! (__si_value , __sip_candidates_0 | __sip_candidates_1)",
+      "holes": [
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sip_candidates_0",
+          "slot": "candidates",
+          "kind": "pat"
+        },
+        {
+          "placeholder": "__sip_candidates_1",
+          "slot": "candidates",
+          "kind": "pat"
+        }
+      ],
+      "specificity": 5,
+      "expanded_by": "klepto (it holds a std macro, which cargo expand opens)"
+    },
+    {
+      "piece": "is_one_of",
+      "family": "expression",
+      "variant": "3 patterns",
+      "position": "value",
+      "call": "simple_impl::is_one_of!(__si_value; __sip_candidates_0 | __sip_candidates_1 | __sip_candidates_2)",
+      "expansion": ":: core :: matches ! (__si_value , __sip_candidates_0 | __sip_candidates_1 | __sip_candidates_2)",
+      "pattern": "matches ! (__si_value , __sip_candidates_0 | __sip_candidates_1 | __sip_candidates_2)",
+      "holes": [
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sip_candidates_0",
+          "slot": "candidates",
+          "kind": "pat"
+        },
+        {
+          "placeholder": "__sip_candidates_1",
+          "slot": "candidates",
+          "kind": "pat"
+        },
+        {
+          "placeholder": "__sip_candidates_2",
+          "slot": "candidates",
+          "kind": "pat"
+        }
+      ],
+      "specificity": 6,
+      "expanded_by": "klepto (it holds a std macro, which cargo expand opens)"
+    },
+    {
+      "piece": "guard",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::guard!(__si_condition => __si_return_value);",
+      "expansion": "if ! (__si_condition) { return __si_return_value ; } ;",
+      "pattern": "if ! __si_condition { return __si_return_value ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_return_value",
+          "slot": "return_value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 6,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure!(__si_condition, __si_error);",
+      "expansion": "if ! (__si_condition) { return :: core :: result :: Result :: Err (__si_error) ; } ;",
+      "pattern": "if ! __si_condition { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 8,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "bail",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::bail!(__si_error);",
+      "expansion": "return :: core :: result :: Result :: Err (__si_error) ;",
+      "pattern": "return Err (__si_error) ;",
+      "holes": [
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 4,
+      "expanded_by": "cargo expand",
+      "klepto_same": false
+    },
+    {
+      "piece": "ensure_eq",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_eq!(__si_left, __si_right, __si_error);",
+      "expansion": "if ! ((__si_left) == (__si_right)) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (__si_left == __si_right) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_left",
+          "slot": "left",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_right",
+          "slot": "right",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 10,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_ne",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_ne!(__si_left, __si_right, __si_error);",
+      "expansion": "if ! ((__si_left) != (__si_right)) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (__si_left != __si_right) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_left",
+          "slot": "left",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_right",
+          "slot": "right",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 10,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_nonempty",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_nonempty!(__si_value, __si_error);",
+      "expansion": "if ! (! (__si_value) . is_empty ()) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (! __si_value . is_empty ()) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_empty",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_empty!(__si_value, __si_error);",
+      "expansion": "if ! ((__si_value) . is_empty ()) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! __si_value . is_empty () { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_len",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_len!(__si_value, __si_expected, __si_error);",
+      "expansion": "if ! ((__si_value) . len () == (__si_expected)) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (__si_value . len () == __si_expected) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_expected",
+          "slot": "expected",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_min_len",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_min_len!(__si_value, __si_minimum, __si_error);",
+      "expansion": "if ! ((__si_value) . len () >= (__si_minimum)) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (__si_value . len () >= __si_minimum) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_minimum",
+          "slot": "minimum",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_max_len",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_max_len!(__si_value, __si_maximum, __si_error);",
+      "expansion": "if ! ((__si_value) . len () <= (__si_maximum)) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (__si_value . len () <= __si_maximum) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_maximum",
+          "slot": "maximum",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_range",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_range!(__si_value, __si_minimum, __si_maximum, __si_error);",
+      "expansion": "if ! ({ let value = & __si_value ; (__si_minimum ..= __si_maximum) . contains (value) }) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! ({ let __sib_0 = & __si_value ; (__si_minimum ..= __si_maximum) . contains (__sib_0) }) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_minimum",
+          "slot": "minimum",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_maximum",
+          "slot": "maximum",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 19,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_any",
+      "family": "guard",
+      "variant": "2 conditions",
+      "position": "step",
+      "call": "simple_impl::ensure_any!(__si_error; __si_conditions_0, __si_conditions_1);",
+      "expansion": "if ! (false || (__si_conditions_0) || (__si_conditions_1)) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (false || __si_conditions_0 || __si_conditions_1) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_any",
+      "family": "guard",
+      "variant": "3 conditions",
+      "position": "step",
+      "call": "simple_impl::ensure_any!(__si_error; __si_conditions_0, __si_conditions_1, __si_conditions_2);",
+      "expansion": "if ! (false || (__si_conditions_0) || (__si_conditions_1) || (__si_conditions_2)) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (false || __si_conditions_0 || __si_conditions_1 || __si_conditions_2) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_2",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_exactly_one",
+      "family": "guard",
+      "variant": "2 conditions",
+      "position": "step",
+      "call": "simple_impl::ensure_exactly_one!(__si_error; __si_conditions_0, __si_conditions_1);",
+      "expansion": "if ! (0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } == 1) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } == 1) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 29,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_at_most_one",
+      "family": "guard",
+      "variant": "2 conditions",
+      "position": "step",
+      "call": "simple_impl::ensure_at_most_one!(__si_error; __si_conditions_0, __si_conditions_1);",
+      "expansion": "if ! (0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } <= 1) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (0usize + if __si_conditions_0 { 1usize } else { 0usize } + if __si_conditions_1 { 1usize } else { 0usize } <= 1) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 29,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_implies",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_implies!(__si_left => __si_right, __si_error);",
+      "expansion": "if ! (! (__si_left) || (__si_right)) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (! __si_left || __si_right) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_left",
+          "slot": "left",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_right",
+          "slot": "right",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 10,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ensure_excludes",
+      "family": "guard",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::ensure_excludes!(__si_left, __si_right, __si_error);",
+      "expansion": "if ! (! ((__si_left) && (__si_right))) { return :: core :: result :: Result :: Err (__si_error) ; } ; ;",
+      "pattern": "if ! (! (__si_left && __si_right)) { return Err (__si_error) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_left",
+          "slot": "left",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_right",
+          "slot": "right",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "require_some",
+      "family": "flow",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::require_some!(__si_option, __si_error);",
+      "expansion": "match __si_option { :: core :: option :: Option :: Some (value) => value , :: core :: option :: Option :: None => return :: core :: result :: Result :: Err (__si_error) , }",
+      "pattern": "match __si_option { Some (__sib_0) => __sib_0 , None => return Err (__si_error) , }",
+      "holes": [
+        {
+          "placeholder": "__si_option",
+          "slot": "option",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_error",
+          "slot": "error",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "require_ok",
+      "family": "flow",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::require_ok!(__si_result, __si_map_error);",
+      "expansion": "match __si_result { :: core :: result :: Result :: Ok (value) => value , :: core :: result :: Result :: Err (error) => { return :: core :: result :: Result :: Err ((__si_map_error) (error)) ; } }",
+      "pattern": "match __si_result { Ok (__sib_0) => __sib_0 , Err (__sib_1) => { return Err (__si_map_error (__sib_1)) ; } }",
+      "holes": [
+        {
+          "placeholder": "__si_result",
+          "slot": "result",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__sib_1",
+          "slot": "1",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_map_error",
+          "slot": "map_error",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ],
+        [
+          "__sib_1",
+          "error"
+        ]
+      ],
+      "specificity": 17,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "some_or_return",
+      "family": "flow",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::some_or_return!(__si_option => __si_return_value);",
+      "expansion": "match __si_option { :: core :: option :: Option :: Some (value) => value , :: core :: option :: Option :: None => return __si_return_value , }",
+      "pattern": "match __si_option { Some (__sib_0) => __sib_0 , None => return __si_return_value , }",
+      "holes": [
+        {
+          "placeholder": "__si_option",
+          "slot": "option",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_return_value",
+          "slot": "return_value",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "ok_or_return",
+      "family": "flow",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::ok_or_return!(__si_result => __si_return_value);",
+      "expansion": "match __si_result { :: core :: result :: Result :: Ok (value) => value , :: core :: result :: Result :: Err (_) => return __si_return_value , }",
+      "pattern": "match __si_result { Ok (__sib_0) => __sib_0 , Err (_) => return __si_return_value , }",
+      "holes": [
+        {
+          "placeholder": "__si_result",
+          "slot": "result",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_return_value",
+          "slot": "return_value",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "return_if",
+      "family": "flow",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::return_if!(__si_condition => __si_return_value);",
+      "expansion": "if __si_condition { return __si_return_value ; } ;",
+      "pattern": "if __si_condition { return __si_return_value ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_return_value",
+          "slot": "return_value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 5,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "return_unless",
+      "family": "flow",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::return_unless!(__si_condition => __si_return_value);",
+      "expansion": "if ! (__si_condition) { return __si_return_value ; } ;",
+      "pattern": "if ! __si_condition { return __si_return_value ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_return_value",
+          "slot": "return_value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 6,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "none_if",
+      "family": "flow",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::none_if!(__si_condition);",
+      "expansion": "if __si_condition { return :: core :: option :: Option :: None ; } ;",
+      "pattern": "if __si_condition { return None ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 6,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "break_if",
+      "family": "flow",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::break_if!(__si_condition);",
+      "expansion": "if __si_condition { break ; } ;",
+      "pattern": "if __si_condition { break ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 5,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "break_if",
+      "family": "flow",
+      "variant": "with a value",
+      "position": "step",
+      "call": "simple_impl::break_if!(__si_condition => __si_value);",
+      "expansion": "if __si_condition { break __si_value ; } ;",
+      "pattern": "if __si_condition { break __si_value ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 5,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "continue_if",
+      "family": "flow",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::continue_if!(__si_condition);",
+      "expansion": "if __si_condition { continue ; } ;",
+      "pattern": "if __si_condition { continue ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 5,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "some_or_continue",
+      "family": "flow",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::some_or_continue!(__si_option);",
+      "expansion": "match __si_option { :: core :: option :: Option :: Some (value) => value , :: core :: option :: Option :: None => continue , }",
+      "pattern": "match __si_option { Some (__sib_0) => __sib_0 , None => continue , }",
+      "holes": [
+        {
+          "placeholder": "__si_option",
+          "slot": "option",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "some_or_break",
+      "family": "flow",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::some_or_break!(__si_option);",
+      "expansion": "match __si_option { :: core :: option :: Option :: Some (value) => value , :: core :: option :: Option :: None => break , }",
+      "pattern": "match __si_option { Some (__sib_0) => __sib_0 , None => break , }",
+      "holes": [
+        {
+          "placeholder": "__si_option",
+          "slot": "option",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "push_if",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::push_if!(__si_collection, __si_condition => __si_value);",
+      "expansion": "if __si_condition { (__si_collection) . push (__si_value) ; } ;",
+      "pattern": "if __si_condition { __si_collection . push (__si_value) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_collection",
+          "slot": "collection",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 7,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "push_some",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::push_some!(__si_collection, __si_option);",
+      "expansion": "if let :: core :: option :: Option :: Some (value) = __si_option { (__si_collection) . push (value) ; } ;",
+      "pattern": "if let Some (__sib_0) = __si_option { __si_collection . push (__sib_0) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_option",
+          "slot": "option",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_collection",
+          "slot": "collection",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "extend_if",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::extend_if!(__si_collection, __si_condition => __si_values);",
+      "expansion": "if __si_condition { (__si_collection) . extend (__si_values) ; } ;",
+      "pattern": "if __si_condition { __si_collection . extend (__si_values) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_collection",
+          "slot": "collection",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_values",
+          "slot": "values",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 7,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "extend_some",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::extend_some!(__si_collection, __si_option);",
+      "expansion": "if let :: core :: option :: Option :: Some (values) = __si_option { (__si_collection) . extend (values) ; } ;",
+      "pattern": "if let Some (__sib_0) = __si_option { __si_collection . extend (__sib_0) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_option",
+          "slot": "option",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_collection",
+          "slot": "collection",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "values"
+        ]
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "insert_if",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::insert_if!(__si_map, __si_condition => __si_key, __si_value);",
+      "expansion": "if __si_condition { (__si_map) . insert (__si_key , __si_value) ; } ;",
+      "pattern": "if __si_condition { __si_map . insert (__si_key , __si_value) ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_map",
+          "slot": "map",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_key",
+          "slot": "key",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 8,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "insert_some",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::insert_some!(__si_map, __si_key => __si_option);",
+      "expansion": "if let :: core :: option :: Option :: Some (value) = __si_option { (__si_map) . insert (__si_key , value) ; } ;",
+      "pattern": "if let Some (__sib_0) = __si_option { __si_map . insert (__si_key , __sib_0) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_option",
+          "slot": "option",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_map",
+          "slot": "map",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_key",
+          "slot": "key",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "assign_if",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::assign_if!(__si_condition; __si_place => __si_value);",
+      "expansion": "if __si_condition { __si_place = __si_value ; } ;",
+      "pattern": "if __si_condition { __si_place = __si_value ; }",
+      "holes": [
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_place",
+          "slot": "place",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 5,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "assign_if_some",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::assign_if_some!(__si_place, __si_option);",
+      "expansion": "if let :: core :: option :: Option :: Some (value) = __si_option { __si_place = value ; } ;",
+      "pattern": "if let Some (__sib_0) = __si_option { __si_place = __sib_0 ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_option",
+          "slot": "option",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_place",
+          "slot": "place",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 9,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "push_unique",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::push_unique!(__si_collection, __si_value);",
+      "expansion": "{ let collection = & mut __si_collection ; let value = __si_value ; if ! collection . iter () . any (| existing | existing == & value) { collection . push (value) ; } } ;",
+      "pattern": "{ let __sib_0 = & mut __si_collection ; let __sib_1 = __si_value ; if ! __sib_0 . iter () . any (| __sib_2 | __sib_2 == & __sib_1) { __sib_0 . push (__sib_1) ; } } ;",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_collection",
+          "slot": "collection",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_1",
+          "slot": "1",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_2",
+          "slot": "2",
+          "kind": "binder"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "collection"
+        ],
+        [
+          "__sib_1",
+          "value"
+        ],
+        [
+          "__sib_2",
+          "existing"
+        ]
+      ],
+      "specificity": 28,
+      "expanded_by": "cargo expand",
+      "klepto_same": false
+    },
+    {
+      "piece": "extend_unique",
+      "family": "collection",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::extend_unique!(__si_collection, __si_values);",
+      "expansion": "{ for value in __si_values { { let collection = & mut __si_collection ; let value = value ; if ! collection . iter () . any (| existing | existing == & value) { collection . push (value) ; } } ; } } ;",
+      "pattern": "for __sib_0 in __si_values { { let __sib_1 = & mut __si_collection ; let __sib_0 = __sib_0 ; if ! __sib_1 . iter () . any (| __sib_2 | __sib_2 == & __sib_0) { __sib_1 . push (__sib_0) ; } } ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_values",
+          "slot": "values",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_1",
+          "slot": "1",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_collection",
+          "slot": "collection",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sib_2",
+          "slot": "2",
+          "kind": "binder"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ],
+        [
+          "__sib_1",
+          "collection"
+        ],
+        [
+          "__sib_2",
+          "existing"
+        ]
+      ],
+      "specificity": 32,
+      "expanded_by": "cargo expand",
+      "klepto_same": false
+    },
+    {
+      "piece": "sc_cmd",
+      "family": "argv",
+      "variant": "",
+      "position": "value",
+      "call": "simple_impl::sc_cmd!(__si_value);",
+      "expansion": "vec ! [__si_value . to_string ()]",
+      "pattern": "vec ! [__si_value . to_string ()]",
+      "holes": [
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 6,
+      "expanded_by": "klepto (it holds a std macro, which cargo expand opens)"
+    },
+    {
+      "piece": "sc_flags",
+      "family": "argv",
+      "variant": "1 field",
+      "position": "step",
+      "call": "simple_impl::sc_flags!(__sid_parts, __sid_this, __sid_fields_0 => __si_flags_0);",
+      "expansion": "{ if __sid_this . __sid_fields_0 { __sid_parts . push (__si_flags_0 . to_string ()) ; } } ;",
+      "pattern": "if __sid_this . __sid_fields_0 { __sid_parts . push (__si_flags_0 . to_string ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_this",
+          "slot": "this",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_fields_0",
+          "slot": "fields",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__si_flags_0",
+          "slot": "flags",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_flags_into",
+      "family": "argv",
+      "variant": "1 field",
+      "position": "step",
+      "call": "simple_impl::sc_flags_into!(__sid_parts, __sid_this, __sid_fields_0 => __si_flags_0);",
+      "expansion": "{ if __sid_this . __sid_fields_0 { __sid_parts . push (__si_flags_0 . into ()) ; } } ;",
+      "pattern": "if __sid_this . __sid_fields_0 { __sid_parts . push (__si_flags_0 . into ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_this",
+          "slot": "this",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_fields_0",
+          "slot": "fields",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__si_flags_0",
+          "slot": "flags",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_opt_kv",
+      "family": "argv",
+      "variant": "1 field",
+      "position": "step",
+      "call": "simple_impl::sc_opt_kv!(__sid_parts, __sid_this, __sid_fields_0 => __si_flags_0);",
+      "expansion": "{ if let Some (v) = & __sid_this . __sid_fields_0 { __sid_parts . push (__si_flags_0 . to_string ()) ; __sid_parts . push (v . to_string ()) ; } } ;",
+      "pattern": "if let Some (__sib_0) = & __sid_this . __sid_fields_0 { __sid_parts . push (__si_flags_0 . to_string ()) ; __sid_parts . push (__sib_0 . to_string ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__sid_this",
+          "slot": "this",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_fields_0",
+          "slot": "fields",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__si_flags_0",
+          "slot": "flags",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "v"
+        ]
+      ],
+      "specificity": 23,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_args",
+      "family": "argv",
+      "variant": "1 argument",
+      "position": "step",
+      "call": "simple_impl::sc_args!(__sid_parts, __si_args_0);",
+      "expansion": "{ __sid_parts . push ((__si_args_0) . into ()) ; } ;",
+      "pattern": "__sid_parts . push (__si_args_0 . into ()) ;",
+      "holes": [
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__si_args_0",
+          "slot": "args",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 7,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_if_some",
+      "family": "argv",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::sc_if_some!(__sid_parts, __si_opt, __si_map);",
+      "expansion": "{ if let Some (v) = & (__si_opt) { __sid_parts . push ((__si_map) (v)) ; } } ;",
+      "pattern": "if let Some (__sib_0) = & __si_opt { __sid_parts . push (__si_map (__sib_0)) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_opt",
+          "slot": "opt",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__si_map",
+          "slot": "map",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "v"
+        ]
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_if_some_display",
+      "family": "argv",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::sc_if_some_display!(__sid_parts, __si_opt);",
+      "expansion": "{ if let Some (v) = & (__si_opt) { __sid_parts . push (v . to_string ()) ; } } ;",
+      "pattern": "if let Some (__sib_0) = & __si_opt { __sid_parts . push (__sib_0 . to_string ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_opt",
+          "slot": "opt",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "v"
+        ]
+      ],
+      "specificity": 15,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_if_some_into",
+      "family": "argv",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::sc_if_some_into!(__sid_parts, __si_opt);",
+      "expansion": "{ if let Some (v) = & (__si_opt) { __sid_parts . push ((* v) . into ()) ; } } ;",
+      "pattern": "if let Some (__sib_0) = & __si_opt { __sid_parts . push ((* __sib_0) . into ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_opt",
+          "slot": "opt",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "v"
+        ]
+      ],
+      "specificity": 15,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_if_some_clone",
+      "family": "argv",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::sc_if_some_clone!(__sid_parts, __si_opt);",
+      "expansion": "{ if let Some (v) = & (__si_opt) { __sid_parts . push (v . clone ()) ; } } ;",
+      "pattern": "if let Some (__sib_0) = & __si_opt { __sid_parts . push (__sib_0 . clone ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_opt",
+          "slot": "opt",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "v"
+        ]
+      ],
+      "specificity": 15,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_if_some_prefix",
+      "family": "argv",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::sc_if_some_prefix!(__sid_parts, __si_opt, __si_prefix);",
+      "expansion": "{ if let Some (v) = & (__si_opt) { __sid_parts . push (format ! (\"{}{}\" , __si_prefix , v)) ; } }",
+      "pattern": "if let Some (__sib_0) = & __si_opt { __sid_parts . push (format ! (\"{}{}\" , __si_prefix , __sib_0)) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_opt",
+          "slot": "opt",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__si_prefix",
+          "slot": "prefix",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "v"
+        ]
+      ],
+      "specificity": 16,
+      "expanded_by": "klepto (it holds a std macro, which cargo expand opens)"
+    },
+    {
+      "piece": "sc_each",
+      "family": "argv",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::sc_each!(__sid_parts, __si_iter, __si_map);",
+      "expansion": "{ for item in (__si_iter) { __sid_parts . push ((__si_map) (item)) ; } } ;",
+      "pattern": "for __sib_0 in __si_iter { __sid_parts . push (__si_map (__sib_0)) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_iter",
+          "slot": "iter",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__si_map",
+          "slot": "map",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "item"
+        ]
+      ],
+      "specificity": 9,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_each_display",
+      "family": "argv",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::sc_each_display!(__sid_parts, __si_iter);",
+      "expansion": "{ for item in (__si_iter) { __sid_parts . push (item . to_string ()) ; } } ;",
+      "pattern": "for __sib_0 in __si_iter { __sid_parts . push (__sib_0 . to_string ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_iter",
+          "slot": "iter",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__sid_parts",
+          "slot": "parts",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "item"
+        ]
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "sc_if_some_flag",
+      "family": "argv",
+      "variant": "",
+      "position": "step",
+      "call": "simple_impl::sc_if_some_flag!(__si_vec, __si_opt, __si_flag);",
+      "expansion": "if let Some (val) = & __si_opt { __si_vec . push (__si_flag . to_string ()) ; __si_vec . push (val . clone ()) ; } ;",
+      "pattern": "if let Some (__sib_0) = & __si_opt { __si_vec . push (__si_flag . to_string ()) ; __si_vec . push (__sib_0 . clone ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_opt",
+          "slot": "opt",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_vec",
+          "slot": "vec",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_flag",
+          "slot": "flag",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "val"
+        ]
+      ],
+      "specificity": 22,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "simple_method",
+      "family": "method",
+      "variant": "with a return type",
+      "position": "function",
+      "call": "simple_impl::simple_method!(fn __sid_name(__sia_args: __SiArgsTy) -> __SiRet => __si_value);",
+      "expansion": "fn __sid_name (__sia_args) -> __SiRet { __si_value }",
+      "pattern": "fn __sid_name (__sia_args) -> __SiRet { __si_value }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sia_args",
+          "slot": "args",
+          "kind": "args"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 5,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "simple_method",
+      "family": "method",
+      "variant": "no return type",
+      "position": "function",
+      "call": "simple_impl::simple_method!(fn __sid_name(__sia_args: __SiArgsTy) => __si_value);",
+      "expansion": "fn __sid_name (__sia_args) { __si_value }",
+      "pattern": "fn __sid_name (__sia_args) { __si_value }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sia_args",
+          "slot": "args",
+          "kind": "args"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 4,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "simple_method",
+      "family": "method",
+      "variant": "const, with a return type",
+      "position": "function",
+      "call": "simple_impl::simple_method!(const fn __sid_name(__sia_args: __SiArgsTy) -> __SiRet => __si_value);",
+      "expansion": "const fn __sid_name (__sia_args) -> __SiRet { __si_value }",
+      "pattern": "const fn __sid_name (__sia_args) -> __SiRet { __si_value }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sia_args",
+          "slot": "args",
+          "kind": "args"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 6,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "checked_method",
+      "family": "method",
+      "variant": "1 condition",
+      "position": "function",
+      "call": "simple_impl::checked_method!(fn __sid_name(__sia_args: __SiArgsTy) -> __SiOk, __SiErrorTy; __si_conditions_0 => __si_errors_0; => __si_value);",
+      "expansion": "fn __sid_name (__sia_args) -> :: core :: result :: Result < __SiOk , __SiErrorTy > { if ! (__si_conditions_0) { return :: core :: result :: Result :: Err (__si_errors_0) ; } ; :: core :: result :: Result :: Ok (__si_value) }",
+      "pattern": "fn __sid_name (__sia_args) -> Result < __SiOk , __SiErrorTy > { if ! __si_conditions_0 { return Err (__si_errors_0) ; } Ok (__si_value) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sia_args",
+          "slot": "args",
+          "kind": "args"
+        },
+        {
+          "placeholder": "__SiOk",
+          "slot": "ok",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__SiErrorTy",
+          "slot": "error_ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_errors_0",
+          "slot": "errors",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 19,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "checked_method",
+      "family": "method",
+      "variant": "2 conditions",
+      "position": "function",
+      "call": "simple_impl::checked_method!(fn __sid_name(__sia_args: __SiArgsTy) -> __SiOk, __SiErrorTy; __si_conditions_0 => __si_errors_0; __si_conditions_1 => __si_errors_1; => __si_value);",
+      "expansion": "fn __sid_name (__sia_args) -> :: core :: result :: Result < __SiOk , __SiErrorTy > { if ! (__si_conditions_0) { return :: core :: result :: Result :: Err (__si_errors_0) ; } ; if ! (__si_conditions_1) { return :: core :: result :: Result :: Err (__si_errors_1) ; } ; :: core :: result :: Result :: Ok (__si_value) }",
+      "pattern": "fn __sid_name (__sia_args) -> Result < __SiOk , __SiErrorTy > { if ! __si_conditions_0 { return Err (__si_errors_0) ; } if ! __si_conditions_1 { return Err (__si_errors_1) ; } Ok (__si_value) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sia_args",
+          "slot": "args",
+          "kind": "args"
+        },
+        {
+          "placeholder": "__SiOk",
+          "slot": "ok",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__SiErrorTy",
+          "slot": "error_ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_errors_0",
+          "slot": "errors",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_errors_1",
+          "slot": "errors",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 27,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "checked_constructor",
+      "family": "method",
+      "variant": "1 condition",
+      "position": "function",
+      "call": "simple_impl::checked_constructor!(fn __sid_name(__sia_args: __SiArgsTy), __SiErrorTy; __si_conditions_0 => __si_errors_0; => __si_value);",
+      "expansion": "fn __sid_name (__sia_args) -> :: core :: result :: Result < Self , __SiErrorTy > { if ! (__si_conditions_0) { return :: core :: result :: Result :: Err (__si_errors_0) ; } ; :: core :: result :: Result :: Ok (__si_value) }",
+      "pattern": "fn __sid_name (__sia_args) -> Result < Self , __SiErrorTy > { if ! __si_conditions_0 { return Err (__si_errors_0) ; } Ok (__si_value) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sia_args",
+          "slot": "args",
+          "kind": "args"
+        },
+        {
+          "placeholder": "__SiErrorTy",
+          "slot": "error_ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_errors_0",
+          "slot": "errors",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 20,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "checked_constructor",
+      "family": "method",
+      "variant": "2 conditions",
+      "position": "function",
+      "call": "simple_impl::checked_constructor!(fn __sid_name(__sia_args: __SiArgsTy), __SiErrorTy; __si_conditions_0 => __si_errors_0; __si_conditions_1 => __si_errors_1; => __si_value);",
+      "expansion": "fn __sid_name (__sia_args) -> :: core :: result :: Result < Self , __SiErrorTy > { if ! (__si_conditions_0) { return :: core :: result :: Result :: Err (__si_errors_0) ; } ; if ! (__si_conditions_1) { return :: core :: result :: Result :: Err (__si_errors_1) ; } ; :: core :: result :: Result :: Ok (__si_value) }",
+      "pattern": "fn __sid_name (__sia_args) -> Result < Self , __SiErrorTy > { if ! __si_conditions_0 { return Err (__si_errors_0) ; } if ! __si_conditions_1 { return Err (__si_errors_1) ; } Ok (__si_value) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sia_args",
+          "slot": "args",
+          "kind": "args"
+        },
+        {
+          "placeholder": "__SiErrorTy",
+          "slot": "error_ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__si_conditions_0",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_errors_0",
+          "slot": "errors",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_conditions_1",
+          "slot": "conditions",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_errors_1",
+          "slot": "errors",
+          "kind": "expr"
+        },
+        {
+          "placeholder": "__si_value",
+          "slot": "value",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 28,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "getter",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::getter!(fn __sid_name(&self) -> __SiRet => __sif_field);",
+      "expansion": "fn __sid_name (& self) -> __SiRet { self . __sif_field }",
+      "pattern": "fn __sid_name (& self) -> __SiRet { self . __sif_field }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sif_field",
+          "slot": "field",
+          "kind": "field_path"
+        }
+      ],
+      "specificity": 8,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "getter",
+      "family": "method",
+      "variant": "const",
+      "position": "function",
+      "call": "simple_impl::getter!(const fn __sid_name(&self) -> __SiRet => __sif_field);",
+      "expansion": "const fn __sid_name (& self) -> __SiRet { self . __sif_field }",
+      "pattern": "const fn __sid_name (& self) -> __SiRet { self . __sif_field }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sif_field",
+          "slot": "field",
+          "kind": "field_path"
+        }
+      ],
+      "specificity": 9,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "getter_ref",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::getter_ref!(fn __sid_name(&self) -> &__SiRet => __sif_field);",
+      "expansion": "fn __sid_name (& self) -> & __SiRet { & self . __sif_field }",
+      "pattern": "fn __sid_name (& self) -> & __SiRet { & self . __sif_field }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sif_field",
+          "slot": "field",
+          "kind": "field_path"
+        }
+      ],
+      "specificity": 10,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "getter_mut",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::getter_mut!(fn __sid_name(&mut self) -> &mut __SiRet => __sif_field);",
+      "expansion": "fn __sid_name (& mut self) -> & mut __SiRet { & mut self . __sif_field }",
+      "pattern": "fn __sid_name (& mut self) -> & mut __SiRet { & mut self . __sif_field }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sif_field",
+          "slot": "field",
+          "kind": "field_path"
+        }
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "getter_option_ref",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::getter_option_ref!(fn __sid_name(&self) -> Option<&__SiRet> => __sid_field);",
+      "expansion": "fn __sid_name (& self) -> :: core :: option :: Option < & __SiRet > { self . __sid_field . as_ref () }",
+      "pattern": "fn __sid_name (& self) -> Option < & __SiRet > { self . __sid_field . as_ref () }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 15,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "getter_option_deref",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::getter_option_deref!(fn __sid_name(&self) -> Option<&__SiRet> => __sid_field);",
+      "expansion": "fn __sid_name (& self) -> :: core :: option :: Option < & __SiRet > { self . __sid_field . as_deref () }",
+      "pattern": "fn __sid_name (& self) -> Option < & __SiRet > { self . __sid_field . as_deref () }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 15,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "getter_slice",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::getter_slice!(fn __sid_name(&self) -> &[__SiElem] => __sid_field);",
+      "expansion": "fn __sid_name (& self) -> & [__SiElem] { & self . __sid_field }",
+      "pattern": "fn __sid_name (& self) -> & [__SiElem] { & self . __sid_field }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiElem",
+          "slot": "elem",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "len_field",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::len_field!(fn __sid_name(&self) => __sid_field);",
+      "expansion": "fn __sid_name (& self) -> usize { self . __sid_field . len () }",
+      "pattern": "fn __sid_name (& self) -> usize { self . __sid_field . len () }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "is_empty_field",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::is_empty_field!(fn __sid_name(&self) => __sid_field);",
+      "expansion": "fn __sid_name (& self) -> bool { self . __sid_field . is_empty () }",
+      "pattern": "fn __sid_name (& self) -> bool { self . __sid_field . is_empty () }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "bool_field",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::bool_field!(fn __sid_name(&self) => __sid_field);",
+      "expansion": "fn __sid_name (& self) -> bool { self . __sid_field }",
+      "pattern": "fn __sid_name (& self) -> bool { self . __sid_field }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 9,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "contains_field",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::contains_field!(fn __sid_name(&self, __sid_arg: __SiTy) => __sid_field);",
+      "expansion": "fn __sid_name (& self , __sid_arg : __SiTy) -> bool { self . __sid_field . contains (__sid_arg) }",
+      "pattern": "fn __sid_name (& self , __sid_arg : __SiTy) -> bool { self . __sid_field . contains (__sid_arg) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 14,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "find_by",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::find_by!(fn __sid_name(&self, __sid_arg: __SiArgTy) -> Option<&__SiItemTy> => __sid_field, __sid_item => __si_condition);",
+      "expansion": "fn __sid_name (& self , __sid_arg : __SiArgTy) -> :: core :: option :: Option < & __SiItemTy > { self . __sid_field . iter () . find (| __sid_item | __si_condition) }",
+      "pattern": "fn __sid_name (& self , __sid_arg : __SiArgTy) -> Option < & __SiItemTy > { self . __sid_field . iter () . find (| __sid_item | __si_condition) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiArgTy",
+          "slot": "arg_ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__SiItemTy",
+          "slot": "item_ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_item",
+          "slot": "item",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__si_condition",
+          "slot": "condition",
+          "kind": "expr"
+        }
+      ],
+      "specificity": 21,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "delegate",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::delegate!(fn __sid_name(&self) -> __SiRet => __sid_field.__sid_method());",
+      "expansion": "fn __sid_name (& self) -> __SiRet { self . __sid_field . __sid_method () }",
+      "pattern": "fn __sid_name (& self) -> __SiRet { self . __sid_field . __sid_method () }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_method",
+          "slot": "method",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 10,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "delegate",
+      "family": "method",
+      "variant": "passing an argument",
+      "position": "function",
+      "call": "simple_impl::delegate!(fn __sid_name(&self, __sid_arg: __SiTy) -> __SiRet => __sid_field.__sid_method(__sid_pass));",
+      "expansion": "fn __sid_name (& self , __sid_arg : __SiTy) -> __SiRet { self . __sid_field . __sid_method (__sid_pass) }",
+      "pattern": "fn __sid_name (& self , __sid_arg : __SiTy) -> __SiRet { self . __sid_field . __sid_method (__sid_pass) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_method",
+          "slot": "method",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_pass",
+          "slot": "pass",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "delegate_mut",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::delegate_mut!(fn __sid_name(&mut self) -> __SiRet => __sid_field.__sid_method());",
+      "expansion": "fn __sid_name (& mut self) -> __SiRet { self . __sid_field . __sid_method () }",
+      "pattern": "fn __sid_name (& mut self) -> __SiRet { self . __sid_field . __sid_method () }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_method",
+          "slot": "method",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "delegate_mut",
+      "family": "method",
+      "variant": "passing an argument",
+      "position": "function",
+      "call": "simple_impl::delegate_mut!(fn __sid_name(&mut self, __sid_arg: __SiTy) -> __SiRet => __sid_field.__sid_method(__sid_pass));",
+      "expansion": "fn __sid_name (& mut self , __sid_arg : __SiTy) -> __SiRet { self . __sid_field . __sid_method (__sid_pass) }",
+      "pattern": "fn __sid_name (& mut self , __sid_arg : __SiTy) -> __SiRet { self . __sid_field . __sid_method (__sid_pass) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_method",
+          "slot": "method",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_pass",
+          "slot": "pass",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "newtype_value",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::newtype_value!(fn __sid_name(self) -> __SiRet);",
+      "expansion": "fn __sid_name (self) -> __SiRet { self . 0 }",
+      "pattern": "fn __sid_name (self) -> __SiRet { self . 0 }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        }
+      ],
+      "specificity": 8,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "newtype_value",
+      "family": "method",
+      "variant": "const",
+      "position": "function",
+      "call": "simple_impl::newtype_value!(const fn __sid_name(self) -> __SiRet);",
+      "expansion": "const fn __sid_name (self) -> __SiRet { self . 0 }",
+      "pattern": "const fn __sid_name (self) -> __SiRet { self . 0 }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        }
+      ],
+      "specificity": 9,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "newtype_ref",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::newtype_ref!(fn __sid_name(&self) -> &__SiRet);",
+      "expansion": "fn __sid_name (& self) -> & __SiRet { & self . 0 }",
+      "pattern": "fn __sid_name (& self) -> & __SiRet { & self . 0 }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "setter",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::setter!(fn __sid_name(&mut self, __sid_arg: __SiTy) => __sif_field);",
+      "expansion": "fn __sid_name (& mut self , __sid_arg : __SiTy) { self . __sif_field = __sid_arg ; }",
+      "pattern": "fn __sid_name (& mut self , __sid_arg : __SiTy) { self . __sif_field = __sid_arg ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sif_field",
+          "slot": "field",
+          "kind": "field_path"
+        }
+      ],
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "setter_into",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::setter_into!(fn __sid_name(&mut self, __sid_arg: __SiTy) => __sif_field);",
+      "expansion": "fn __sid_name (& mut self , __sid_arg : impl :: core :: convert :: Into < __SiTy >) { self . __sif_field = __sid_arg . into () ; }",
+      "pattern": "fn __sid_name (& mut self , __sid_arg : impl Into < __SiTy >) { self . __sif_field = __sid_arg . into () ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sif_field",
+          "slot": "field",
+          "kind": "field_path"
+        }
+      ],
+      "specificity": 19,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "setter_some",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::setter_some!(fn __sid_name(&mut self, __sid_arg: __SiTy) => __sid_field);",
+      "expansion": "fn __sid_name (& mut self , __sid_arg : __SiTy) { self . __sid_field = :: core :: option :: Option :: Some (__sid_arg) ; }",
+      "pattern": "fn __sid_name (& mut self , __sid_arg : __SiTy) { self . __sid_field = Some (__sid_arg) ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 14,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "setter_some_into",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::setter_some_into!(fn __sid_name(&mut self, __sid_arg: __SiTy) => __sid_field);",
+      "expansion": "fn __sid_name (& mut self , __sid_arg : impl :: core :: convert :: Into < __SiTy >) { self . __sid_field = :: core :: option :: Option :: Some (__sid_arg . into ()) ; }",
+      "pattern": "fn __sid_name (& mut self , __sid_arg : impl Into < __SiTy >) { self . __sid_field = Some (__sid_arg . into ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 21,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "clear_collection",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::clear_collection!(fn __sid_name(&mut self) => __sid_field);",
+      "expansion": "fn __sid_name (& mut self) { self . __sid_field . clear () ; }",
+      "pattern": "fn __sid_name (& mut self) { self . __sid_field . clear () ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "take_field",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::take_field!(fn __sid_name(&mut self) -> Option<__SiTy> => __sid_field);",
+      "expansion": "fn __sid_name (& mut self) -> :: core :: option :: Option < __SiTy > { self . __sid_field . take () }",
+      "pattern": "fn __sid_name (& mut self) -> Option < __SiTy > { self . __sid_field . take () }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 15,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "enable_field",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::enable_field!(fn __sid_name(&mut self) => __sid_field);",
+      "expansion": "fn __sid_name (& mut self) { self . __sid_field = true ; }",
+      "pattern": "fn __sid_name (& mut self) { self . __sid_field = true ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "disable_field",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::disable_field!(fn __sid_name(&mut self) => __sid_field);",
+      "expansion": "fn __sid_name (& mut self) { self . __sid_field = false ; }",
+      "pattern": "fn __sid_name (& mut self) { self . __sid_field = false ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "toggle_field",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::toggle_field!(fn __sid_name(&mut self) => __sid_field);",
+      "expansion": "fn __sid_name (& mut self) { self . __sid_field = ! self . __sid_field ; }",
+      "pattern": "fn __sid_name (& mut self) { self . __sid_field = ! self . __sid_field ; }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_field",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::with_field!(fn __sid_name(mut self, __sid_arg: __SiTy) -> Self => __sif_field);",
+      "expansion": "fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { self . __sif_field = __sid_arg ; self }",
+      "pattern": "fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { self . __sif_field = __sid_arg ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sif_field",
+          "slot": "field",
+          "kind": "field_path"
+        }
+      ],
+      "specificity": 14,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_field",
+      "family": "method",
+      "variant": "const",
+      "position": "function",
+      "call": "simple_impl::with_field!(const fn __sid_name(mut self, __sid_arg: __SiTy) -> Self => __sif_field);",
+      "expansion": "const fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { self . __sif_field = __sid_arg ; self }",
+      "pattern": "const fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { self . __sif_field = __sid_arg ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sif_field",
+          "slot": "field",
+          "kind": "field_path"
+        }
+      ],
+      "specificity": 15,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_into",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::with_into!(fn __sid_name(mut self, __sid_arg: __SiTy) -> Self => __sid_field);",
+      "expansion": "fn __sid_name (mut self , __sid_arg : impl :: core :: convert :: Into < __SiTy >) -> Self { self . __sid_field = __sid_arg . into () ; self }",
+      "pattern": "fn __sid_name (mut self , __sid_arg : impl Into < __SiTy >) -> Self { self . __sid_field = __sid_arg . into () ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 21,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_some",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::with_some!(fn __sid_name(mut self, __sid_arg: __SiTy) -> Self => __sid_field);",
+      "expansion": "fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { self . __sid_field = :: core :: option :: Option :: Some (__sid_arg) ; self }",
+      "pattern": "fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { self . __sid_field = Some (__sid_arg) ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 16,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_some_into",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::with_some_into!(fn __sid_name(mut self, __sid_arg: __SiTy) -> Self => __sid_field);",
+      "expansion": "fn __sid_name (mut self , __sid_arg : impl :: core :: convert :: Into < __SiTy >) -> Self { self . __sid_field = :: core :: option :: Option :: Some (__sid_arg . into ()) ; self }",
+      "pattern": "fn __sid_name (mut self , __sid_arg : impl Into < __SiTy >) -> Self { self . __sid_field = Some (__sid_arg . into ()) ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 23,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_push",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::with_push!(fn __sid_name(mut self, __sid_arg: __SiTy) -> Self => __sid_field);",
+      "expansion": "fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { self . __sid_field . push (__sid_arg) ; self }",
+      "pattern": "fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { self . __sid_field . push (__sid_arg) ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 16,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_push_into",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::with_push_into!(fn __sid_name(mut self, __sid_arg: __SiTy) -> Self => __sid_field);",
+      "expansion": "fn __sid_name (mut self , __sid_arg : impl :: core :: convert :: Into < __SiTy >) -> Self { self . __sid_field . push (__sid_arg . into ()) ; self }",
+      "pattern": "fn __sid_name (mut self , __sid_arg : impl Into < __SiTy >) -> Self { self . __sid_field . push (__sid_arg . into ()) ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 23,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_extend",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::with_extend!(fn __sid_name(mut self, __sid_arg) -> Self => __sid_field: __SiElem);",
+      "expansion": "fn __sid_name < I > (mut self , __sid_arg : I) -> Self where I : :: core :: iter :: IntoIterator < Item = __SiElem > { self . __sid_field . extend (__sid_arg) ; self }",
+      "pattern": "fn __sid_name < I > (mut self , __sid_arg : I) -> Self where I : IntoIterator < Item = __SiElem > { self . __sid_field . extend (__sid_arg) ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiElem",
+          "slot": "elem",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 28,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_flag",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::with_flag!(fn __sid_name(mut self) -> Self => __sid_field);",
+      "expansion": "fn __sid_name (mut self) -> Self { self . __sid_field = true ; self }",
+      "pattern": "fn __sid_name (mut self) -> Self { self . __sid_field = true ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "without_flag",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::without_flag!(fn __sid_name(mut self) -> Self => __sid_field);",
+      "expansion": "fn __sid_name (mut self) -> Self { self . __sid_field = false ; self }",
+      "pattern": "fn __sid_name (mut self) -> Self { self . __sid_field = false ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 13,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "with_unique_push",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::with_unique_push!(fn __sid_name(mut self, __sid_arg: __SiTy) -> Self => __sid_field);",
+      "expansion": "fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { { let collection = & mut self . __sid_field ; let value = __sid_arg ; if ! collection . iter () . any (| existing | existing == & value) { collection . push (value) ; } } ; self }",
+      "pattern": "fn __sid_name (mut self , __sid_arg : __SiTy) -> Self { { let __sib_0 = & mut self . __sid_field ; let __sib_1 = __sid_arg ; if ! __sib_0 . iter () . any (| __sib_2 | __sib_2 == & __sib_1) { __sib_0 . push (__sib_1) ; } } ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sib_1",
+          "slot": "1",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__sib_2",
+          "slot": "2",
+          "kind": "binder"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "collection"
+        ],
+        [
+          "__sib_1",
+          "value"
+        ],
+        [
+          "__sib_2",
+          "existing"
+        ]
+      ],
+      "specificity": 40,
+      "expanded_by": "cargo expand",
+      "klepto_same": false
+    },
+    {
+      "piece": "newtype_constructor",
+      "family": "method",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::newtype_constructor!(fn __sid_name(__sid_arg: __SiTy) -> Self);",
+      "expansion": "fn __sid_name (__sid_arg : __SiTy) -> Self { Self (__sid_arg) }",
+      "pattern": "fn __sid_name (__sid_arg : __SiTy) -> Self { Self (__sid_arg) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        }
+      ],
+      "specificity": 9,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "newtype_constructor",
+      "family": "method",
+      "variant": "const",
+      "position": "function",
+      "call": "simple_impl::newtype_constructor!(const fn __sid_name(__sid_arg: __SiTy) -> Self);",
+      "expansion": "const fn __sid_name (__sid_arg : __SiTy) -> Self { Self (__sid_arg) }",
+      "pattern": "const fn __sid_name (__sid_arg : __SiTy) -> Self { Self (__sid_arg) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        }
+      ],
+      "specificity": 10,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "forward_trait_method",
+      "family": "method",
+      "variant": "self",
+      "position": "function",
+      "call": "simple_impl::forward_trait_method!(fn __sid_name(self) -> __SiRet => __sit_target);",
+      "expansion": "fn __sid_name (self) -> __SiRet { __sit_target (self) }",
+      "pattern": "fn __sid_name (self) -> __SiRet { __sit_target (self) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sit_target",
+          "slot": "target",
+          "kind": "path"
+        }
+      ],
+      "specificity": 6,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "forward_trait_method",
+      "family": "method",
+      "variant": "self and an argument",
+      "position": "function",
+      "call": "simple_impl::forward_trait_method!(fn __sid_name(self, __sid_arg: __SiTy) -> __SiRet => __sit_target);",
+      "expansion": "fn __sid_name (self , __sid_arg : __SiTy) -> __SiRet { __sit_target (self , __sid_arg) }",
+      "pattern": "fn __sid_name (self , __sid_arg : __SiTy) -> __SiRet { __sit_target (self , __sid_arg) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sit_target",
+          "slot": "target",
+          "kind": "path"
+        }
+      ],
+      "specificity": 9,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "forward_trait_method",
+      "family": "method",
+      "variant": "&self",
+      "position": "function",
+      "call": "simple_impl::forward_trait_method!(fn __sid_name(&self) -> __SiRet => __sit_target);",
+      "expansion": "fn __sid_name (& self) -> __SiRet { __sit_target (self) }",
+      "pattern": "fn __sid_name (& self) -> __SiRet { __sit_target (self) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sit_target",
+          "slot": "target",
+          "kind": "path"
+        }
+      ],
+      "specificity": 7,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "forward_trait_method",
+      "family": "method",
+      "variant": "&self and an argument",
+      "position": "function",
+      "call": "simple_impl::forward_trait_method!(fn __sid_name(&self, __sid_arg: __SiTy) -> __SiRet => __sit_target);",
+      "expansion": "fn __sid_name (& self , __sid_arg : __SiTy) -> __SiRet { __sit_target (self , __sid_arg) }",
+      "pattern": "fn __sid_name (& self , __sid_arg : __SiTy) -> __SiRet { __sit_target (self , __sid_arg) }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_arg",
+          "slot": "arg",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__SiRet",
+          "slot": "ret",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sit_target",
+          "slot": "target",
+          "kind": "path"
+        }
+      ],
+      "specificity": 10,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "builder_new_default",
+      "family": "builder",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::builder_new_default!();",
+      "expansion": "# [inline] pub fn new () -> Self { Self :: default () }",
+      "pattern": "# [inline] pub fn new () -> Self { Self :: default () }",
+      "holes": [],
+      "specificity": 14,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "builder_opt",
+      "family": "builder",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::builder_opt!(__sid_name => __sid_field: __SiTy);",
+      "expansion": "# [inline] pub fn __sid_name (mut self , value : __SiTy) -> Self { self . __sid_field = Some (value) ; self }",
+      "pattern": "# [inline] pub fn __sid_name (mut self , __sib_0 : __SiTy) -> Self { self . __sid_field = Some (__sib_0) ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 19,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "builder_opt_into",
+      "family": "builder",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::builder_opt_into!(__sid_name => __sid_field: __SiTy);",
+      "expansion": "# [inline] pub fn __sid_name (mut self , value : impl Into < __SiTy >) -> Self { self . __sid_field = Some (value . into ()) ; self }",
+      "pattern": "# [inline] pub fn __sid_name (mut self , __sib_0 : impl Into < __SiTy >) -> Self { self . __sid_field = Some (__sib_0 . into ()) ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 26,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "builder_set",
+      "family": "builder",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::builder_set!(__sid_name => __sid_field: __SiTy);",
+      "expansion": "# [inline] pub fn __sid_name (mut self , value : __SiTy) -> Self { self . __sid_field = value ; self }",
+      "pattern": "# [inline] pub fn __sid_name (mut self , __sib_0 : __SiTy) -> Self { self . __sid_field = __sib_0 ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__SiTy",
+          "slot": "ty",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 17,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "builder_vec_into",
+      "family": "builder",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::builder_vec_into!(__sid_name => __sid_field: __SiElem);",
+      "expansion": "# [inline] pub fn __sid_name (mut self , list : impl Into < Vec < __SiElem > >) -> Self { self . __sid_field = list . into () ; self }",
+      "pattern": "# [inline] pub fn __sid_name (mut self , __sib_0 : impl Into < Vec < __SiElem > >) -> Self { self . __sid_field = __sib_0 . into () ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__SiElem",
+          "slot": "elem",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "list"
+        ]
+      ],
+      "specificity": 27,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "builder_vec_iter",
+      "family": "builder",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::builder_vec_iter!(__sid_name => __sid_field: __SiElem);",
+      "expansion": "# [inline] pub fn __sid_name < I > (mut self , iter : I) -> Self where I : IntoIterator < Item = __SiElem > { self . __sid_field = iter . into_iter () . collect () ; self }",
+      "pattern": "# [inline] pub fn __sid_name < I > (mut self , __sib_0 : I) -> Self where I : IntoIterator < Item = __SiElem > { self . __sid_field = __sib_0 . into_iter () . collect () ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__SiElem",
+          "slot": "elem",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "iter"
+        ]
+      ],
+      "specificity": 35,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "builder_push",
+      "family": "builder",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::builder_push!(__sid_name => __sid_field: __SiElem);",
+      "expansion": "# [inline] pub fn __sid_name (mut self , value : __SiElem) -> Self { self . __sid_field . push (value) ; self }",
+      "pattern": "# [inline] pub fn __sid_name (mut self , __sib_0 : __SiElem) -> Self { self . __sid_field . push (__sib_0) ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__SiElem",
+          "slot": "elem",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "specificity": 19,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "builder_flag",
+      "family": "builder",
+      "variant": "",
+      "position": "function",
+      "call": "simple_impl::builder_flag!(__sid_name => __sid_field);",
+      "expansion": "# [inline] pub fn __sid_name (mut self) -> Self { self . __sid_field = true ; self }",
+      "pattern": "# [inline] pub fn __sid_name (mut self) -> Self { self . __sid_field = true ; self }",
+      "holes": [
+        {
+          "placeholder": "__sid_name",
+          "slot": "name",
+          "kind": "ident"
+        },
+        {
+          "placeholder": "__sid_field",
+          "slot": "field",
+          "kind": "ident"
+        }
+      ],
+      "specificity": 16,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "impl_default_via_new",
+      "family": "impl",
+      "variant": "",
+      "position": "impl_fn",
+      "call": "simple_impl::impl_default_via_new!(__SiTy);",
+      "expansion": "fn default () -> Self { Self :: new () }",
+      "pattern": "fn default () -> Self { Self :: new () }",
+      "holes": [],
+      "trait_name": "Default",
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "impl_from_newtype",
+      "family": "impl",
+      "variant": "",
+      "position": "impl_fn",
+      "call": "simple_impl::impl_from_newtype!(__SiWrapper, __SiInner);",
+      "expansion": "fn from (value : __SiInner) -> Self { Self (value) }",
+      "pattern": "fn from (__sib_0 : __SiInner) -> Self { Self (__sib_0) }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__SiInner",
+          "slot": "inner",
+          "kind": "type"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "value"
+        ]
+      ],
+      "trait_name": "From",
+      "specificity": 10,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "impl_as_ref_newtype",
+      "family": "impl",
+      "variant": "",
+      "position": "impl_fn",
+      "call": "simple_impl::impl_as_ref_newtype!(__SiWrapper, __SiInner);",
+      "expansion": "fn as_ref (& self) -> & __SiInner { & self . 0 }",
+      "pattern": "fn as_ref (& self) -> & __SiInner { & self . 0 }",
+      "holes": [
+        {
+          "placeholder": "__SiInner",
+          "slot": "inner",
+          "kind": "type"
+        }
+      ],
+      "trait_name": "AsRef",
+      "specificity": 12,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "impl_deref_newtype",
+      "family": "impl",
+      "variant": "",
+      "position": "impl_fn",
+      "call": "simple_impl::impl_deref_newtype!(__SiWrapper, __SiTarget);",
+      "expansion": "fn deref (& self) -> & Self :: Target { & self . 0 }",
+      "pattern": "fn deref (& self) -> & Self :: Target { & self . 0 }",
+      "holes": [],
+      "trait_name": "Deref",
+      "specificity": 15,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "impl_deref_mut_newtype",
+      "family": "impl",
+      "variant": "",
+      "position": "impl_fn",
+      "call": "simple_impl::impl_deref_mut_newtype!(__SiWrapper);",
+      "expansion": "fn deref_mut (& mut self) -> & mut Self :: Target { & mut self . 0 }",
+      "pattern": "fn deref_mut (& mut self) -> & mut Self :: Target { & mut self . 0 }",
+      "holes": [],
+      "trait_name": "DerefMut",
+      "specificity": 18,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "impl_display_via",
+      "family": "impl",
+      "variant": "",
+      "position": "impl_fn",
+      "call": "simple_impl::impl_display_via!(__SiTy, __sid_method);",
+      "expansion": "fn fmt (& self , f : & mut :: core :: fmt :: Formatter < '_ >) -> :: core :: fmt :: Result { write ! (f , \"{}\" , self . __sid_method ()) ; }",
+      "pattern": "fn fmt (& self , __sib_0 : & mut :: core :: fmt :: Formatter < '_ >) -> :: core :: fmt :: Result { write ! (__sib_0 , \"{}\" , self . __sid_method ()) ; }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__sid_method",
+          "slot": "method",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "f"
+        ]
+      ],
+      "trait_name": "Display",
+      "specificity": 36,
+      "expanded_by": "klepto (it holds a std macro, which cargo expand opens)"
+    },
+    {
+      "piece": "impl_debug_redacted",
+      "family": "impl",
+      "variant": "",
+      "position": "impl_fn",
+      "call": "simple_impl::impl_debug_redacted!(__SiTy, __si_text);",
+      "expansion": "fn fmt (& self , f : & mut :: core :: fmt :: Formatter < '_ >) -> :: core :: fmt :: Result { f . write_str (__si_text) }",
+      "pattern": "fn fmt (& self , __sib_0 : & mut :: core :: fmt :: Formatter < '_ >) -> :: core :: fmt :: Result { __sib_0 . write_str (__si_text) }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__si_text",
+          "slot": "text",
+          "kind": "expr"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "f"
+        ]
+      ],
+      "trait_name": "Debug",
+      "specificity": 29,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "impl_partial_ord_via_ord",
+      "family": "impl",
+      "variant": "",
+      "position": "impl_fn",
+      "call": "simple_impl::impl_partial_ord_via_ord!(__SiTy);",
+      "expansion": "fn partial_cmp (& self , other : & Self) -> :: core :: option :: Option < :: core :: cmp :: Ordering > { :: core :: option :: Option :: Some (self . cmp (other)) }",
+      "pattern": "fn partial_cmp (& self , __sib_0 : & Self) -> Option < :: core :: cmp :: Ordering > { Some (self . cmp (__sib_0)) }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "other"
+        ]
+      ],
+      "trait_name": "PartialOrd",
+      "specificity": 25,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    },
+    {
+      "piece": "impl_from_variant",
+      "family": "impl",
+      "variant": "",
+      "position": "impl_fn",
+      "call": "simple_impl::impl_from_variant!(__SiSource => __SiTarget, __sid_variant);",
+      "expansion": "fn from (error : __SiSource) -> Self { Self :: __sid_variant (error) }",
+      "pattern": "fn from (__sib_0 : __SiSource) -> Self { Self :: __sid_variant (__sib_0) }",
+      "holes": [
+        {
+          "placeholder": "__sib_0",
+          "slot": "0",
+          "kind": "binder"
+        },
+        {
+          "placeholder": "__SiSource",
+          "slot": "source",
+          "kind": "type"
+        },
+        {
+          "placeholder": "__sid_variant",
+          "slot": "variant",
+          "kind": "ident"
+        }
+      ],
+      "binders": [
+        [
+          "__sib_0",
+          "error"
+        ]
+      ],
+      "trait_name": "From",
+      "specificity": 11,
+      "expanded_by": "cargo expand",
+      "klepto_same": true
+    }
+  ],
+  "not_matched": [
+    [
+      "guard_with",
+      "takes a cleanup block: its statements are spliced into the guard, so no one statement has its shape"
+    ],
+    [
+      "ensure_with",
+      "takes a cleanup block: its statements are spliced into the guard, so no one statement has its shape"
+    ],
+    [
+      "bail_with",
+      "takes a cleanup block: its statements are spliced into the guard, so no one statement has its shape"
+    ],
+    [
+      "ensure_all",
+      "expands to one ensure per pair: several statements, each matched as an `ensure`"
+    ],
+    [
+      "impl_std_error",
+      "writes an impl with no function: there is no body to match"
+    ],
+    [
+      "shell_command_builder",
+      "writes a whole struct and its impls, not a function"
+    ],
+    [
+      "define_shell_builder",
+      "writes a whole struct and its impls, not a function"
+    ]
+  ]
+}

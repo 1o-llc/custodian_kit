@@ -46,7 +46,8 @@
             "bundle",
             "sweep",
             "impact",
-            "linkage"
+            "linkage",
+            "patterns"
           ],
           "description": "What the reading reads (the kinds table in custodian_kit's README)."
         },
@@ -145,6 +146,33 @@
             "min_tokens": {
               "type": "integer",
               "description": "Bodies with fewer significant tokens are not compared."
+            }
+          }
+        },
+        "patterns": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "patterns: what counts as a shape worth a macro of its own.",
+          "properties": {
+            "min_repeats": {
+              "type": "integer",
+              "description": "A shape no toolkit piece writes is a candidate when it repeats at least this many times."
+            },
+            "min_crates": {
+              "type": "integer",
+              "description": "... in at least this many crates."
+            },
+            "min_size": {
+              "type": "integer",
+              "description": "... and has at least this many tokens that are not holes."
+            },
+            "candidates": {
+              "type": "integer",
+              "description": "How many candidates the reading lists (all are counted)."
+            },
+            "min_tokens": {
+              "type": "integer",
+              "description": "klepto's shaping: bodies with fewer significant tokens get no klepto shape."
             }
           }
         },

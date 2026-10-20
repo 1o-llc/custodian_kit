@@ -97,6 +97,20 @@ enum; a test holds the two equal.
 | `sweep` | a read-only walk of an undeclared tree (the one walk custodian makes): files by extension, crates, TOML directories, the routes to declare; never in a job |
 | `impact` | everything a change to a crate, a file or an item entails, in one reading: its definitions, use sites, constructions, matches, impls, dependents, reach, the tests that cover it, the features and feature configurations that build it, the linkage records naming it, and the cost of the change by dimension, each measured, heuristic or unknown |
 | `linkage` | the architectural linkage records (why declarations are bound together) naming the target, `*` for all: each bound declaration resolved through klepto, stale when it no longer resolves, to review when its file changed since the record was made; comment anchors with no record behind them |
+| `patterns` | every function body in scope (`*`, or crates by name) against the simple_impl toolkit: its shape, the toolkit pieces whose expansion it holds (exact: the call expands to the same tokens; near: the difference named) with the replace_body spec that swaps them, the shapes that repeat across crates and no piece writes (ranked by count times size, each with a body and a proposed macro), and the counts by crate |
+
+### The toolkit's shapes (`patterns`)
+
+The `patterns` kind matches every function body against the simple_impl 0.1.11 toolkit. Its catalog,
+`schema/toolkit/simple_impl-0.1.11.shapes.json`, is one call of each piece on placeholder arguments (written by the
+change vocabulary's own renderer), expanded by `cargo expand` as rustc does it, or by klepto where the expansion
+holds a std macro (`vec!`, `format!`, `write!`, `matches!`) that hand-written code keeps as the macro. A statement
+matches a piece when its tokens are the expansion's with the holes filled, and the filling put back into the
+expansion reads the same in the normal form (`toolkit::normal`): exact. A near match names what differs (a
+`return` without its `;`, a builder line's `#[inline]`, `a != b` for the macro's `!(a == b)`). The catalog is made
+again by `cargo run --example toolkit_shapes -- <new dir>`, and `toolkit::tests` holds the shipped one equal to a
+fresh expansion. Each function row carries the replace_body spec (`spec`, JSON) that code_passenger's `to-toolkit`
+makes; the shapes no piece writes come with a proposed macro for the suite.
 
 ## Declaration roles
 
@@ -270,7 +284,7 @@ transform are bound to.
 | `extract` | items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were |
 | `gate` | an item put behind a crate feature the crate declares (target: the item, `feature`) |
 | `anchor` | a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name) |
-| `replace_body` | a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched |
+| `replace_body` | a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched; with a toolkit method generator (`function.generator`) the whole function is written as the call, its signature, docs and attributes inside it |
 | `change_dependency` | a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features |
 | `inline` | a function's body put in place of every call to it (target: a free function, or an associated one without self): each call becomes a block that binds the parameters to the call's arguments with `let`, then the body; the function is removed when it is not `pub` and every use of it was a call |
 | `wrap` | a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched |

@@ -1,6 +1,6 @@
 //! Every reading kind on the fixture workspace (tests/fixtures/ws): known use
 //! sites, env reads, duplicates, dependents, declarations, sockets, reach,
-//! constructors, matches, public API, tests, sensitivity, routes, the diff.
+//! constructors, matches, public API, tests, sensitivity, routes, the diff, the toolkit's patterns.
 
 use custodian_kit::api::{self, ReadingKind, ReadingSpec, Resolving, Scope, Workspace};
 use custodian_kit::diff;
@@ -91,6 +91,20 @@ fn duplicates_find_the_copied_crates() {
     assert!(pairs.contains(&"copy_a ↔ copy_b"), "{pairs:?}");
     let dups = rows(&r, "duplicate");
     assert!(dups.iter().any(|d| d.label == "copy_a::checksum") && dups.iter().any(|d| d.label == "copy_b::checksum"));
+}
+
+#[test]
+fn patterns_shape_every_function_and_find_the_shapes_repeated_across_crates() {
+    let r = read("patterns", "*", "[patterns]\nmin_repeats = 2\n");
+    let fns = rows(&r, "function");
+    assert_eq!(fns.len(), count(&r, "functions shaped"), "a route for every function");
+    assert!(fns.iter().any(|f| f.label == "copy_a::checksum") && fns.iter().all(|f| f.attributes.contains_key("status")));
+    // the same loop in copy_a and copy_b, which no piece writes
+    let cands = rows(&r, "candidate-shape");
+    let lp = cands.iter().find(|c| c.attributes["frame"].starts_with("for $b in $ {")).unwrap_or_else(|| panic!("{:?}", cands.iter().map(|c| &c.attributes["frame"]).collect::<Vec<_>>()));
+    assert_eq!(lp.attributes["crates"], "2");
+    assert!(lp.attributes["proposed"].contains('!'));
+    assert!(!rows(&r, "crate").is_empty());
 }
 
 #[test]
