@@ -47,7 +47,7 @@ vocabulary! {
         AddAttribute = "add_attribute" : "one attribute line placed on an item (target: the item)",
         AddModule = "add_module" : "a new module: its own file and its `mod` line in the parent (target: the parent route)",
         AddDependency = "add_dependency" : "a dependency line in a crate's Cargo.toml (target: crate:<name>)",
-        AddTest = "add_test" : "a test function (target: the function it proves): in the file's tests module (`to`: another inline test module of the file, by name), its body from toolkit pieces",
+        AddTest = "add_test" : "a test function (target: the function it proves): in the file's tests module (`to`: another inline test module of the file, by name; one the file does not have is made, `#[cfg(test)]`), its body from toolkit pieces",
         AddConstructor = "add_constructor" : "a constructor for a type (target: the type): `Self { field: param, .. }`, or a toolkit constructor generator",
         AddTraitImpl = "add_trait_impl" : "`impl Trait for Type` (target: the type): a toolkit impl generator, or the trait's functions",
         ChangeSignature = "change_signature" : "a function's signature changed (target: the function): a new parameter with the expression its call sites pass, a new name, a new return type; with `function.body`, its body written in the same step (a body that compiles only against the new signature)",

@@ -146,3 +146,11 @@ fn change_signature_with_a_body_says_both_are_proved_together() {
     assert!(p.authorized, "{:?} {:?}", p.reasons, p.preconditions);
     assert!(p.listed.iter().any(|l| l == "its body is written with the signature: 1 pieces, proved together"), "{:?}", p.listed);
 }
+
+#[test]
+fn add_test_into_a_module_the_file_does_not_have_says_it_is_made() {
+    let (store, ctx, w) = project("tomod");
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "t", "name = \"t\"\nobjective = \"o\"\noperation = \"add_test\"\ntarget = \"shop::version\"\nto = \"pantry_tests\"\n\n[function]\nname = \"one\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(p.authorized, "{:?} {:?}", p.reasons, p.preconditions);
+    assert!(p.listed.iter().any(|l| l == "the test module shop::pantry_tests is made: #[cfg(test)] mod pantry_tests at the end of shop/src/lib.rs"), "{:?}", p.listed);
+}

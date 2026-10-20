@@ -104,7 +104,7 @@ pub const VERIFY_FORMS: &[&str] = &["test", "reading", "check"];
 pub fn check_verify(line: &str) -> Result<()> {
     match line.split_once(':') {
         Some((form, what)) if VERIFY_FORMS.contains(&form) && !what.trim().is_empty() => Ok(()),
-        _ => Err(ReadingRefusal::SpecInvalid.refuse(format!("`{line}` is not a verification: test:<name>, reading:<spec>, check:<which>"))),
+        _ => Err(ReadingRefusal::SpecInvalid.refuse(format!("`{line}` is not a verification: test:<name> (or test:<module>::* for every test of a module), reading:<spec>, check:<which>"))),
     }
 }
 
@@ -1199,7 +1199,7 @@ fn verified(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], readi
     let what = what.trim();
     match form {
         "test" => {
-            let hits: Vec<&crate::store::TestRow> = tests.iter().filter(|t| t.test == what || t.test.ends_with(&format!("::{what}")) || t.package == what).collect();
+            let hits: Vec<&crate::store::TestRow> = tests.iter().filter(|t| test_named(&t.test, what) || t.package == what).collect();
             if hits.iter().any(|t| matches!(t.outcome.as_str(), "FAILED" | "failed" | "fail")) {
                 "failed"
             } else if hits.iter().any(|t| matches!(t.outcome.as_str(), "ok" | "passed" | "pass")) {
@@ -1215,6 +1215,16 @@ fn verified(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], readi
             None => "not run",
         },
         _ => "not run",
+    }
+}
+
+/// Whether a test's path (`kitchen::tests::can_cook`) is the one a `test:` verification names: the test by its name
+/// or its path's end (`can_cook`, `tests::can_cook`), or every test of a module with `<module>::*` (`tests::*`,
+/// `kitchen::tests::*`).
+pub fn test_named(test: &str, what: &str) -> bool {
+    match what.strip_suffix("::*") {
+        Some(module) => test.starts_with(&format!("{module}::")) || test.contains(&format!("::{module}::")),
+        None => test == what || test.ends_with(&format!("::{what}")),
     }
 }
 

@@ -162,3 +162,12 @@ fn a_bounded_job_names_every_file_it_touched_and_a_file_no_operation_writes_need
     assert!(c.refusal.as_ref().unwrap().message.contains("features.toml"));
     assert!(jobs::is_code_file("crates/core_lib/Cargo.toml") && jobs::is_code_file("crates/core_lib/src/lib.rs") && !jobs::is_code_file("features.toml"));
 }
+
+#[test]
+fn a_test_verification_names_a_test_or_every_test_of_a_module() {
+    use custodian_kit::jobs::test_named;
+    assert!(test_named("kitchen::tests::can_cook", "can_cook") && test_named("kitchen::tests::can_cook", "tests::can_cook"));
+    assert!(test_named("kitchen::tests::can_cook", "tests::*") && test_named("kitchen::tests::can_cook", "kitchen::tests::*") && test_named("tests::pantry_tests", "tests::*"));
+    assert!(!test_named("kitchen::tests::can_cook", "cook") && !test_named("kitchen::tests_more::can_cook", "tests::*") && !test_named("kitchen::tests::can_cook", "kitchen::*::x"));
+    jobs::check_verify("test:pantry_tests::*").unwrap();
+}

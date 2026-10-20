@@ -497,8 +497,10 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
             Operation::AddTest => {
                 if let Some(m) = &spec.to {
                     let module = format!("{}::{m}", l.module);
-                    let there = f.k.modules.get(&module).is_some();
-                    pre.push(Check { what: format!("the test module {m} is in {}", l.file), holds: there, detail: if there { module } else { format!("no module {module}") } });
+                    match f.k.modules.get(&module) {
+                        Some(_) => listed.push(format!("the test goes in the module {module}")),
+                        None => listed.push(format!("the test module {module} is made: #[cfg(test)] mod {m} at the end of {}", l.file)),
+                    }
                 }
             }
             Operation::Inline => {
