@@ -13,7 +13,7 @@ use super::facts::Facts;
 use super::kinds::{named, site};
 use super::spec::ReadingSpec;
 use super::Answer;
-use crate::toolkit::matcher::{self, Context, FnMatch, Source};
+use crate::toolkit::matcher::{self, Context, FnMatch, FnParts, Source};
 use crate::toolkit::normal::Level;
 use crate::toolkit::frame;
 use crate::Result;
@@ -52,11 +52,12 @@ struct FileJob {
 }
 
 /// One function matched into its row.
-fn row(src: &Source, job: &FileJob, at: proc_macro2::Span, attrs: &[syn::Attribute], vis: &syn::Visibility, sig: &syn::Signature, block: &syn::Block, ctx: &Context) -> Option<FnRow> {
+fn row(src: &Source, job: &FileJob, at: proc_macro2::Span, parts: FnParts, ctx: &Context) -> Option<FnRow> {
+    let FnParts { sig, body: block, .. } = parts;
     let s = at.start();
     let id = job.fns.get(&(s.line as u32, s.column as u32))?;
-    let m: FnMatch = matcher::match_fn(src, attrs, vis, sig, block, ctx);
-    let spec = matcher::spec_for(&m, src, id, &sig.ident.to_string(), attrs, vis, sig, block, false).or_else(|| matcher::spec_for(&m, src, id, &sig.ident.to_string(), attrs, vis, sig, block, true));
+    let m: FnMatch = matcher::match_fn(src, parts, ctx);
+    let spec = matcher::spec_for(&m, src, id, parts, false).or_else(|| matcher::spec_for(&m, src, id, parts, true));
     let mut pieces: Vec<(String, Level)> = Vec::new();
     let mut calls: Vec<(String, String)> = Vec::new();
     if let Some(w) = &m.whole {
@@ -118,7 +119,7 @@ fn read_file(job: &FileJob) -> std::result::Result<Vec<FnRow>, String> {
     let file = syn::parse_file(&job.source).map_err(|e| format!("{}: syn cannot parse it: {e}", job.path.display()))?;
     let src = Source::new(&job.source);
     let mut out = Vec::new();
-    matcher::each_fn(&file, |at, attrs, vis, sig, block, ctx| out.extend(row(&src, job, at, attrs, vis, sig, block, ctx)));
+    matcher::each_fn(&file, |at, parts, ctx| out.extend(row(&src, job, at, parts, ctx)));
     Ok(out)
 }
 

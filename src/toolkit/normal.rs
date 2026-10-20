@@ -204,7 +204,7 @@ impl VisitMut for Norm {
                 if b.attrs.is_empty() && b.label.is_none() && b.block.stmts.len() == 1 {
                     if let syn::Stmt::Expr(inner, _) = &b.block.stmts[0] {
                         if diverges(inner) {
-                            a.body = Box::new(inner.clone());
+                            *a.body = inner.clone();
                             self.fire(RULE_ARM_BLOCK);
                         }
                     }

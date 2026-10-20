@@ -103,7 +103,7 @@ fn same(a: &TokenTree, b: &TokenTree) -> bool {
     }
 }
 
-fn hole_of<'a>(t: &TokenTree, kinds: &'a HashMap<String, HoleKind>) -> Option<(String, HoleKind)> {
+fn hole_of(t: &TokenTree, kinds: &HashMap<String, HoleKind>) -> Option<(String, HoleKind)> {
     match t {
         TokenTree::Ident(i) => {
             let s = i.to_string();
@@ -737,8 +737,18 @@ impl<'ast, 'a, 's> Visit<'ast> for Walker<'a, 's> {
     fn visit_item(&mut self, _: &'ast syn::Item) {}
 }
 
-/// A function (its attributes, signature and body as syn reads them) matched against the toolkit.
-pub fn match_fn(src: &Source, attrs: &[syn::Attribute], vis: &syn::Visibility, sig: &syn::Signature, body: &syn::Block, ctx: &Context) -> FnMatch {
+/// A function as syn reads it: its attributes, visibility, signature and body.
+#[derive(Clone, Copy)]
+pub struct FnParts<'a> {
+    pub attrs: &'a [syn::Attribute],
+    pub vis: &'a syn::Visibility,
+    pub sig: &'a syn::Signature,
+    pub body: &'a syn::Block,
+}
+
+/// A function matched against the toolkit.
+pub fn match_fn(src: &Source, f: FnParts, ctx: &Context) -> FnMatch {
+    let FnParts { attrs, vis, sig, body } = f;
     let mut out = FnMatch::default();
     let mut calls = Calls(false);
     calls.visit_block(body);
@@ -848,8 +858,10 @@ pub fn call_text(m: &StepMatch, src: &Source) -> Result<String, String> {
 
 /// The replace_body spec for a function: its exact matches swapped for the calls, the rest of the body as it is
 /// (`let` and `value` steps, `raw` for any other statement and for comments between statements); `None` when
-/// nothing matches exactly. `item` is the function's path (the spec's target), `name` its name.
-pub fn spec_for(m: &FnMatch, src: &Source, item: &str, name: &str, attrs: &[syn::Attribute], vis: &syn::Visibility, sig: &syn::Signature, body: &syn::Block, near_too: bool) -> Option<ChangeSpec> {
+/// nothing matches exactly. `item` is the function's path (the spec's target).
+pub fn spec_for(m: &FnMatch, src: &Source, item: &str, f: FnParts, near_too: bool) -> Option<ChangeSpec> {
+    let FnParts { attrs, vis, sig, body } = f;
+    let name = &sig.ident.to_string();
     let usable = |l: Level| l == Level::Exact || near_too;
     let base = ChangeSpec {
         name: format!("to-toolkit-{}", crate::reading::spec::name_slug(item)),
@@ -916,7 +928,7 @@ pub fn spec_for(m: &FnMatch, src: &Source, item: &str, name: &str, attrs: &[syn:
     let mut cursor = open;
     let last = body.stmts.len().saturating_sub(1);
     for (i, s) in body.stmts.iter().enumerate() {
-        let Some((a, b)) = src.range(s.span()) else { return None };
+        let (a, b) = src.range(s.span())?;
         // comments between statements stay, as their own raw step
         let gap = src.text[cursor..a].trim();
         if !gap.is_empty() {
@@ -975,7 +987,7 @@ pub fn spec_for(m: &FnMatch, src: &Source, item: &str, name: &str, attrs: &[syn:
 // ---------------------------------------------------------------------------
 // the functions of a file
 
-type EachFn<'f> = dyn FnMut(proc_macro2::Span, &[syn::Attribute], &syn::Visibility, &syn::Signature, &syn::Block, &Context) + 'f;
+type EachFn<'f> = dyn FnMut(proc_macro2::Span, FnParts, &Context) + 'f;
 
 struct Each<'f, 'g> {
     ctx: Vec<Context>,
@@ -992,7 +1004,7 @@ impl<'ast, 'f, 'g> Visit<'ast> for Each<'f, 'g> {
 
     fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
         let ctx = self.ctx.last().cloned().unwrap_or_default();
-        (self.f)(f.span(), &f.attrs, &f.vis, &f.sig, &f.block, &ctx);
+        (self.f)(f.span(), FnParts { attrs: &f.attrs, vis: &f.vis, sig: &f.sig, body: &f.block }, &ctx);
         // a function inside a body is its own, in no impl
         self.ctx.push(Context::default());
         syn::visit::visit_impl_item_fn(self, f);
@@ -1000,7 +1012,7 @@ impl<'ast, 'f, 'g> Visit<'ast> for Each<'f, 'g> {
     }
 
     fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
-        (self.f)(f.span(), &f.attrs, &f.vis, &f.sig, &f.block, &Context::default());
+        (self.f)(f.span(), FnParts { attrs: &f.attrs, vis: &f.vis, sig: &f.sig, body: &f.block }, &Context::default());
         self.ctx.push(Context::default());
         syn::visit::visit_item_fn(self, f);
         self.ctx.pop();
@@ -1008,7 +1020,7 @@ impl<'ast, 'f, 'g> Visit<'ast> for Each<'f, 'g> {
 
     fn visit_trait_item_fn(&mut self, f: &'ast syn::TraitItemFn) {
         if let Some(b) = &f.default {
-            (self.f)(f.span(), &f.attrs, &syn::Visibility::Inherited, &f.sig, b, &Context::default());
+            (self.f)(f.span(), FnParts { attrs: &f.attrs, vis: &syn::Visibility::Inherited, sig: &f.sig, body: b }, &Context::default());
         }
         syn::visit::visit_trait_item_fn(self, f);
     }
@@ -1016,7 +1028,7 @@ impl<'ast, 'f, 'g> Visit<'ast> for Each<'f, 'g> {
 
 /// Every function of a file with what it sits in: its place (its first token, attributes included: where klepto
 /// records a function), attributes, visibility, signature, body and impl.
-pub fn each_fn<'f>(file: &syn::File, mut f: impl FnMut(proc_macro2::Span, &[syn::Attribute], &syn::Visibility, &syn::Signature, &syn::Block, &Context) + 'f) {
+pub fn each_fn<'f>(file: &syn::File, mut f: impl FnMut(proc_macro2::Span, FnParts, &Context) + 'f) {
     let mut e = Each { ctx: Vec::new(), f: &mut f };
     e.visit_file(file);
 }
@@ -1036,15 +1048,15 @@ pub fn function_at(text: &str, line: u32, column: u32, item: &str) -> Option<FnA
     let file = syn::parse_file(text).ok()?;
     let src = Source::new(text);
     let mut out = None;
-    each_fn(&file, |at, attrs, vis, sig, block, ctx| {
+    each_fn(&file, |at, parts, ctx| {
         let s = at.start();
         if out.is_some() || (s.line as u32, s.column as u32) != (line, column) {
             return;
         }
-        let m = match_fn(&src, attrs, vis, sig, block, ctx);
-        let name = sig.ident.to_string();
-        let spec = spec_for(&m, &src, item, &name, attrs, vis, sig, block, false);
-        let near_spec = spec_for(&m, &src, item, &name, attrs, vis, sig, block, true);
+        let m = match_fn(&src, parts, ctx);
+        let name = parts.sig.ident.to_string();
+        let spec = spec_for(&m, &src, item, parts, false);
+        let near_spec = spec_for(&m, &src, item, parts, true);
         out = Some(FnAt { name, matched: m, spec, near_spec });
     });
     out

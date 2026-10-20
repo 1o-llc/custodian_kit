@@ -13,8 +13,9 @@ fn matched(text: &str) -> Vec<(String, matcher::FnMatch, Option<crate::change::C
     for item in &file.items {
         match item {
             syn::Item::Fn(f) => {
-                let m = matcher::match_fn(&src, &f.attrs, &f.vis, &f.sig, &f.block, &Context::default());
-                let spec = matcher::spec_for(&m, &src, &format!("demo::{}", f.sig.ident), &f.sig.ident.to_string(), &f.attrs, &f.vis, &f.sig, &f.block, false);
+                let parts = matcher::FnParts { attrs: &f.attrs, vis: &f.vis, sig: &f.sig, body: &f.block };
+                let m = matcher::match_fn(&src, parts, &Context::default());
+                let spec = matcher::spec_for(&m, &src, &format!("demo::{}", f.sig.ident), parts, false);
                 out.push((f.sig.ident.to_string(), m, spec));
             }
             syn::Item::Impl(i) => {
@@ -22,8 +23,9 @@ fn matched(text: &str) -> Vec<(String, matcher::FnMatch, Option<crate::change::C
                 let ctx = Context { trait_name, self_ty: None, impl_items: i.items.len(), in_impl: true };
                 for it in &i.items {
                     if let syn::ImplItem::Fn(f) = it {
-                        let m = matcher::match_fn(&src, &f.attrs, &f.vis, &f.sig, &f.block, &ctx);
-                        let spec = matcher::spec_for(&m, &src, &format!("demo::T::{}", f.sig.ident), &f.sig.ident.to_string(), &f.attrs, &f.vis, &f.sig, &f.block, false);
+                        let parts = matcher::FnParts { attrs: &f.attrs, vis: &f.vis, sig: &f.sig, body: &f.block };
+                        let m = matcher::match_fn(&src, parts, &ctx);
+                        let spec = matcher::spec_for(&m, &src, &format!("demo::T::{}", f.sig.ident), parts, false);
                         out.push((f.sig.ident.to_string(), m, spec));
                     }
                 }

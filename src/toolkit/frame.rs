@@ -512,12 +512,12 @@ pub fn of_method(sig: &syn::Signature, body: &syn::Block) -> Option<Frame> {
             w.t(",");
         }
         match a {
-            syn::FnArg::Receiver(r) => w.t(&match (&r.reference, r.mutability.is_some()) {
+            syn::FnArg::Receiver(r) => w.t(match (&r.reference, r.mutability.is_some()) {
                 (Some(_), true) => "&mut self",
                 (Some(_), false) => "&self",
                 (None, true) => "mut self",
                 (None, false) => "self",
-            }.to_string()),
+            }),
             syn::FnArg::Typed(t) => {
                 if let syn::Pat::Ident(i) = &*t.pat {
                     params.push(i.ident.to_string());
