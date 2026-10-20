@@ -167,3 +167,47 @@ fn gate_refuses_an_item_its_feature_gates_already() {
     let once = preflight::run_preflight(&ctx, &spec(&store.root, "g2", "name = \"g2\"\nobjective = \"o\"\noperation = \"gate\"\ntarget = \"shop::plain\"\nfeature = \"json\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
     assert!(once.authorized, "{:?} {:?}", once.reasons, once.preconditions);
 }
+
+/// p depends on a (and a on c), and optionally on b; a declares x = ["c/z"], c declares z, b declares y.
+fn forms(tag: &str) -> (Store, Ctx, Workspace) {
+    let root = std::env::temp_dir().join(format!("custodian-kit-forms-{tag}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    write(&root, "Cargo.toml", "[workspace]\nresolver = \"2\"\nmembers = [\"p\", \"a\", \"b\", \"c\"]\n");
+    write(&root, "p/Cargo.toml", "[package]\nname = \"p\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\na = { path = \"../a\" }\nb = { path = \"../b\", optional = true }\n\n[features]\ng = []\n");
+    write(&root, "p/src/lib.rs", "pub fn p() -> u8 {\n    a::a()\n}\n");
+    write(&root, "a/Cargo.toml", "[package]\nname = \"a\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nc = { path = \"../c\" }\n\n[features]\nx = [\"c/z\"]\n");
+    write(&root, "a/src/lib.rs", "pub fn a() -> u8 {\n    c::c()\n}\n");
+    write(&root, "b/Cargo.toml", "[package]\nname = \"b\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[features]\ny = []\n");
+    write(&root, "b/src/lib.rs", "pub fn b() -> u8 {\n    2\n}\n");
+    write(&root, "c/Cargo.toml", "[package]\nname = \"c\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[features]\nz = []\n");
+    write(&root, "c/src/lib.rs", "pub fn c() -> u8 {\n    1\n}\n");
+    let (store, _) = Store::init(&root, Mode::Agent).unwrap();
+    let ctx = Ctx { root: store.root.clone(), store: Some(store.clone()), exe: PathBuf::from("custodian") };
+    let w = Workspace::open_with(&store.root, &Scope::default(), Resolving::Free).unwrap();
+    (store, ctx, w)
+}
+
+#[test]
+fn declare_feature_takes_every_cargo_form_and_reads_it_through_the_feature_graph() {
+    let (store, ctx, w) = forms("all");
+    let text = "name = \"f\"\nobjective = \"o\"\noperation = \"declare_feature\"\ntarget = \"crate:p\"\nfeature = \"f\"\nenables = [\"g\", \"a/x\", \"b?/y\", \"dep:b\"]\n";
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "f", text), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(p.authorized, "{:?} {:?}", p.reasons, p.preconditions);
+    let listed = p.listed.join("\n");
+    // a/x brings a's x, and a second level down c's z
+    assert!(listed.contains("f brings a:x (a/x in p)") && listed.contains("f brings c:z (c/z in a)"), "{listed}");
+    // dep:b turns b on, so b?/y brings y
+    assert!(listed.contains("f brings the dependency b (dep:b in p)") && listed.contains("f brings b:y (b?/y in p, weak)"), "{listed}");
+    // the weak entry alone: pending, said as weak
+    let w2 = preflight::run_preflight(&ctx, &spec(&store.root, "w", "name = \"w\"\nobjective = \"o\"\noperation = \"declare_feature\"\ntarget = \"crate:p\"\nfeature = \"w\"\nenables = [\"b?/y\"]\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(w2.authorized && w2.listed.iter().any(|l| l == "w weak: b?/y in p: brings it only when b is on"), "{:?}", w2.listed);
+}
+
+#[test]
+fn declare_feature_refuses_a_feature_the_dependency_does_not_have_and_names_its_features() {
+    let (store, ctx, w) = forms("nope");
+    for (enables, why) in [("[\"a/nope\"]", "`a/nope`: a has no feature nope (its features: x)"), ("[\"b?/nope\"]", "`b?/nope`: b has no feature nope (its features: y)"), ("[\"q/x\"]", "`q/x`: p has no dependency q")] {
+        let text = format!("name = \"n\"\nobjective = \"o\"\noperation = \"declare_feature\"\ntarget = \"crate:p\"\nfeature = \"n\"\nenables = {enables}\n");
+        let p = preflight::run_preflight(&ctx, &spec(&store.root, "n", &text), None, Runner::InProcess(&w)).unwrap().preflight;
+        assert!(!p.authorized && p.preconditions.iter().any(|c| !c.holds && c.detail.contains(why)), "{enables}: {:?}", p.preconditions);
+    }
+}

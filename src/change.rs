@@ -1581,6 +1581,17 @@ pub struct FeatureDeclaration {
     pub made_optional: Vec<String>,
     /// Why it cannot be declared as asked; empty when it can.
     pub problems: Vec<String>,
+    /// What turning it on brings, through the whole feature graph (klepto's closure over the model the declaration
+    /// leaves): `a:x (a/x in p)`, `c:z (c/z in a)`, `the dependency b (dep:b in p)`.
+    #[serde(default)]
+    pub brings: Vec<String>,
+    /// Its weak entries (`b?/y`) whose dependency nothing it turns on turns on: they bring the feature only when
+    /// something else turns the dependency on.
+    #[serde(default)]
+    pub weak: Vec<String>,
+    /// Entries whose dependency's features are not known here (not a member, and cargo metadata not read).
+    #[serde(default)]
+    pub unchecked: Vec<String>,
 }
 
 /// Whether `name` is a feature name cargo takes: letters, digits, `_`, `-`, `+`, `.`, starting with a letter, a
@@ -1613,9 +1624,14 @@ pub fn feature_declaration(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -
             let n = n.trim_end_matches('?');
             if dep(n).is_none() {
                 d.problems.push(format!("`{e}`: {package} has no dependency {n}"));
-            }
-            if f.is_empty() {
+            } else if f.is_empty() {
                 d.problems.push(format!("`{e}` names no feature of {n}"));
+            } else {
+                match k.dependency_feature_names(&package, n) {
+                    Some(have) if !have.contains(f) => d.problems.push(format!("`{e}`: {n} has no feature {f} (its features: {})", if have.is_empty() { "none".to_string() } else { have.iter().cloned().collect::<Vec<_>>().join(", ") })),
+                    Some(_) => {}
+                    None => d.unchecked.push(format!("`{e}`: {n}'s features are not known here (not a member, and its cargo metadata not read)")),
+                }
             }
         } else if e == &feature {
             d.problems.push(format!("`{e}`: a feature cannot turn itself on"));
@@ -1625,6 +1641,25 @@ pub fn feature_declaration(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -
     }
     d.made_optional.sort();
     d.made_optional.dedup();
+    // what it brings, read through the whole feature graph as the declaration leaves it
+    if d.problems.is_empty() {
+        let asked = klepto::PackageSpec { features: [(feature.clone(), spec.enables.clone())].into_iter().collect(), optional: d.made_optional.iter().cloned().collect(), default: None };
+        let map = k.feature_items_with(&m.apply_spec(&asked), &feature);
+        for e in map.entries.iter().skip(1) {
+            let what = match &e.key.feature {
+                Some(f) => format!("{}:{f}", e.key.package),
+                None => format!("the dependency {}", e.key.package),
+            };
+            let by = e.enabled_by.as_ref().map(|b| format!(" ({} in {}{})", enable_text(&b.entry), b.package, if b.weak { ", weak" } else { "" })).unwrap_or_default();
+            d.brings.push(format!("{what}{by}"));
+        }
+        for w in &map.weak_pending {
+            d.weak.push(format!("{} in {}: brings it only when {} is on", enable_text(&w.entry), w.package, match &w.entry {
+                klepto::FeatureEnable::DepFeature { dep, .. } => dep.clone(),
+                other => enable_text(other),
+            }));
+        }
+    }
     if d.was.as_ref() == Some(&spec.enables) {
         d.problems.push(format!("{package} already declares {feature} = {:?}: nothing to change", spec.enables));
     }

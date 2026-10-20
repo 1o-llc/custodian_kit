@@ -391,6 +391,15 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                     for n in &d.made_optional {
                         listed.push(format!("{n} becomes optional: dep:{n} turns it on, so code that uses it compiles only with {} on", d.feature));
                     }
+                    for b in &d.brings {
+                        listed.push(format!("{} brings {b}", d.feature));
+                    }
+                    for w in &d.weak {
+                        listed.push(format!("{} weak: {w}", d.feature));
+                    }
+                    for u in &d.unchecked {
+                        listed.push(format!("{} not checked: {u}", d.feature));
+                    }
                 }
                 Err(e) => pre.push(Check { what: "the feature's crate".into(), holds: false, detail: e }),
             },
