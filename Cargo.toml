@@ -1,6 +1,6 @@
 [package]
 name = "custodian_kit"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
 # tantivy 0.26 needs 1.86; time, globset, ignore and darling in the lock need 1.88; xccute 0.3.1 (std File locks), 1.89
 rust-version = "1.89"

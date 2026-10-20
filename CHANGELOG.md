@@ -1,5 +1,94 @@
 # Changelog
 
+## 0.3.7 (2026-10-20)
+
+custodian's exercise ran the new operations on the pantry and on `features_ws` with 0.3.6 and found ten things. The
+first is a real fault: a preflight authorized a signature change while four of its call sites were unresolved, and
+only the transform's own check stopped it. The other nine are a refusal told as waiting, two numbers for one count,
+a check left to the transform, a count taken before the change, forms the exercise never tried, and words that hid
+the reason. Each is fixed here, numbered as found. Nothing is removed from the API: the rustdoc JSON of 0.3.6 and
+0.3.7 differ by 45 additions and no removal. Every link is pinned to 7c00110; the lines it replaces to a7d885b
+(0.3.6).
+
+1. **Calls inside a macro's arguments.** The pantry's `shopping_list` is called twice inside `simple_impl::ensure_eq!`
+   and `ensure_empty!` in its test module, reached through `use super::*`. klepto names those paths in the macro's
+   tokens and resolves none, so the impact reading counted them as unresolved, and the preflight counted only the
+   one resolved call: [preflight.rs L477 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/preflight.rs#L477). Now one rule, `change::macro_calls`
+   ([change.rs L1780](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/change.rs#L1780)), reads each macro's tokens ([change.rs L1852](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/change.rs#L1852)): a name written with its
+   argument list is a call, `fn name` is a declaration, a name with no argument list is a value, `.name(..)` is a
+   method call. Each call's path is resolved from the macro's module as the compiler would: the module's own items,
+   its imports, a glob import's module, `crate::`, `self::`, `super::`, `Self::`, a crate by name
+   ([change.rs L1927](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/change.rs#L1927), [change.rs L1953](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/change.rs#L1953)). A call that resolves to the function is a call site; one
+   that resolves to nothing is unresolved (`change::unresolved_macro_paths`, [change.rs L1786](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/change.rs#L1786)). The
+   preflight counts both kinds of call site and refuses while any is unresolved, `unresolved: N` and each place
+   named, unless the spec sets `call_sites.allow_unresolved = true` ([change.rs L418](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/change.rs#L418)), which goes ahead and
+   lists them: [preflight.rs L509](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/preflight.rs#L509), [preflight.rs L553](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/preflight.rs#L553). The impact reading's unresolved rows now
+   reach the preflight too: [preflight.rs L825](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/preflight.rs#L825). code_passenger 0.4.5 rewrites by the same rule. Proof:
+   tests/operations.rs `change_signature_counts_the_calls_inside_macro_arguments_and_refuses_while_one_is_unresolved`
+   ([L207](https://github.com/1o-llc/custodian_kit/blob/7c00110/tests/operations.rs#L207)): two calls inside a macro klepto does not expand, through `use super::*` and
+   `crate::`, are 2 call sites and 0 unresolved; a declaration and a value of the same name are neither; a path that
+   resolves to nothing is `unresolved: 1` and refused, and allowed with `allow_unresolved`.
+2. **A change already in place.** A preflight refused because what the spec asks is already in the code (the item
+   already gated by the feature, the dependency already named, the feature already declared as asked, the library
+   already there) now records that ([preflight.rs L481](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/preflight.rs#L481) and the three before it) and its receipt's reason is
+   `not authorized: already in place` ([preflight.rs L902](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/preflight.rs#L902)). The handoff tells such a spec under what changed,
+   as done, and never under waiting on a person or as a step to fix or drop: [handoff.rs L336](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/handoff.rs#L336),
+   [handoff.rs L594](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/handoff.rs#L594); 0.3.6 listed it as waiting: [handoff.rs L506 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/handoff.rs#L506). `Handoff::waiting`
+   counts what waits ([handoff.rs L444](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/handoff.rs#L444)), and custodian 0.3.5 exits by it. Proof: tests/handoff.rs
+   `a_handoff_is_made_from_the_records_in_its_order_and_pinned` ([L214](https://github.com/1o-llc/custodian_kit/blob/7c00110/tests/handoff.rs#L214)), with one more
+   spec already in place: three things wait, it does not, and its line is pinned.
+3. **One number for the lines.** "What changed" gave git's 58 and then the count's +54. The count is now the one
+   source, whole and per crate, and the sentence says so: "(the job's counts at open and close)"
+   ([handoff.rs L362](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/handoff.rs#L362), [handoff.rs L576](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/handoff.rs#L576)); 0.3.6 took the total from the closing line:
+   [handoff.rs L338 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/handoff.rs#L338). Proof: the same test, its closing line saying git's +8 and its counts +6;
+   the handoff says 6.
+4. The command line's refusal on a folder with no `.custodian` is custodian 0.3.5's.
+5. A dry transform's wording is code_passenger 0.4.5's.
+6. **Code that names an optional dependency.** A method using `chrono::` was authorized with no `#[cfg]`, and only
+   the transform's check caught it. `change::optional_uses` ([change.rs L2084](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/change.rs#L2084)) reads the code a spec writes
+   for paths whose head is an optional dependency of the crate, and whether a feature that turns it on gates the
+   code: a `#[cfg(feature = ..)]` among its attributes, a `cfg_attr` around the path, or the item or module it lands
+   in. The preflight refuses an ungated one and names the fix, `attrs = ['#[cfg(feature = "chrono")]']`
+   ([preflight.rs L630](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/preflight.rs#L630)). Proof: tests/operations.rs
+   `code_naming_an_optional_dependency_needs_a_feature_that_turns_it_on` ([L230](https://github.com/1o-llc/custodian_kit/blob/7c00110/tests/operations.rs#L230)).
+7. **The configurations the change leaves.** The preflight's impact said 8 configurations for the pantry's
+   `declare_feature` while the transform checked 4: the matrix was read before the change
+   ([impact.rs L280 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/reading/impact.rs#L280)). `change::model_after` ([change.rs L1734](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/change.rs#L1734)) is now the one rule
+   for the feature model as the change leaves the manifest (it was code_passenger's), and the preflight counts by it,
+   saying how many there were before: [preflight.rs L682](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/preflight.rs#L682). Proof: tests/operations.rs
+   `the_preflight_counts_the_configurations_the_change_leaves` ([L251](https://github.com/1o-llc/custodian_kit/blob/7c00110/tests/operations.rs#L251)): two optional
+   dependencies made one feature, fewer configurations after than before, the transform's number.
+8. **Every form, from the real feature graph.** The exercise's `declare_feature` always had an empty `enables`
+   ([exercise.rs L585 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/exercise.rs#L585)). `exercise::feature_forms` ([exercise.rs L647](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/exercise.rs#L647)) reads the crate's
+   dependencies and makes `dep:<x>` for an optional one, `<a>/<x>` and `<b>?/<y>` with a feature that resolves with
+   no new package (one the manifest asks of it, else `default`, else a workspace crate's own); `specs_for`
+   ([exercise.rs L691](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/exercise.rs#L691)) makes a case for each, and one more with `optional = true` for `add_dependency` and
+   `change_dependency` ([exercise.rs L677](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/exercise.rs#L677)). The case table names the form. Proof: tests/operations.rs
+   `the_exercise_makes_a_case_for_each_form_the_feature_graph_offers` ([L273](https://github.com/1o-llc/custodian_kit/blob/7c00110/tests/operations.rs#L273)): `dep:b`,
+   `a/x` and `b?/y` on the fixture, each authorized, and `optional` on `add_dependency`.
+9. **The exercise report.** Its `lines` column showed the count's net lines, 0 for a case that wrote 15
+   ([exercise.rs L877 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/exercise.rs#L877)); it is now the lines the transform wrote, from its record, and none when it
+   wrote nothing ([exercise.rs L977](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/exercise.rs#L977), [exercise.rs L1286](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/exercise.rs#L1286)). A group of findings showed the first
+   one's text ([exercise.rs L786 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/exercise.rs#L786)); a group whose findings differ now lists each case's
+   ([exercise.rs L903](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/exercise.rs#L903), [exercise.rs L939](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/exercise.rs#L939)). Proof: `the_summary_says_the_lines_written_and_each_finding_of_a_group`
+   ([exercise.rs L1720](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/exercise.rs#L1720)).
+10. **Words.** A refusal's top line was the word's rule, "`facts`=authorized requires `facts`=preconditions"
+    ([preflight.rs L711 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/preflight.rs#L711), [preflight.rs L156 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/preflight.rs#L156)). It is now the reason in words, each
+    precondition that does not hold with why, or what is already in place; the rule is on the line beneath
+    (`Preflight::why`, `Preflight::headline_why`, [preflight.rs L163](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/preflight.rs#L163), [preflight.rs L716](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/preflight.rs#L716)). Proof:
+    `a_refusals_top_line_is_the_reason_and_the_rule_is_beneath` ([L182](https://github.com/1o-llc/custodian_kit/blob/7c00110/tests/operations.rs#L182)) and
+    `gate_refuses_an_item_its_feature_gates_already` ([L159](https://github.com/1o-llc/custodian_kit/blob/7c00110/tests/operations.rs#L159)). A count reading's cost
+    said "0 files, 0 bytes"; a count names no file, and its line now says it is not a file reading
+    ([cost.rs L194](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/cost.rs#L194), where 0.3.6 had [cost.rs L193 at 0.3.6](https://github.com/1o-llc/custodian_kit/blob/a7d885b/src/cost.rs#L193)). Proof:
+    `a_count_says_it_is_not_a_file_reading` ([cost.rs L328](https://github.com/1o-llc/custodian_kit/blob/7c00110/src/cost.rs#L328)). The bare `job start` is
+    custodian 0.3.5's.
+
+The change spec's schema takes `call_sites.allow_unresolved`; the operations table in the README says what
+`change_signature` now does. On the pantry and `features_ws`, with this release and code_passenger 0.4.5: 15 cases
+and 12, 11 and 10 passed; 0.3.6 ran 10 and 10, 5 and 8 passed. The four and two findings left are `gate` targets the
+exercise picks that other code uses ungated, refused correctly. `cargo test --all-features` passes; clippy reports
+the 17 warnings 0.3.6 reports.
+
 ## 0.3.6 (2026-10-20)
 
 A program built from an empty crate through change specs (the pantry: 42 specs, two bounded jobs) found where the
