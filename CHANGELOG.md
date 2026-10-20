@@ -1,5 +1,66 @@
 # Changelog
 
+## 0.3.9 (2026-10-20)
+
+What the fleet_ops swaps cost, read from their receipts, and the kit's half of making each cost once. The 295
+members of the largest shape batch (receipt #1762) took 1,849 seconds; the batch's own compile, code_passenger's
+line, took 253 of them (#1477). The other 1,595 seconds were the members' preflights, one after another, each
+reading the code again: the code's digest (cargo metadata and a hash of every file) two or three times, a code graph
+of the whole workspace, a copy of that graph for the index key, and an impact reading with a receipt of its own. On a
+copy of the kit, 0.3.8 preflights those 295 members in 1,743 seconds; 0.3.9 in 55 seconds, after the one index parse
+both pay (101 seconds for the whole line), and every member's record is the same as its own preflight's but for the
+index key, which names the copy's path. Nothing is removed from the API: the rustdoc JSON of 0.3.8 and 0.3.9 differ
+by 219 additions and no removal. Every link is pinned to 2899848; the lines it replaces to f824718 (0.3.8).
+
+- **A batch preflight reads the code once.** `preflight::run_preflight_batch` ([preflight.rs L1048](https://github.com/1o-llc/custodian_kit/blob/2899848/src/preflight.rs#L1048)):
+  one scan (the workspace the caller holds open), one code digest, one code graph for every member; each member's
+  impact is answered from that reading by `reading::read_facts_over` ([mod.rs L126](https://github.com/1o-llc/custodian_kit/blob/2899848/src/reading/mod.rs#L126)), where
+  0.3.8 ran a reading per member with its own code digest and receipt ([preflight.rs L815, L818 at 0.3.8](https://github.com/1o-llc/custodian_kit/blob/f824718/src/preflight.rs#L815))
+  and a graph per reading ([mod.rs L128 at 0.3.8](https://github.com/1o-llc/custodian_kit/blob/f824718/src/reading/mod.rs#L128)). Each member is still checked by
+  `preflight::assess`, the rules its own preflight uses, so the codes and refusals are the same. Its record is kept as
+  its own preflight keeps it; one receipt, `preflight-batch`, names the batch's record, which lists each member and its
+  verdict. Proof: tests/bounded.rs `a_batch_preflight_gives_each_member_the_verdict_its_own_preflight_gives`
+  ([L142](https://github.com/1o-llc/custodian_kit/blob/2899848/tests/bounded.rs#L142)): eight specs, one of each verdict (authorized, a precondition broken, a write
+  outside the scope, a name taken, a match that stops compiling, a target that does not resolve, a body on another
+  function, a swap), each member's whole record equal to its own preflight's but for the time.
+- **The gate takes the batch's receipt.** `preflight::gate_all` ([preflight.rs L915](https://github.com/1o-llc/custodian_kit/blob/2899848/src/preflight.rs#L915)) reads
+  the journal once for a batch and finds each member's newest preflight, its own receipt or its line in a batch's;
+  `gate` ([L907](https://github.com/1o-llc/custodian_kit/blob/2899848/src/preflight.rs#L907)) is the same rule for one spec. Proof: the same test, its gate half.
+- **An index key reads the graph it is given.** `index_key_of` ([commands.rs L189](https://github.com/1o-llc/custodian_kit/blob/2899848/src/commands.rs#L189)) copied the
+  whole graph first ([L190 at 0.3.8](https://github.com/1o-llc/custodian_kit/blob/f824718/src/commands.rs#L190)): 0.36 of the 0.54 seconds a member's impact took on
+  the kit. It reads it in place now; the key is the same.
+- **One kept build per workspace is the kit's.** `proof_place::ProofPlace` ([proof_place.rs L80](https://github.com/1o-llc/custodian_kit/blob/2899848/src/proof_place.rs#L80)):
+  the copy and build folder code_passenger's proof kept (its place, its lock, its sync, unchanged), now where custodian's
+  test runs reach it too, so a test run after a transform builds on what the proof built.
+- **Affected tests are the proof's rule.** A test run after a swap in fleet_ops built every dependent's dependent,
+  cold, in the worktree, for six hours on battery: affected_tests ran every test whose calls reach the change, in any
+  crate ([kinds.rs L1279 at 0.3.8](https://github.com/1o-llc/custodian_kit/blob/f824718/src/reading/kinds.rs#L1279)). Now `reading::kinds::affected_crates`
+  ([kinds.rs L1311](https://github.com/1o-llc/custodian_kit/blob/2899848/src/reading/kinds.rs#L1311)) keeps the tests of the crates the change is in, their direct
+  dependents, and the readers of a public item whose signature it alters (`change.signatures`, found from the diff by
+  `testrun::signature_changes`, [testrun.rs L446](https://github.com/1o-llc/custodian_kit/blob/2899848/src/testrun.rs#L446), comparing `testrun::public_signatures`,
+  [L355](https://github.com/1o-llc/custodian_kit/blob/2899848/src/testrun.rs#L355)); the others are named as `test-further` rows, not run. Proof: testrun.rs
+  `a_body_or_a_doc_changes_no_signature_and_a_parameter_or_a_field_does` ([L478](https://github.com/1o-llc/custodian_kit/blob/2899848/src/testrun.rs#L478)), and
+  custodian's tests/kept_build.rs.
+- **No cargo line starts on a dying battery.** `power` ([power.rs L93](https://github.com/1o-llc/custodian_kit/blob/2899848/src/power.rs#L93)): `pmset -g batt`, a
+  declared line; under 20% and not charging, `[CUST0042]`, before the line starts ([exec.rs L473](https://github.com/1o-llc/custodian_kit/blob/2899848/src/exec.rs#L473),
+  every cargo line the kit walks; the proof's place before it is taken). A job's budget can set the floor. Proof:
+  power.rs `under_twenty_percent_and_not_charging_no_cargo_line_starts` ([L106](https://github.com/1o-llc/custodian_kit/blob/2899848/src/power.rs#L106)) and
+  tests/power.rs `a_cargo_line_is_refused_before_it_starts_on_a_dying_battery_and_runs_on_a_charging_one`
+  ([L10](https://github.com/1o-llc/custodian_kit/blob/2899848/tests/power.rs#L10)), the battery given by `CUSTODIAN_BATTERY`.
+- **The kit reads its own cost.** `step_time` ([step_time.rs L89](https://github.com/1o-llc/custodian_kit/blob/2899848/src/step_time.rs#L89)): the time per step kind
+  from the receipts (a preflight, a transform, a batch's compile, a test line, a reading, an index parse); `estimate`
+  ([L215](https://github.com/1o-llc/custodian_kit/blob/2899848/src/step_time.rs#L215)), a job's planned cost, each figure measured here or unknown; `Budget` and
+  `over_budget` ([L315](https://github.com/1o-llc/custodian_kit/blob/2899848/src/step_time.rs#L315)), `hours=<n>,battery=<percent>`, a step past the hours refused
+  before it starts with `[CUST0043]`; `per_member` ([L118](https://github.com/1o-llc/custodian_kit/blob/2899848/src/step_time.rs#L118)), the step kinds a job paid one
+  member at a time where a batch form exists. The closing receipt ([jobs.rs L1114](https://github.com/1o-llc/custodian_kit/blob/2899848/src/jobs.rs#L1114)), the
+  exercise's summary ([exercise.rs L1674](https://github.com/1o-llc/custodian_kit/blob/2899848/src/exercise.rs#L1674)) and the handoff ([handoff.rs L287](https://github.com/1o-llc/custodian_kit/blob/2899848/src/handoff.rs#L287))
+  carry them; a job file's `budget` and the workspace's `.custodian/config/budget.toml` hold the budget. Proof:
+  step_time.rs `the_receipts_predict_a_batch_and_name_the_steps_paid_one_member_at_a_time` ([L335](https://github.com/1o-llc/custodian_kit/blob/2899848/src/step_time.rs#L335))
+  and `a_step_past_the_hours_budget_is_refused_before_it_starts` ([L368](https://github.com/1o-llc/custodian_kit/blob/2899848/src/step_time.rs#L368)); tests/exercise.rs
+  ([L118](https://github.com/1o-llc/custodian_kit/blob/2899848/tests/exercise.rs#L118)).
+
+`cargo test --all-features` passes; `cargo clippy --all-targets --all-features` warns only where 0.3.8 did.
+
 ## 0.3.8 (2026-10-20)
 
 The kit's half of the proof's new shape. A body swapped in fleet_ops on 0.3.7's rule was proved by compiling every
