@@ -290,3 +290,174 @@ pub fn normal_tokens(ts: TokenStream, position: Position, level: Level) -> Resul
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// the names a function binds, written by where they are bound
+
+/// Every name a function binds (its parameters, a `let`, a match arm, a closure's parameters, a `for`, an
+/// `if let`) renamed `__b<n>` in the order they are bound, scope by scope, and every use of it with it: two
+/// functions that differ only in what their locals are called read the same. A macro's own names
+/// (`Some(value) => value` in `require_some!`) are hygienic, so its expansion and the hand-written body it
+/// replaces (`Some(port) => port`) differ only so. A name starting with a capital (a unit variant, a constant) is
+/// left as it is; a name inside a macro's tokens is renamed where it is a token of its own (not inside a string).
+struct Alpha {
+    scopes: Vec<std::collections::HashMap<String, String>>,
+    n: usize,
+}
+
+impl Alpha {
+    fn bind(&mut self, i: &mut syn::Ident) {
+        let name = i.to_string();
+        if name.chars().next().is_some_and(char::is_uppercase) || name == "self" {
+            return;
+        }
+        let c = format!("__b{}", self.n);
+        self.n += 1;
+        if let Some(s) = self.scopes.last_mut() {
+            s.insert(name, c.clone());
+        }
+        *i = syn::Ident::new(&c, i.span());
+    }
+
+    fn lookup(&self, name: &str) -> Option<String> {
+        self.scopes.iter().rev().find_map(|s| s.get(name).cloned())
+    }
+
+    fn scoped(&mut self, f: impl FnOnce(&mut Self)) {
+        self.scopes.push(Default::default());
+        f(self);
+        self.scopes.pop();
+    }
+
+    fn rename_tokens(&self, ts: TokenStream) -> TokenStream {
+        ts.into_iter()
+            .map(|t| match t {
+                proc_macro2::TokenTree::Ident(i) => match self.lookup(&i.to_string()) {
+                    Some(c) => proc_macro2::TokenTree::Ident(proc_macro2::Ident::new(&c, i.span())),
+                    None => proc_macro2::TokenTree::Ident(i),
+                },
+                proc_macro2::TokenTree::Group(g) => {
+                    let mut ng = proc_macro2::Group::new(g.delimiter(), self.rename_tokens(g.stream()));
+                    ng.set_span(g.span());
+                    proc_macro2::TokenTree::Group(ng)
+                }
+                other => other,
+            })
+            .collect()
+    }
+}
+
+impl VisitMut for Alpha {
+    fn visit_pat_ident_mut(&mut self, p: &mut syn::PatIdent) {
+        if let Some((_, sub)) = &mut p.subpat {
+            self.visit_pat_mut(sub);
+        }
+        self.bind(&mut p.ident);
+    }
+
+    fn visit_expr_path_mut(&mut self, e: &mut syn::ExprPath) {
+        if e.qself.is_none() && e.path.segments.len() == 1 && e.path.leading_colon.is_none() {
+            let seg = &mut e.path.segments[0];
+            if let Some(c) = self.lookup(&seg.ident.to_string()) {
+                seg.ident = syn::Ident::new(&c, seg.ident.span());
+                return;
+            }
+        }
+        syn::visit_mut::visit_expr_path_mut(self, e);
+    }
+
+    fn visit_macro_mut(&mut self, m: &mut syn::Macro) {
+        m.tokens = self.rename_tokens(std::mem::take(&mut m.tokens));
+    }
+
+    fn visit_block_mut(&mut self, b: &mut syn::Block) {
+        self.scoped(|s| syn::visit_mut::visit_block_mut(s, b));
+    }
+
+    fn visit_local_mut(&mut self, l: &mut syn::Local) {
+        // what a `let` binds is not seen by its own value
+        if let Some(init) = &mut l.init {
+            self.visit_expr_mut(&mut init.expr);
+            if let Some((_, d)) = &mut init.diverge {
+                self.visit_expr_mut(d);
+            }
+        }
+        self.visit_pat_mut(&mut l.pat);
+    }
+
+    fn visit_arm_mut(&mut self, a: &mut syn::Arm) {
+        self.scoped(|s| {
+            s.visit_pat_mut(&mut a.pat);
+            if let Some((_, g)) = &mut a.guard {
+                s.visit_expr_mut(g);
+            }
+            s.visit_expr_mut(&mut a.body);
+        });
+    }
+
+    fn visit_expr_closure_mut(&mut self, c: &mut syn::ExprClosure) {
+        self.scoped(|s| {
+            for p in c.inputs.iter_mut() {
+                s.visit_pat_mut(p);
+            }
+            s.visit_expr_mut(&mut c.body);
+        });
+    }
+
+    fn visit_expr_for_loop_mut(&mut self, f: &mut syn::ExprForLoop) {
+        self.visit_expr_mut(&mut f.expr);
+        self.scoped(|s| {
+            s.visit_pat_mut(&mut f.pat);
+            s.visit_block_mut(&mut f.body);
+        });
+    }
+
+    fn visit_expr_if_mut(&mut self, i: &mut syn::ExprIf) {
+        if let syn::Expr::Let(l) = &mut *i.cond {
+            self.visit_expr_mut(&mut l.expr);
+            self.scoped(|s| {
+                s.visit_pat_mut(&mut l.pat);
+                s.visit_block_mut(&mut i.then_branch);
+            });
+        } else {
+            self.visit_expr_mut(&mut i.cond);
+            self.visit_block_mut(&mut i.then_branch);
+        }
+        if let Some((_, e)) = &mut i.else_branch {
+            self.visit_expr_mut(e);
+        }
+    }
+
+    fn visit_expr_while_mut(&mut self, w: &mut syn::ExprWhile) {
+        if let syn::Expr::Let(l) = &mut *w.cond {
+            self.visit_expr_mut(&mut l.expr);
+            self.scoped(|s| {
+                s.visit_pat_mut(&mut l.pat);
+                s.visit_block_mut(&mut w.body);
+            });
+        } else {
+            self.visit_expr_mut(&mut w.cond);
+            self.visit_block_mut(&mut w.body);
+        }
+    }
+
+    fn visit_impl_item_fn_mut(&mut self, f: &mut syn::ImplItemFn) {
+        self.scoped(|s| {
+            for a in f.sig.inputs.iter_mut() {
+                if let syn::FnArg::Typed(t) = a {
+                    s.visit_pat_mut(&mut t.pat);
+                }
+            }
+            s.visit_block_mut(&mut f.block);
+        });
+    }
+}
+
+/// A function in the form the to-toolkit proof compares: its bindings renamed by where they are bound, then the
+/// exact normal form.
+pub fn proof_form(f: &syn::ImplItemFn) -> String {
+    let mut f = f.clone();
+    let mut a = Alpha { scopes: Vec::new(), n: 0 };
+    a.visit_impl_item_fn_mut(&mut f);
+    normal_fn(&f, Level::Exact).text
+}

@@ -312,8 +312,13 @@ pub(crate) fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
         ans.headline.push(format!("most repeated shape no piece writes: {} ({} times in {} crates)", frame::proposed_name(&c.frame), c.count, c.crates.len()));
     }
     ans.rows.extend(piece_rows.into_iter().map(|(_, r)| r));
+    let mut names_used: BTreeMap<String, usize> = BTreeMap::new();
     for (i, c) in candidates.iter().take(o.candidates).enumerate() {
-        let name = frame::proposed_name(&c.frame);
+        // one name per shape: a second shape that would take a name gets it numbered
+        let base = frame::proposed_name(&c.frame);
+        let n = names_used.entry(base.clone()).or_default();
+        *n += 1;
+        let name = if *n == 1 { base } else { format!("{base}_{n}") };
         let args = frame::proposed_args(&c.frame);
         let (id, file, line, text) = &c.example;
         let mut r = site(

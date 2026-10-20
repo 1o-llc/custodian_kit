@@ -24,6 +24,7 @@ pub enum Role {
     Error,
     ReturnValue,
     Collection,
+    MapError,
     Place,
     Iter,
     Args,
@@ -43,6 +44,7 @@ impl Role {
             Role::Error => "error",
             Role::ReturnValue => "return_value",
             Role::Collection => "collection",
+            Role::MapError => "map_error",
             Role::Place => "place",
             Role::Iter => "iter",
             Role::Args => "args",
@@ -285,15 +287,17 @@ fn expr(w: &mut W, e: &syn::Expr) {
             operand(w, &b.right, Role::Value);
         }
         syn::Expr::MethodCall(m) => {
-            operand(w, &m.receiver, Role::Collection);
+            let method = m.method.to_string();
+            let (recv, arg) = method_roles(&method);
+            operand(w, &m.receiver, recv);
             w.t(".");
-            w.t(&m.method.to_string());
+            w.t(&method);
             w.t("(");
             for (i, a) in m.args.iter().enumerate() {
                 if i > 0 {
                     w.t(",");
                 }
-                operand(w, a, Role::Value);
+                operand(w, a, arg);
             }
             w.t(")");
         }
@@ -302,6 +306,17 @@ fn expr(w: &mut W, e: &syn::Expr) {
             w.ctl("?");
         }
         _ => operand(w, e, Role::Expr),
+    }
+}
+
+/// What a method's receiver and arguments stand for, by the method.
+fn method_roles(method: &str) -> (Role, Role) {
+    match method {
+        "push" | "push_str" | "extend" | "insert" | "remove" | "retain" | "entry" | "append" | "truncate" => (Role::Collection, Role::Value),
+        "map_err" => (Role::Result, Role::MapError),
+        "ok_or" | "ok_or_else" => (Role::Option, Role::Error),
+        "unwrap_or" | "unwrap_or_else" | "unwrap_or_default" | "expect" => (Role::Option, Role::Value),
+        _ => (Role::Expr, Role::Value),
     }
 }
 
@@ -532,10 +547,16 @@ pub fn of_method(sig: &syn::Signature, body: &syn::Block) -> Option<Frame> {
         }
     }
     w.t("}");
-    Some(done(w))
+    let f = done(w);
+    // a body that is one hole is any one-expression method: simple_method's, not a shape of its own
+    if f.text.ends_with("{ $ }") {
+        return None;
+    }
+    Some(f)
 }
 
-/// A proposed macro's name from a frame's words: its control words and methods, in order, at most five.
+/// A proposed macro's name from a frame's words: its control words, receivers and methods, in order, at most six;
+/// never a keyword alone.
 pub fn proposed_name(f: &Frame) -> String {
     let mut words: Vec<String> = Vec::new();
     for t in f.text.split_whitespace() {
@@ -544,23 +565,27 @@ pub fn proposed_name(f: &Frame) -> String {
             "?" => "try".to_string(),
             "&self" => "ref".to_string(),
             "&mut" | "&mut self" => "mut".to_string(),
+            "mut self" => "owned".to_string(),
+            "=>" | "=" | "." | "," | ";" | "(" | ")" | "{" | "}" | "<" | ">" | "->" | ":" | "&" | "[" | "]" | "()" | "!(..)" => continue,
+            _ if t.starts_with('$') => continue,
             _ if t.chars().all(|c| c.is_alphanumeric() || c == '_') && !t.is_empty() => t.to_lowercase(),
             _ => continue,
         };
-        if ["fn", "self", "in", "let", "else", "_"].contains(&w.as_str()) || w.chars().all(|c| c.is_ascii_digit()) {
+        if ["fn", "in", "_"].contains(&w.as_str()) || w.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        if words.last() != Some(&w) && !words.contains(&w) {
+        if words.last() != Some(&w) {
             words.push(w);
         }
-        if words.len() == 5 {
+        if words.len() == 6 {
             break;
         }
     }
-    if words.is_empty() {
-        "shape".into()
-    } else {
-        words.join("_")
+    const KEYWORDS: &[&str] = &["if", "match", "let", "for", "while", "loop", "return", "break", "continue", "self", "ref", "mut", "str", "bool", "else", "true", "false", "some", "none", "ok", "err", "string", "usize", "fn", "impl", "in", "as", "move", "type", "use", "where", "async", "await", "dyn", "const", "static", "struct", "enum", "trait", "mod", "pub", "crate", "super", "unsafe", "extern"];
+    match words.as_slice() {
+        [] => "shape".into(),
+        [one] if KEYWORDS.contains(&one.as_str()) => format!("{one}_shape"),
+        _ => words.join("_"),
     }
 }
 
