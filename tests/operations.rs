@@ -107,3 +107,20 @@ fn declare_feature_reads_its_list_and_makes_a_dep_entrys_dependency_optional() {
         assert!(!p.authorized && p.preconditions.iter().any(|c| !c.holds && c.detail.contains(why)), "{name}: {:?}", p.preconditions);
     }
 }
+
+#[test]
+fn make_lib_is_for_a_crate_with_only_a_binary_and_a_module_named_lib_is_refused() {
+    let (store, ctx, _) = project("lib");
+    write(&store.root, "Cargo.toml", "[workspace]\nresolver = \"2\"\nmembers = [\"marks\", \"shop\", \"app\", \"tool\"]\n");
+    write(&store.root, "tool/Cargo.toml", "[package]\nname = \"tool\"\nversion = \"0.1.0\"\nedition = \"2021\"\n");
+    write(&store.root, "tool/src/main.rs", "fn main() {}\n");
+    let w = Workspace::open_with(&store.root, &Scope::default(), Resolving::Free).unwrap();
+    let ok = preflight::run_preflight(&ctx, &spec(&store.root, "l", "name = \"l\"\nobjective = \"o\"\noperation = \"make_lib\"\ntarget = \"crate:tool\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(ok.authorized, "{:?} {:?}", ok.reasons, ok.preconditions);
+    assert_eq!(ok.write_set, ["tool/src/lib.rs"]);
+    let has = preflight::run_preflight(&ctx, &spec(&store.root, "l2", "name = \"l2\"\nobjective = \"o\"\noperation = \"make_lib\"\ntarget = \"crate:shop\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(!has.authorized && has.preconditions.iter().any(|c| !c.holds && c.detail.starts_with("it has one")), "{:?}", has.preconditions);
+    // the pantry's 00-lib: a module named lib is no library
+    let m = preflight::run_preflight(&ctx, &spec(&store.root, "m", "name = \"m\"\nobjective = \"o\"\noperation = \"add_module\"\ntarget = \"crate:tool\"\n\n[module]\nname = \"lib\"\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(!m.authorized && m.preconditions.iter().any(|c| !c.holds && c.detail.contains("make_lib")), "{:?}", m.preconditions);
+}

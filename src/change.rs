@@ -60,6 +60,7 @@ vocabulary! {
         ChangeDependency = "change_dependency" : "a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features",
         Inline = "inline" : "a function's body put in place of every call to it (target: a free function, or an associated one without self): each call becomes a block that binds the parameters to the call's arguments with `let`, then the body; the function is removed when it is not `pub` and every use of it was a call",
         Wrap = "wrap" : "a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched",
+        MakeLib = "make_lib" : "a crate's library root, src/lib.rs, made beside its binary (target: crate:<name>, a crate with no library; `module.doc`: the file's inner doc): cargo builds it as the crate's library, and the binary reaches it by the crate's name",
         DeclareFeature = "declare_feature" : "a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given",
     }
 }
@@ -94,14 +95,14 @@ impl Operation {
             Gate | DeclareFeature => &["feature"],
             Anchor => &["linkage"],
             ReplaceBody | Wrap => &["function"],
-            Inline => &[],
+            Inline | MakeLib => &[],
         }
     }
 
     /// Whether the operation's target is an existing item (else a place: a module route, a crate).
     pub fn targets_an_item(self) -> bool {
         use Operation::*;
-        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | ChangeDependency | DeclareFeature | Extract)
+        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | ChangeDependency | DeclareFeature | MakeLib | Extract)
     }
 
     /// The name the operation makes, which must be free where it lands.
@@ -1451,7 +1452,7 @@ pub enum At {
     Above { line: u32 },
     /// At the item at this line (its name, its signature).
     At { line: u32 },
-    /// A new file, its `mod` line in `parent`.
+    /// A new file, its `mod` line in `parent` (empty: a crate root, which no file declares).
     NewFile { parent: String },
     /// The crate's manifest.
     Manifest,
@@ -1479,6 +1480,7 @@ impl Landing {
             At::After { line } => format!("after {} at {}:{line}", self.item.as_deref().unwrap_or(&self.module), self.file),
             At::Above { line } => format!("above {} at {}:{line}", self.item.as_deref().unwrap_or(&self.module), self.file),
             At::At { line } => format!("{} at {}:{line}", self.item.as_deref().unwrap_or(&self.module), self.file),
+            At::NewFile { parent } if parent.is_empty() => format!("a new file {}, the root of {}", self.file, self.package),
             At::NewFile { parent } => format!("a new file {} (module {}), its mod line in {parent}", self.file, self.module),
             At::Manifest => format!("{} ({})", self.file, self.package),
         }
@@ -1646,6 +1648,11 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
         Landing { file: rel(root, &d.location.path), module: d.module.clone(), package: package_of(k, &d.package), item: Some(d.id.clone()), at: at(line) }
     };
     match op {
+        MakeLib => {
+            let name = spec.target.trim().strip_prefix("crate:").filter(|n| !n.contains('/')).ok_or_else(|| format!("`{}` is not a crate:<name> route", spec.target))?;
+            let p = k.packages.get(&name.replace('-', "_")).ok_or_else(|| format!("`{}` is no crate of the workspace", spec.target))?;
+            Ok(Landing { file: rel(root, &p.root.join("src/lib.rs")), module: p.name.replace('-', "_"), package: p.name.clone(), item: None, at: At::NewFile { parent: String::new() } })
+        }
         ChangeDependency => {
             let changes = dependency_changes(k, root, spec)?;
             let one = changes.first().ok_or_else(|| format!("no crate of `{}` names {}", spec.target, spec.dependencies_named().iter().map(|d| d.name.as_str()).collect::<Vec<_>>().join(", ")))?;

@@ -259,7 +259,9 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
     if let Ok(l) = &land {
         write.insert(l.file.clone());
         if let At::NewFile { parent } = &l.at {
-            write.insert(parent.clone());
+            if !parent.is_empty() {
+                write.insert(parent.clone());
+            }
         }
         let module = f.k.modules.get(&l.module);
         let name_free = |name: &str| module.is_none_or(|m| !m.items.contains_key(name));
@@ -274,6 +276,18 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                     pre.push(Check { what: format!("{n} is free in {}", l.module), holds: free, detail: if free { "no item of that name there".into() } else { "taken".into() } });
                 }
                 if f.root.join(&l.file).exists() && matches!(l.at, At::NewFile { .. }) {
+                    collisions.push(format!("{} already exists", l.file));
+                }
+                if op == Operation::AddModule {
+                    let n = makes.clone().unwrap_or_default();
+                    let root_name = ["lib", "main", "mod"].contains(&n.as_str());
+                    pre.push(Check { what: format!("{n} is no crate root's file name"), holds: !root_name, detail: if root_name { format!("a module named {n} is no crate root: make_lib makes src/lib.rs, the library beside the binary") } else { "a module".into() } });
+                }
+            }
+            Operation::MakeLib => {
+                let lib = f.k.packages.get(&l.package.replace('-', "_")).and_then(|p| p.targets.iter().find(|t| t.kind == "lib" || t.kind == "proc-macro"));
+                pre.push(Check { what: format!("{} has no library yet", l.package), holds: lib.is_none(), detail: match lib { Some(t) => format!("it has one: {}", t.src_path.display()), None => "its binary is its only root".into() } });
+                if f.root.join(&l.file).exists() {
                     collisions.push(format!("{} already exists", l.file));
                 }
             }
@@ -525,7 +539,7 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
     // the scope it may write
     let (scope_routes, prefixes): (Vec<String>, Vec<String>) = if spec.scope.write.is_empty() {
         let own: Vec<String> = land.as_ref().map(|l| match &l.at {
-            At::NewFile { parent } => vec![l.file.clone(), parent.clone()],
+            At::NewFile { parent } if !parent.is_empty() => vec![l.file.clone(), parent.clone()],
             // a changed dependency's own files are the manifests that name it (every crate's, for `*`)
             At::Manifest if op == Operation::ChangeDependency => crate::change::dependency_changes(&f.k, &f.root, spec).map(|c| c.into_iter().map(|c| c.manifest).collect::<BTreeSet<_>>().into_iter().collect()).unwrap_or_else(|_| vec![l.file.clone()]),
             _ => vec![l.file.clone()],

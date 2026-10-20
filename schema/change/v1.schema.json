@@ -46,6 +46,7 @@
             "change_dependency",
             "inline",
             "wrap",
+            "make_lib",
             "declare_feature"
           ],
           "description": "What the writer does (the operations table in custodian_kit's README)."

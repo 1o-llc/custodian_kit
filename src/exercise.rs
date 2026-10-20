@@ -119,7 +119,7 @@ pub fn units_of(op: Operation) -> &'static [Unit] {
     match op {
         MakeStruct | MakeEnum | MakeFn | AddModule => &[Unit::File, Unit::Module, Unit::Crate],
         Extract => &[Unit::File, Unit::Module],
-        AddDependency | ChangeDependency | DeclareFeature => &[Unit::Crate],
+        AddDependency | ChangeDependency | DeclareFeature | MakeLib => &[Unit::Crate],
         MakeImpl | AddTraitImpl | AddField | AddVariant | AddDerive => &[Unit::Item],
         AddMethod | AddConstructor => &[Unit::Impl, Unit::Item],
         AddAttribute | Gate | Anchor | Rename | Move => &[Unit::Item, Unit::Function],
@@ -583,6 +583,14 @@ pub fn spec_for(k: &Klepto, root: &Path, op: Operation, t: &Target, n: u64, crat
         AddAttribute => s.attribute = Some("#[allow(dead_code)]".into()),
         Gate => s.feature = Some(first_feature(k, &t.package)?),
         DeclareFeature => s.feature = Some(format!("exercise-feature-{n}")),
+        // only a crate that has no library gets one
+        MakeLib => {
+            let p = k.packages.get(&t.package.replace('-', "_"))?;
+            if p.targets.iter().any(|x| x.kind == "lib" || x.kind == "proc-macro") {
+                return None;
+            }
+            s.module = Some(ModuleSpec { name: "lib".into(), vis: None, doc: Some("made by an exercise".into()) });
+        }
         Anchor => s.linkage = Some(format!("exercise-link-{n}")),
         Rename => {
             let old = last(&t.route);
