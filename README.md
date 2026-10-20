@@ -274,20 +274,22 @@ transform are bound to.
 | `add_derive` | derives added to a type (target: the type), merged into its #[derive(..)] |
 | `add_attribute` | one attribute line placed on an item (target: the item) |
 | `add_module` | a new module: its own file and its `mod` line in the parent (target: the parent route) |
-| `add_dependency` | a dependency line in a crate's Cargo.toml (target: crate:<name>) |
-| `add_test` | a test function (target: the function it proves): in the file's tests module (`to`: another inline test module of the file, by name), its body from toolkit pieces |
+| `add_dependency` | a dependency line in a crate's Cargo.toml (target: crate:<name>); `optional = true` makes it optional, and the lock file cargo writes is written with it |
+| `add_test` | a test function (target: the function it proves): in the file's tests module (`to`: another inline test module of the file, by name; one the file does not have is made, `#[cfg(test)]`), its body from toolkit pieces |
 | `add_constructor` | a constructor for a type (target: the type): `Self { field: param, .. }`, or a toolkit constructor generator |
 | `add_trait_impl` | `impl Trait for Type` (target: the type): a toolkit impl generator, or the trait's functions |
-| `change_signature` | a function's signature changed (target: the function): a new parameter with the expression its call sites pass, or a new name |
+| `change_signature` | a function's signature changed (target: the function): a new parameter with the expression its call sites pass, a new name, a new return type; with `function.body`, its body written in the same step (a body that compiles only against the new signature) |
 | `rename` | an item renamed (target: the item) at its declaration and every use klepto resolves to it |
 | `move` | an item moved to another module (target: the item, `to`: the module route), re-exported where it was so its paths still resolve |
 | `extract` | items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were |
-| `gate` | an item put behind a crate feature the crate declares (target: the item, `feature`) |
+| `gate` | an item put behind a crate feature the crate declares (target: the item, `feature`); an item already gated by it is refused. Code that compiles only with the feature on gets its gate as it is made, in the same step: `#[cfg(feature = "..")]` in the function's `attrs` (add_method, make_fn, add_test) |
 | `anchor` | a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name) |
 | `replace_body` | a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched; with a toolkit method generator (`function.generator`) the whole function is written as the call, its signature, docs and attributes inside it |
-| `change_dependency` | a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features |
+| `change_dependency` | a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features; `optional` true or false, alone (its source kept) or with the rest |
 | `inline` | a function's body put in place of every call to it (target: a free function, or an associated one without self): each call becomes a block that binds the parameters to the call's arguments with `let`, then the body; the function is removed when it is not `pub` and every use of it was a call |
 | `wrap` | a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched |
+| `make_lib` | a crate's library root, src/lib.rs, made beside its binary (target: crate:<name>, a crate with no library; `module.doc`: the file's inner doc): cargo builds it as the crate's library, and the binary reaches it by the crate's name |
+| `declare_feature` | a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given |
 
 A function body is never free text the tool trusts. It is a list of pieces,
 each one of simple_impl 0.1.12's toolkit macros (130 of them, the table is
@@ -383,12 +385,17 @@ first; a `check` receipt named `exercise` is the job's verification.
 
 ## Bounded and unbounded jobs
 
-`jobs::JobMode`: a bounded job's touched Rust and TOML lines must each be
-covered by one of its transform records at close, else the close is refused
-(CUST0031) and the result is `rejected`; an unbounded job is help and nothing
-is refused. Every job records at open whether its target is known (it
+`jobs::JobMode`: a bounded job's touched code lines (Rust, and each crate's
+Cargo.toml, which `add_dependency`, `change_dependency` and `declare_feature`
+write) must each be covered by one of its transform records at close, else
+the close is refused (CUST0031) and the result is `rejected`; an unbounded job
+is help and nothing is refused. Any other file a bounded job touches by hand
+(a features document, a test's expected output) is one no operation writes
+(CUST0041, below). A close gives one refusal: CUST0031 when code was written by
+hand, naming the other files too; CUST0041 when only other files were. Every job records at open whether its target is known (it
 resolves) and whether its outcome is known (its `verify` lines:
-`test:<name>`, `reading:<spec>`, `check:<which>`), and the closing receipt
+`test:<name>`, or `test:<module>::*` for every test of a module,
+`reading:<spec>`, `check:<which>`), and the closing receipt
 says both as they were set at open and the receipt at which each became true.
 `accepted` needs every verify line satisfied by the job's own runs; with none
 the result is `pending`.

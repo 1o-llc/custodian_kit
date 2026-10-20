@@ -1,6 +1,6 @@
 [package]
 name = "custodian_kit"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 # tantivy 0.26 needs 1.86; time, globset, ignore and darling in the lock need 1.88; xccute 0.3.1 (std File locks), 1.89
 rust-version = "1.89"
@@ -25,7 +25,7 @@ thiserror = "1"
 tantivy = "0.26.1"
 # reading specs: klepto is the one extractor; syn reads the attribute and macro tokens klepto hands over,
 # TOML declarations with their spans, and the UTC stamp of each reading
-klepto = "0.3.3"
+klepto = "0.3.4"
 syn = { version = "2", features = ["full", "visit", "extra-traits"] }
 quote = "1"
 # the patterns reading: a body's tokens with their places in its file (a filling taken as written)
