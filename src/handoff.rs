@@ -461,7 +461,8 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 
 /// The cargo line that runs exactly a test line's failed tests.
 pub fn failed_line(t: &TestLine) -> String {
-    let target = match t.target.as_str() {
+    let (word, config) = crate::testrun::Configuration::of_target(&t.target);
+    let target = match word.as_str() {
         "lib" => "--lib".to_string(),
         "lib+bins" | "all" => "--lib --bins".to_string(),
         x => match x.strip_prefix("test:") {
@@ -472,7 +473,8 @@ pub fn failed_line(t: &TestLine) -> String {
             },
         },
     };
-    format!("cargo test -p {} {target} -- {} --exact", t.package, t.failed.join(" "))
+    let config = config.args().into_iter().map(|a| format!(" {a}")).collect::<String>();
+    format!("cargo test -p {} {target}{config} -- {} --exact", t.package, t.failed.join(" "))
 }
 
 /// The handoff as text, in its fixed order.

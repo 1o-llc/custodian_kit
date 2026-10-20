@@ -81,11 +81,13 @@ pub struct Judged {
 /// Whether two target words name one target: `test:gate` and `gate` (the journal keeps a test target bare), and
 /// `lib`, `unit` and `lib+bins` (the library's unit tests).
 fn same_target(a: &str, b: &str) -> bool {
-    let norm = |t: &str| -> String {
-        match t {
+    let norm = |t: &str| -> (String, crate::testrun::Configuration) {
+        let (word, config) = crate::testrun::Configuration::of_target(t);
+        let w = match word.as_str() {
             "unit" | "lib+bins" => "lib".to_string(),
             t => t.strip_prefix("test:").unwrap_or(t).to_string(),
-        }
+        };
+        (w, config)
     };
     norm(a) == norm(b)
 }
@@ -172,7 +174,10 @@ fn libraries(root: &Path) -> Vec<String> {
 
 /// The cargo test line that runs exactly `tests` of one package and target word, in the tree at `root`.
 fn line_for(root: &Path, package: &str, target: &str, tests: &[String], libs: &[String]) -> exec::CargoTestRooted<exec::Cargo> {
-    let mut line = exec::Cargo::test(root.join("Cargo.toml").as_os_str(), package);
+    // a line run under a feature configuration carries it in its target word: run again the same way
+    let (word, config) = crate::testrun::Configuration::of_target(target);
+    let target = word.as_str();
+    let mut line = config.on(exec::Cargo::test(root.join("Cargo.toml").as_os_str(), package));
     let has_lib = libs.iter().any(|l| *l == package.replace('-', "_"));
     line = match target.split_once(':') {
         Some(("bin", b)) => line.bin(b),

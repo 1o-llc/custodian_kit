@@ -154,6 +154,16 @@ pub struct CargoTest {
     #[builder(into)]
     #[arg(kv = "--bin")]
     pub bin: Option<OsString>,
+    /// A feature configuration ([`crate::testrun::Configuration`]): without the default features.
+    #[arg(flag = "--no-default-features")]
+    pub no_default_features: bool,
+    /// Every feature.
+    #[arg(flag = "--all-features")]
+    pub all_features: bool,
+    /// These features, comma-separated.
+    #[builder(into)]
+    #[arg(kv = "--features")]
+    pub features: Option<OsString>,
     /// `--`, the filters, then `--exact`.
     #[arg(positional)]
     pub rest: Vec<OsString>,

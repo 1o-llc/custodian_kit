@@ -36,6 +36,101 @@ impl std::str::FromStr for Observe {
     }
 }
 
+/// A feature configuration a test line runs under: cargo's default features (`Configuration::default()`), with
+/// listed features on top, with every feature, or without the defaults. A line run under another configuration
+/// than the default carries it in its target word, `lib [features json]`, so its outcomes are told apart from the
+/// default's and a rerun (a job's close) runs it the same way.
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+pub struct Configuration {
+    pub no_default: bool,
+    pub all: bool,
+    pub features: Vec<String>,
+}
+
+impl Configuration {
+    pub fn is_default(&self) -> bool {
+        *self == Configuration::default()
+    }
+
+    /// cargo's words for it: `--no-default-features`, `--all-features`, `--features a,b`.
+    pub fn args(&self) -> Vec<String> {
+        let mut a = Vec::new();
+        if self.no_default {
+            a.push("--no-default-features".to_string());
+        }
+        if self.all {
+            a.push("--all-features".to_string());
+        }
+        if !self.features.is_empty() {
+            a.push("--features".to_string());
+            a.push(self.features.join(","));
+        }
+        a
+    }
+
+    /// `no-default-features, features json,chrono`; empty for the default.
+    pub fn label(&self) -> String {
+        let mut parts = Vec::new();
+        if self.no_default {
+            parts.push("no-default-features".to_string());
+        }
+        if self.all {
+            parts.push("all-features".to_string());
+        }
+        if !self.features.is_empty() {
+            parts.push(format!("features {}", self.features.join(",")));
+        }
+        parts.join(", ")
+    }
+
+    /// A target word with this configuration: the word itself for the default, else `<word> [<label>]`.
+    pub fn target_with(&self, target: &str) -> String {
+        if self.is_default() {
+            target.to_string()
+        } else {
+            format!("{target} [{}]", self.label())
+        }
+    }
+
+    /// A target word read back: the word and its configuration.
+    pub fn of_target(target: &str) -> (String, Configuration) {
+        let Some((word, rest)) = target.split_once(" [") else { return (target.to_string(), Configuration::default()) };
+        let mut c = Configuration::default();
+        for part in rest.trim_end_matches(']').split(", ") {
+            match part {
+                "no-default-features" => c.no_default = true,
+                "all-features" => c.all = true,
+                p => {
+                    if let Some(f) = p.strip_prefix("features ") {
+                        c.features = f.split(',').filter(|x| !x.is_empty()).map(str::to_string).collect();
+                    }
+                }
+            }
+        }
+        (word.to_string(), c)
+    }
+
+    /// Every configuration klepto's check matrix asks of a package (the transform's N of N): each feature set, with
+    /// and without the defaults, one per distinct set of features on.
+    pub fn matrix(model: &klepto::FeatureModel) -> Vec<Configuration> {
+        klepto::check_matrix(model).into_iter().map(|j| Configuration { no_default: j.no_default, all: false, features: j.features }).collect()
+    }
+
+    /// The configuration on a cargo test line.
+    pub fn on(&self, mut line: exec::CargoTestRooted<exec::Cargo>) -> exec::CargoTestRooted<exec::Cargo> {
+        if self.no_default {
+            line = line.no_default_features();
+        }
+        if self.all {
+            line = line.all_features();
+        }
+        if !self.features.is_empty() {
+            line = line.features(self.features.join(","));
+        }
+        line
+    }
+}
+
 /// One cargo test line to run: a package, a target, the exact filters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TestLine {
@@ -233,4 +328,22 @@ pub fn report(ctx: &Ctx) -> Result<String> {
         _ => s.push_str("\nno #[timed_test] timings in .maintenance/timings.\n"),
     }
     Ok(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_configuration_is_carried_in_the_target_word_and_read_back() {
+        let c = Configuration { no_default: true, all: false, features: vec!["json".into(), "chrono".into()] };
+        assert_eq!(c.args(), ["--no-default-features", "--features", "json,chrono"]);
+        let word = c.target_with("lib");
+        assert_eq!(word, "lib [no-default-features, features json,chrono]");
+        assert_eq!(Configuration::of_target(&word), ("lib".to_string(), c));
+        assert_eq!(Configuration::default().target_with("test:gate"), "test:gate");
+        assert_eq!(Configuration::of_target("test:gate"), ("test:gate".to_string(), Configuration::default()));
+        let all = Configuration { all: true, ..Default::default() };
+        assert_eq!(Configuration::of_target(&all.target_with("bin:tool")), ("bin:tool".to_string(), all));
+    }
 }
