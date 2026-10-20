@@ -60,6 +60,7 @@ pub mod transform;
 pub mod plan;
 pub mod tasks;
 pub mod exercise;
+pub mod baseline;
 
 #[cfg(test)]
 mod tests;

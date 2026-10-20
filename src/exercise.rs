@@ -123,7 +123,7 @@ pub fn units_of(op: Operation) -> &'static [Unit] {
         MakeImpl | AddTraitImpl | AddField | AddVariant | AddDerive => &[Unit::Item],
         AddMethod | AddConstructor => &[Unit::Impl, Unit::Item],
         AddAttribute | Gate | Anchor | Rename | Move => &[Unit::Item, Unit::Function],
-        ChangeSignature | ReplaceBody | AddTest => &[Unit::Function],
+        ChangeSignature | ReplaceBody | AddTest | Inline | Wrap => &[Unit::Function],
     }
 }
 
@@ -137,7 +137,7 @@ mod word {
     /// is `Unit::ALL[i]`), and how it runs; its rules are checked by flaga_solver.
     #[bitpack(storage = u64, version = 1)]
     pub struct ExerciseWord {
-        #[bits(22)]
+        #[bits(24)]
         #[describe("the operations an exercise runs, bit i the vocabulary's i-th")]
         ops: u32,
         #[bits(6)]
@@ -391,6 +391,8 @@ pub fn targets(k: &Klepto, root: &Path, op: Operation, unit: Unit, krate: Option
                     Move => free && other_module(k, root, &d.package, &d.module).is_some(),
                     Gate => first_feature(k, &d.package).is_some(),
                     ChangeSignature => !f.is_generic,
+                    // a function the rule says can be inlined (crate::change::inline_blockers), that something calls
+                    Inline => crate::change::inline_blockers(k, &d.id).is_empty() && k.calls.iter().any(|c| matches!(&c.resolution, Some(klepto::Resolution::Local(id) | klepto::Resolution::External(id)) if *id == d.id)),
                     _ => true,
                 };
                 if ok {
@@ -615,6 +617,8 @@ pub fn spec_for(k: &Klepto, root: &Path, op: Operation, t: &Target, n: u64, crat
             s.call_sites = Some(CallSites { pass: Some("0".into()) });
         }
         ReplaceBody => s.function = Some(FnSpec { name: last(&t.route).to_string(), doc: Some("replaced by an exercise".into()), ..FnSpec::default() }),
+        Inline => {}
+        Wrap => s.function = Some(FnSpec { name: last(&t.route).to_string(), body: vec![Piece { piece: "let".into(), bind: Some(format!("_exercise_{n}")), value: Some("0u8".into()), ..Piece::default() }], ..FnSpec::default() }),
         AddTest => s.function = Some(FnSpec { name: format!("exercise_test_{n}"), body: vec![step_value("assert!(true)")], ..FnSpec::default() }),
         AddMethod => s.function = Some(u32fn(format!("exercise_method_{n}"), Some("&self"))),
         AddConstructor => {
@@ -1579,8 +1583,8 @@ mod tests {
         assert_eq!(ExerciseWord::from_raw(all.word).operations().len(), Operation::ALL.len());
         assert_eq!(ExerciseWord::from_raw(all.word).unit_kinds().len(), Unit::ALL.len());
         // a word that is not a vocabulary's is refused, with what it may be
-        let e = Options::from_words(Some("inline"), None, None, false, None, None, None).unwrap_err();
-        assert!(e.to_string().contains("unknown operation `inline`"), "{e}");
+        let e = Options::from_words(Some("unroll"), None, None, false, None, None, None).unwrap_err();
+        assert!(e.to_string().contains("unknown operation `unroll`"), "{e}");
         assert!(Options::from_words(None, Some("trait"), None, false, None, None, None).is_err());
         assert!(Options::from_words(None, None, Some("0"), false, None, None, None).is_err());
     }

@@ -164,9 +164,10 @@ fn operations_for(kind: &str) -> Vec<String> {
     let ops: &[Operation] = match kind {
         "struct" => &[Operation::AddField, Operation::AddMethod, Operation::AddTraitImpl],
         "enum" => &[Operation::AddVariant, Operation::AddMethod],
-        "fn" | "method" => &[Operation::ChangeSignature, Operation::AddTest, Operation::Rename],
+        "fn" => &[Operation::ChangeSignature, Operation::ReplaceBody, Operation::Wrap, Operation::Inline, Operation::AddTest, Operation::Rename],
+        "method" => &[Operation::ChangeSignature, Operation::ReplaceBody, Operation::Wrap, Operation::AddTest, Operation::Rename],
         "trait" => &[Operation::AddMethod],
-        "crate" => &[Operation::MakeStruct, Operation::MakeFn, Operation::AddModule],
+        "crate" => &[Operation::MakeStruct, Operation::MakeFn, Operation::AddModule, Operation::ChangeDependency],
         _ => &[Operation::Rename, Operation::AddAttribute],
     };
     ops.iter().map(|o| o.as_str().to_string()).collect()

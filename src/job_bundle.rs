@@ -152,7 +152,7 @@ pub fn job_readings(folder: &Path) -> Vec<(PathBuf, ReadingReport)> {
         for p in entries {
             if p.is_dir() {
                 stack.push(p);
-            } else if p.extension().is_some_and(|e| e == "json") && p.file_name().is_some_and(|n| n != "latest.json") {
+            } else if p.extension().is_some_and(|e| e == "json") && p.file_name().is_some_and(|n| n != "latest.json" && n != crate::reading::READINGS_INDEX) {
                 if let Ok(r) = load(&p) {
                     out.push((p.with_extension("md"), r));
                 }

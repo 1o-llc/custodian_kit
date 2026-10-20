@@ -192,7 +192,7 @@ fn the_schemas_name_exactly_the_fields_of_the_rust_forms() {
     declared.sort();
     assert_eq!(have, declared);
 
-    let job = custodian_kit::jobs::JobFile { id: Some("1".into()), name: Some("n".into()), kind: Some("specs".into()), target: Some("t".into()), origin: Some("o".into()), count: Some(true), routes: vec!["*".into()], task_id: Some("t".into()), revision: Some("base".into()), mode: Some(custodian_kit::jobs::JobMode::Bounded), verify: vec!["test:x".into()], target_known: Some(true), outcome_known: Some(true) };
+    let job = custodian_kit::jobs::JobFile { id: Some("1".into()), name: Some("n".into()), kind: Some("specs".into()), target: Some("t".into()), origin: Some("o".into()), count: Some(true), routes: vec!["*".into()], task_id: Some("t".into()), revision: Some("base".into()), mode: Some(custodian_kit::jobs::JobMode::Bounded), verify: vec!["test:x".into()], target_known: Some(true), outcome_known: Some(true), base_commit: Some("c".into()), baseline: Some(true), allow_file: vec!["tests/ui/*.stderr".into()] };
     let mut have = Vec::new();
     keys(&serde_json::to_value(&job).unwrap(), "", &mut have);
     let mut declared = Vec::new();

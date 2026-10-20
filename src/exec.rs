@@ -60,7 +60,7 @@ pub struct ExecReading {
 #[composite(command = "check", method = "check", ty = CargoCheck, init = "manifest_path")]
 pub struct Cargo;
 
-/// `cargo test --manifest-path M -p PACKAGE [--lib --bins | --test T] -- FILTER... --exact`.
+/// `cargo test --manifest-path M -p PACKAGE [--lib --bins | --test T | --bin B] -- FILTER... --exact`.
 #[allow(clippy::duplicated_attributes)]
 #[derive(SimpleSubCommand, Debug, Clone, Default)]
 #[subcommand(segment = "test")]
@@ -81,6 +81,10 @@ pub struct CargoTest {
     #[builder(into)]
     #[arg(kv = "--test")]
     pub test: Option<OsString>,
+    /// One binary's unit tests.
+    #[builder(into)]
+    #[arg(kv = "--bin")]
+    pub bin: Option<OsString>,
     /// `--`, the filters, then `--exact`.
     #[arg(positional)]
     pub rest: Vec<OsString>,

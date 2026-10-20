@@ -77,7 +77,9 @@ pub struct Dimension {
 
 /// What the target is.
 fn target_kind(f: &Facts, target: &str) -> &'static str {
-    if f.package_named(target).is_some() {
+    if target == crate::change::WORKSPACE {
+        "workspace"
+    } else if f.package_named(target).is_some() {
         "crate"
     } else if f.root.join(target.trim_start_matches("./")).is_file() {
         "file"
@@ -119,6 +121,8 @@ pub fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
             let abs = f.root.join(target.trim_start_matches("./"));
             f.k.items.iter().filter(|d| d.location.path == abs).map(|d| d.id.clone()).collect()
         }
+        // `*`: every crate of the workspace (a change_dependency over every crate naming it)
+        "workspace" => f.k.items.iter().map(|d| d.id.clone()).collect(),
         _ => BTreeSet::from([item_id(f, target)?]),
     };
     let defs: usize;
@@ -171,6 +175,10 @@ pub fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
                 }
             }
         }
+        "workspace" => {
+            defs = seeds.len();
+            public = f.k.items.iter().any(|d| d.is_public);
+        }
         "crate" => {
             let a = public_api(f, &spec_of(spec, ReadingKind::PublicApi))?;
             defs = a.rows.iter().filter(|r| r.kind == "public-item").count();
@@ -191,18 +199,30 @@ pub fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
         }
     }
     // what depends on it, and what a change reaches
-    let dep_target = if what == "item" { seeds.iter().next().cloned().unwrap_or_default() } else { target.to_string() };
-    let dependents_answer = dependents(f, &ReadingSpec { target: dep_target, ..spec_of(spec, ReadingKind::Dependents) }).ok();
-    let fan_out = dependents_answer.as_ref().map(|a| a.rows.len()).unwrap_or(0);
-    if let Some(a) = dependents_answer {
-        rows.extend(a.rows);
-    }
-    let r = reach(f, &spec_of(spec, ReadingKind::Reach))?;
-    let count_of = |a: &Answer, what: &str| a.counts.iter().find(|c| c.what == what).map(|c| c.n).unwrap_or(0);
-    let (items_reached, files, crates, bins) = (count_of(&r, "items touched"), count_of(&r, "files"), count_of(&r, "crates"), count_of(&r, "binaries"));
-    let packages: BTreeSet<String> = r.rows.iter().filter(|x| x.kind == "reach-crate").map(|x| x.label.clone()).collect();
-    let files_of: BTreeSet<String> = seeds.iter().chain(r.rows.iter().filter_map(|x| x.attributes.get("item"))).filter_map(|id| f.item(id).map(|d| f.rel(&d.location.path))).collect();
-    rows.extend(r.rows);
+    let (fan_out, items_reached, files, crates, bins, packages, files_of) = if what == "workspace" {
+        // the whole workspace is what it reaches: every crate, file and binary, nothing depending on it from outside
+        let packages: BTreeSet<String> = f.k.packages.keys().cloned().collect();
+        let bins = f.k.packages.values().map(|p| p.targets.iter().filter(|t| t.kind == "bin").count()).sum();
+        let files_of: BTreeSet<String> = f.k.files.iter().map(|x| f.rel(&x.path)).collect();
+        for p in &packages {
+            rows.push(named("reach-crate", p.clone(), Some(p.clone()), "a crate of the workspace", vec![]));
+        }
+        (0, seeds.len(), files_of.len(), packages.len(), bins, packages, files_of)
+    } else {
+        let dep_target = if what == "item" { seeds.iter().next().cloned().unwrap_or_default() } else { target.to_string() };
+        let dependents_answer = dependents(f, &ReadingSpec { target: dep_target, ..spec_of(spec, ReadingKind::Dependents) }).ok();
+        let fan_out = dependents_answer.as_ref().map(|a| a.rows.len()).unwrap_or(0);
+        if let Some(a) = dependents_answer {
+            rows.extend(a.rows);
+        }
+        let r = reach(f, &spec_of(spec, ReadingKind::Reach))?;
+        let count_of = |a: &Answer, what: &str| a.counts.iter().find(|c| c.what == what).map(|c| c.n).unwrap_or(0);
+        let (items_reached, files, crates, bins) = (count_of(&r, "items touched"), count_of(&r, "files"), count_of(&r, "crates"), count_of(&r, "binaries"));
+        let packages: BTreeSet<String> = r.rows.iter().filter(|x| x.kind == "reach-crate").map(|x| x.label.clone()).collect();
+        let files_of: BTreeSet<String> = seeds.iter().chain(r.rows.iter().filter_map(|x| x.attributes.get("item"))).filter_map(|id| f.item(id).map(|d| f.rel(&d.location.path))).collect();
+        rows.extend(r.rows);
+        (fan_out, items_reached, files, crates, bins, packages, files_of)
+    };
     // the tests that cover it
     let cases: Vec<TestCase> = tests_reaching(f, &seeds);
     rows.extend(test_rows(f, &cases, "a test whose calls reach the change"));

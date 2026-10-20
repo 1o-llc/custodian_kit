@@ -43,7 +43,9 @@
             "gate",
             "anchor",
             "replace_body",
-            "change_dependency"
+            "change_dependency",
+            "inline",
+            "wrap"
           ],
           "description": "What the writer does (the operations table in custodian_kit's README)."
         },

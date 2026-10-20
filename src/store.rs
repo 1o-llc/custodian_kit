@@ -80,11 +80,14 @@ pub mod named {
     pub const LOG: ArtifactOutputDescriptor = part("custodian.log.v1", "custodian.log", "log", ArtifactEndpoint::FileTxt, AppPathRole::Data, "logs/{name}.txt", PathMutability::AppendOnly);
     /// A tree snapshot (`tree_history::tree`), one per point.
     pub const TREE: ArtifactOutputDescriptor = file("custodian.tree", "tree", ArtifactEndpoint::FileJson, AppPathRole::Data, "trees/{point}.json", PathMutability::AppendOnly);
+    /// The parsed index, held once per code digest (klepto's model in its serde form, as CBOR): the next scan of the
+    /// same code reads it instead of parsing.
+    pub const INDEX_MODEL: ArtifactOutputDescriptor = file("custodian.index", "index", ArtifactEndpoint::FileCbor, AppPathRole::State, "index/{digest}/model.cbor", PathMutability::Writable);
 
     /// Every part of the folder, each once: what `custodian list` prints and what the golden test pins.
     pub const ALL: &[ArtifactOutputDescriptor] = &[
         SETTINGS, PATHS, SCHEMA, THRESHOLDS, JOB_TEMPLATE, QUEUED_SPEC, DONE_SPEC, READING_PAGE, RECEIPT, INVENTORY, PLAN, HISTORY_INDEX, JOURNAL, JOB_FILE, SOCKET,
-        READING_RECORD, CHECK_RUN, LOG, WRITER, CHANGE_SPEC, PREFLIGHT, TRANSFORM, LINKAGE, INTENT_PLAN, TREE,
+        READING_RECORD, CHECK_RUN, LOG, WRITER, CHANGE_SPEC, PREFLIGHT, TRANSFORM, LINKAGE, INTENT_PLAN, TREE, INDEX_MODEL,
     ];
 
     /// The folder's policy for the project at `root`: pathgen's dev policy whose base is the root and whose app

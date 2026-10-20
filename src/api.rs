@@ -184,10 +184,11 @@ impl Reading {
     pub fn digest(&self) -> String {
         let mut r = self.report.clone();
         r.stamp.clear();
+        r.index = None;
         crate::digest::of_value(&r)
     }
 
-    /// Writes `<base>/<name>/<stamp>.md|.json` and the latest copies.
+    /// Writes `<base>/<name>/<stamp>.md|.json` and names it the latest in the folder's index.
     pub fn write(&self, base: &Path) -> Result<(PathBuf, PathBuf, PathBuf), Refusal> {
         Ok(crate::reading::write(base, &self.report)?)
     }

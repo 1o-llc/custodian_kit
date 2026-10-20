@@ -4,7 +4,8 @@
 //!
 //! `reading run <spec.toml>` writes `<stamp>.md` and `<stamp>.json` (the
 //! code_passenger.query.v1 receipt inside a custodian.reading.v1 record)
-//! and copies them to `latest.md` / `latest.json`. `reading list` shows the
+//! and names the latest in the folder's `index.json` (never a copy: each
+//! reading is stored once). `reading list` shows the
 //! specs and their latest readings. Nothing else in the project is written.
 
 pub mod declared;
@@ -73,6 +74,10 @@ pub struct ReadingReport {
     /// The finding in a few lines (the duplicates' top crate pairs, an impact's record line).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headline: Vec<String>,
+    /// Where the parsed index it read came from: `parsed (<ms> ms)`, `from cache (<ms> ms)`, `from daemon`. Not part
+    /// of the reading's digest: the same answer from a cache is the same reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<String>,
 }
 
 /// What a kind found, before it becomes a report.
@@ -108,7 +113,14 @@ pub fn read(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, how:
 
 /// Answers `spec` over a scan already made (a workspace held open).
 pub fn read_facts(facts: &Facts, spec_path: &Path, spec: &ReadingSpec, stamp: &str) -> Result<ReadingReport> {
-    let facts = facts;
+    // a kind that walks the syntax trees, over an index read back from the cache (which holds none): parsed for it
+    let parsed;
+    let facts = if spec.kind.walks_trees() && !facts.trees {
+        parsed = Facts::build_parsed(&facts.root, &spec.scope, facts.how)?;
+        &parsed
+    } else {
+        facts
+    };
     let spec = &resolved(facts, spec)?;
     let graph = crate::graph_from_klepto(&facts.root, &facts.k);
     let index_key = crate::index_key_of(&graph, &spec.query_args()).ok().map(|r| r.key.key_id);
@@ -178,6 +190,7 @@ pub fn read_facts(facts: &Facts, spec_path: &Path, spec: &ReadingSpec, stamp: &s
         artifact: answer.artifact,
         count: answer.count,
         headline: answer.headline,
+        index: Some(facts.index.line()),
     })
 }
 
@@ -241,6 +254,7 @@ fn read_sweep(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, ho
         artifact: None,
         count: None,
         headline: Vec::new(),
+        index: None,
     })
 }
 
@@ -272,6 +286,7 @@ pub struct ReadingSummary {
     /// Where the page and its JSON were written (`None` in free mode).
     pub page: Option<PathBuf>,
     pub json: Option<PathBuf>,
+    /// The folder's readings index, which names the latest (`index.json`; it was a copy, `latest.md`, before 0.3.3).
     pub latest: Option<PathBuf>,
     pub index_key: Option<String>,
     pub items: Vec<String>,
@@ -281,15 +296,29 @@ pub struct ReadingSummary {
     /// The finding in a few lines.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headline: Vec<String>,
+    /// Where the parsed index came from (the reading's `index`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<String>,
 }
 
 /// The env key a reading line takes extra changed files from (affected_tests
 /// after a git ref's diff), one path per line.
 pub const CHANGE_FILES_ENV: &str = "CUSTODIAN_CHANGE_FILES";
 
+/// A spec's readings folder's index (`index.json`): the latest reading and every one, by stem
+/// (`<stamp>`, whose `.md` and `.json` sit beside it). It names them; it never copies one.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReadingsIndex {
+    pub latest: String,
+    pub readings: Vec<String>,
+}
+
+/// The readings index's file in a spec's readings folder.
+pub const READINGS_INDEX: &str = "index.json";
+
 /// Writes `<base>/<name>/<stamp>.md` and `.json` (and `.bundle`, a bundle
-/// reading's bundle), and their `latest` copies,
-/// each whole. An earlier page is never overwritten: a second reading in the
+/// reading's bundle), and names the latest in the folder's index
+/// ([`READINGS_INDEX`]), each whole. An earlier page is never overwritten: a second reading in the
 /// same second is `<stamp>-2`.
 pub fn write(base: &Path, report: &ReadingReport) -> Result<(PathBuf, PathBuf, PathBuf)> {
     let dir = base.join(&report.name);
@@ -305,9 +334,12 @@ pub fn write(base: &Path, report: &ReadingReport) -> Result<(PathBuf, PathBuf, P
     let text = serde_json::to_string_pretty(report)? + "\n";
     crate::store::write_whole(&page, md.as_bytes())?;
     crate::store::write_whole(&json, text.as_bytes())?;
-    let latest = dir.join("latest.md");
-    crate::store::write_whole(&latest, md.as_bytes())?;
-    crate::store::write_whole(&dir.join("latest.json"), text.as_bytes())?;
+    // the latest is named, never copied: one copy of each reading
+    let latest = dir.join(READINGS_INDEX);
+    let mut index: ReadingsIndex = std::fs::read_to_string(&latest).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    index.readings.push(stem.clone());
+    index.latest = stem;
+    crate::store::write_whole(&latest, (serde_json::to_string_pretty(&index)? + "\n").as_bytes())?;
     if let Some(bytes) = &report.artifact {
         crate::store::write_whole(&page.with_extension("bundle"), bytes)?;
     }
@@ -344,7 +376,7 @@ pub fn answer(spec_path: &Path, root: &Path, out: &str, stamp: &str, how: crate:
         (Some(p), Some(j), Some(l))
     };
     let bundle = page.as_ref().filter(|_| report.artifact.is_some()).map(|p| p.with_extension("bundle"));
-    Ok(ReadingSummary { name: report.name, kind: report.kind, target: report.target, stamp: report.stamp, counts: report.counts, page, json, latest, index_key: report.index_key, items: report.items, bundle, headline: report.headline })
+    Ok(ReadingSummary { name: report.name, kind: report.kind, target: report.target, stamp: report.stamp, counts: report.counts, page, json, latest, index_key: report.index_key, items: report.items, bundle, headline: report.headline, index: report.index })
 }
 
 /// A reading written before, read back.

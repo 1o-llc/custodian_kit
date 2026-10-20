@@ -165,9 +165,12 @@ digest. `count::history` lists a route's counts from the journal.
 
 A job whose template says `count = true` (triage and features do) is counted
 at open, after each step that changes code, and at close; its closing
-receipt lists the lines touched per step and for the job
-(`job: +6 −0 across 2 files in 2 crates`), and `jobs::lines_within` sums them
-over a set of jobs.
+receipt lists the lines touched per step and for the job, and
+`jobs::lines_within` sums them over a set of jobs. In a git repository the
+job's own figure is git's, exact: `git diff --numstat` against the commit the
+job opened at, new files counted whole, cargo's lock file aside
+(`job: +55 −37 across 10 files in 9 crates (git diff --numstat 2d95b71c...)`);
+a step's figure is the counts' and says `net`.
 
 ## Scope depth
 
@@ -220,7 +223,19 @@ A reading is a `custodian.reading.v1` record holding the
 | `outputs`, `job`, `reused_seq`, `millis` | the files written, the job, the run reused when the same search had already answered |
 
 Two runs with the same `spec_hash` and `code_digest` are the same search: the
-second reuses the first's reading and says so. Every digest is
+second reuses the first's reading and says so. A reading is stored once: its
+folder's `index.json` names the latest and every one, by stem; nothing is
+copied to a `latest` file.
+
+The parsed index is held once per code digest. A scan in a project with a
+`.custodian` folder keeps klepto's model (its serde form, as CBOR) under
+`.custodian/state/index/<digest>/model.cbor`, and the next scan of the same
+code (the same klepto, the same scan options) reads it back instead of
+parsing; the newest two are kept. The model holds no syntax trees, so `count`
+and `bundle`, which walk them, parse. A reading's record and its receipt's
+`reason` say where its index came from: `parsed (35901 ms)`,
+`from cache (3314 ms)`, `from daemon` (custodian's resident). On the kit's
+workspace: parsed in 35.9 s at 5.7 GB, read back in 3.3 s at 1.8 GB. Every digest is
 `stable_digest`'s sha256 over a declared canonical form, written `sha256:<hex>`.
 
 ## Change specs and the preflight
@@ -257,6 +272,8 @@ transform are bound to.
 | `anchor` | a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name) |
 | `replace_body` | a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched |
 | `change_dependency` | a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features |
+| `inline` | a function's body put in place of every call to it (target: a free function, or an associated one without self): each call becomes a block that binds the parameters to the call's arguments with `let`, then the body; the function is removed when it is not `pub` and every use of it was a call |
+| `wrap` | a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched |
 
 A function body is never free text the tool trusts. It is a list of pieces,
 each one of simple_impl 0.1.11's toolkit macros (123 of them, the table is
@@ -358,8 +375,30 @@ covered by one of its transform records at close, else the close is refused
 is refused. Every job records at open whether its target is known (it
 resolves) and whether its outcome is known (its `verify` lines:
 `test:<name>`, `reading:<spec>`, `check:<which>`), and the closing receipt
-records the receipt at which each became true. `accepted` needs every verify
-line satisfied by the job's own runs; with none the result is `pending`.
+says both as they were set at open and the receipt at which each became true.
+`accepted` needs every verify line satisfied by the job's own runs; with none
+the result is `pending`.
+
+A job opens at a commit (`base_commit`, `git rev-parse HEAD` at `job start`).
+A test the job ran that fails the same way at that base is not the job's
+failure (`baseline`): at close each failing test is run again on the job's
+tree for its first failing line (the panic's message, the trees' own paths
+written `<root>`), and looked up at the base: in the baseline `job start`
+kept when the job file says `baseline true` (the tests the target reaches,
+run at open, `data/baseline.json`), else on a worktree of the repository at
+the base commit, outside the project. The same first failing line there makes
+it `pre-existing`: the closing receipt names it with that line and the job
+can still be `accepted`. One that passes at the base, fails there another
+way, or passes when run again, is the job's (`failing`, with why).
+
+The closing receipt lists every file the job touched since its base (git's:
+changed against the base commit and new files, a file that already differed
+at open counted from its state then), each with what carries it: a
+`transform #<seq>`, `allow_file <glob>`, `cargo` (the lock file), or `hand`.
+In a bounded job a file no operation writes (a test's expected output, a
+fixture) must be named by an `allow_file` glob in the job file
+(`jobs::declare_allow`, `custodian job allow GLOB`), else the close is
+refused (CUST0041) and `rejected`.
 The task states (`tasks::TaskState`: proposed, ready, running, blocked,
 paused, verifying, completed, failed) are derived from the records.
 

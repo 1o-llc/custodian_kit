@@ -32,6 +32,7 @@ const GOLDEN: &[(&str, &str)] = &[
     ("custodian.linkage", "data/linkage/v1.{name}.1o.linkage"),
     ("custodian.intent_plan", "data/plans/intent/{name}.json"),
     ("custodian.tree", "data/trees/{point}.json"),
+    ("custodian.index", "state/index/{digest}/model.cbor"),
 ];
 
 #[test]
@@ -57,7 +58,7 @@ fn a_part_resolves_under_the_projects_folder_and_never_leaves_it() {
     std::fs::create_dir_all(&d).unwrap();
     let (store, _) = custodian_kit::store::Store::init(&d, custodian_kit::store::Mode::Plain).unwrap();
     for part in ALL {
-        let vars: Vec<(&str, &str)> = ["name", "stamp", "seq", "state", "job", "kind", "modifier", "point"].iter().map(|k| (*k, "x")).collect();
+        let vars: Vec<(&str, &str)> = ["name", "stamp", "seq", "state", "job", "kind", "modifier", "point", "digest"].iter().map(|k| (*k, "x")).collect();
         assert_eq!(store.path(part, &vars).unwrap(), named::resolve(&named::policy(&store.root).unwrap(), part, &vars).unwrap(), "{}", part.route_id);
     }
 }

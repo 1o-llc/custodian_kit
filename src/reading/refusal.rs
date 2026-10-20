@@ -86,6 +86,10 @@ pub enum ReadingRefusal {
     NoPlanStep,
     #[liaise(code = 39, msg = "the reading reads declarations and none are named: no declared_in source in the spec, and no default in .custodian/config/declared.toml")]
     NoDeclaredSource,
+    #[liaise(code = 40, msg = "an attribute macro rewrites the item, and the operation does not know how: it writes the item as declared, the macro does not leave it so")]
+    MacroRewrites,
+    #[liaise(code = 41, msg = "a file the job touched is neither code a transform wrote nor a file the job allows (allow_file)")]
+    FileNotAllowed,
     #[liaise(code = 101, msg = "the bundle filters break the word's own rules")]
     FiltersRefused,
     #[liaise(code = 102, msg = "the route holds no file the filters keep")]

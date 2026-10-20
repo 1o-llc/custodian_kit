@@ -119,6 +119,12 @@ vocabulary! {
 }
 
 impl ReadingKind {
+    /// Whether the kind walks the syntax trees (the count's test lines and inline modules, the bundle's cfg windows):
+    /// an index read back from the cache holds none, so these are answered over a parse.
+    pub fn walks_trees(self) -> bool {
+        matches!(self, ReadingKind::Count | ReadingKind::Bundle)
+    }
+
     /// The kind in code_passenger.query.v1 results this reading writes.
     pub fn query_kind(self) -> &'static str {
         match self {

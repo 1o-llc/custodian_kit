@@ -18,7 +18,7 @@ use crate::runs::{keep, now_utc, run_reading_by, Ctx, InJob, Ran, Runner};
 use crate::store::{write_whole, JobRow, JobState, Receipt, Store, RECEIPT_SCHEMA};
 use crate::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// The job templates custodian ships; `agent init` writes each to
@@ -201,6 +201,17 @@ pub struct JobFile {
     /// At open: the job declared its verification.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome_known: Option<bool>,
+    /// The commit the job opened at (`git rev-parse HEAD` at `job start`): the base a failing test is judged
+    /// against, and where `test --affected` measures the job's change from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_commit: Option<String>,
+    /// Run the tests the target reaches at open, and keep their outcomes as the job's baseline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<bool>,
+    /// Files the job may touch that no operation writes (a test's expected output, a fixture): globs from the root.
+    /// A bounded job's other touched files need a transform.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_file: Vec<String>,
 }
 
 /// A count a job took, the lines it touched between two counts, the counts
@@ -595,6 +606,8 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     let target_known = jf.target.as_deref().is_some_and(|t| target_resolves(ctx, t, ws));
     jf.target_known = Some(target_known);
     jf.outcome_known = Some(!jf.verify.is_empty());
+    // the base: the commit the job opens at
+    jf.base_commit = crate::baseline::head_commit(&ctx.root);
     write_job_file(&running, &jf)?;
     said.push(format!("task history: {}/{} (task, intent)", task.task_id, task.revision));
     said.push(format!("mode: {} — {}", mode.as_str(), mode.doc()));
@@ -615,6 +628,21 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     }
     let routes = count_routes(&jf, t.as_ref());
     take_counts(ctx, &running, &in_job, "open", &routes, &mut said, &mut runs, by)?;
+    said.push(match &jf.base_commit {
+        Some(c) => format!("base: {c} (a test failing the same way there is not the job's)"),
+        None => "base: none (not a git repository): every failing test is the job's".into(),
+    });
+    if let Some(base) = &jf.base_commit {
+        // what already differs from the base at open (a file not committed yet): the job did not touch it
+        let open: BTreeMap<String, String> = changed_since(ctx, base).into_iter().map(|p| { let d = digest_now(ctx, &p); (p, d) }).collect();
+        write_whole(&running.join(JOB_DATA).join(OPEN_FILES), (serde_json::to_string_pretty(&open)? + "\n").as_bytes())?;
+    }
+    if jf.baseline == Some(true) {
+        let tests = baseline_tests(ctx, jf.target.as_deref().unwrap_or(crate::change::WORKSPACE), ws)?;
+        let b = crate::baseline::record_at_open(ctx, &running, &in_job, jf.base_commit.clone(), &tests)?;
+        let failed = b.outcomes.iter().filter(|o| o.outcome == "FAILED").count();
+        said.push(format!("baseline: {} tests the target reaches run at open, {failed} failing there ({})", b.outcomes.len(), ctx.rel(&running.join(JOB_DATA).join(crate::baseline::BASELINE_FILE))));
+    }
     if exercise {
         // every case on a copy in the job's data folder, its findings diagnosis records of the job's task
         let (ran, case_said) = crate::exercise::run_in_job(ctx, &running, &in_job, &task)?;
@@ -639,6 +667,35 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
         runs.extend(exec.runs);
     }
     Ok(Started { id, folder: running, runs, said })
+}
+
+/// The tests a job's baseline runs at open: those whose calls reach the target (an item; a crate's items for
+/// `crate:<name>`; every item for `*`), as (package, target word, test).
+fn baseline_tests(ctx: &Ctx, target: &str, ws: Option<&crate::api::Workspace>) -> Result<Vec<(String, String, String)>> {
+    // the tests are read: a workspace held open without them is not used
+    let owned;
+    let f = match ws.filter(|w| w.scope.tests) {
+        Some(w) => w.facts(),
+        None => {
+            owned = crate::reading::facts::Facts::build(&ctx.root, &crate::reading::spec::Scope { tests: true, ..Default::default() }, crate::paths::Resolving::Job)?;
+            &owned
+        }
+    };
+    let t = target.trim();
+    let seeds: BTreeSet<String> = if t == crate::change::WORKSPACE {
+        f.k.items.iter().map(|d| d.id.clone()).collect()
+    } else if let Some(c) = t.strip_prefix("crate:").filter(|c| !c.contains('/')) {
+        f.k.items.iter().filter(|d| d.package == c.replace('-', "_")).map(|d| d.id.clone()).collect()
+    } else {
+        crate::change::item_named(&f.k, t).map(|d| d.id.clone()).into_iter().collect()
+    };
+    // the tests reaching it, and every test of a crate it names
+    let crates: BTreeSet<String> = if t == crate::change::WORKSPACE { f.k.packages.keys().cloned().collect() } else { t.strip_prefix("crate:").filter(|c| !c.contains('/')).map(|c| BTreeSet::from([c.replace('-', "_")])).unwrap_or_default() };
+    let mut cases = crate::reading::kinds::tests_reaching(f, &seeds);
+    cases.extend(crate::reading::kinds::tests_of_crates(f, &crates));
+    cases.sort();
+    cases.dedup();
+    Ok(cases.into_iter().map(|c| (c.package, c.target, c.filter)).collect())
 }
 
 /// Whether a job's target resolves: a declared route, or an item of the scan.
@@ -757,6 +814,12 @@ pub struct Closing {
     /// When the outcome became known (the verification declared): `open`, `#<receipt>`, or never.
     #[serde(default)]
     pub outcome_known_at: Option<String>,
+    /// The job's target_known as `job start` set it at open (the job file's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_known: Option<bool>,
+    /// The job's outcome_known as `job start` set it at open (the job file's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_known: Option<bool>,
     /// Each declared verification and whether the job's own runs satisfy it: `satisfied`, `failed`, `not run`, or, for a
     /// reading the job made that is the same as the one before it opened, `unchanged`.
     #[serde(default)]
@@ -779,6 +842,19 @@ pub struct Closing {
     /// Set when the close is refused (a bounded job with uncovered lines): the code and what was refused.
     #[serde(default)]
     pub refusal: Option<crate::api::Refusal>,
+    /// The commit the job opened at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_commit: Option<String>,
+    /// The tests that failed in the job and fail the same way at its base, each with its first failing line.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_existing: Vec<crate::baseline::PreExisting>,
+    /// The job's own failing tests, each with why it is the job's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failing: Vec<String>,
+    /// Every file the job touched since its base (git's), and what carries it: `transform #<seq>`, `allow_file
+    /// <glob>`, `cargo` (the lock file cargo writes from the manifests), or `hand`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub touched_files: Vec<(String, String)>,
 }
 
 pub const CLOSING_SCHEMA: &str = "custodian.job_closing.v1";
@@ -815,7 +891,10 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         let mut count_runs = Vec::new();
         take_counts(ctx, &running, &in_job, "close", &routes, &mut count_said, &mut count_runs, by)?;
     }
-    let lines_touched = lines_touched_of(&running, &taken(&running))?;
+    let mut lines_touched = lines_touched_of(&running, &taken(&running))?;
+    if let Some(base) = &jf.base_commit {
+        exact_lines(ctx, &running, base, &mut lines_touched);
+    }
     let runs = journal.runs_of_job(&id)?;
     // every receipt and every job folder, for the readings of a spec (`receipts::readings_of`)
     let all_runs = journal.runs()?;
@@ -878,7 +957,28 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         .filter(|r| r.command == "transform" && r.accepted)
         .filter_map(|r| r.outputs.iter().find(|o| o.ends_with(".json")).and_then(|o| std::fs::read_to_string(ctx.root.join(o)).ok()).and_then(|t| serde_json::from_str(&t).ok()).map(|t| (r.seq, t)))
         .collect();
-    let uncovered = if mode == JobMode::Bounded { uncovered_lines(ctx, &running, &transforms.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>())? } else { Vec::new() };
+    let mut uncovered = if mode == JobMode::Bounded { uncovered_lines(ctx, &running, &transforms.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>())? } else { Vec::new() };
+    // every file the job touched, code or not: each carried by a transform, allowed, cargo's, or by hand
+    let touched_files = match &jf.base_commit {
+        Some(base) => files_touched(ctx, &running, base, &jf.allow_file, &transforms)?,
+        None => Vec::new(),
+    };
+    let mut not_allowed = Vec::new();
+    if mode == JobMode::Bounded {
+        for (path, how) in touched_files.iter().filter(|(_, how)| how.starts_with("hand")) {
+            if !uncovered.iter().any(|u| &u.path == path) {
+                let now = std::fs::read(ctx.root.join(path)).map(|b| stable_digest::StableDigest::sha256(&b).as_str().to_string()).unwrap_or_else(|_| "none".into());
+                uncovered.push(crate::transform::Uncovered { path: path.clone(), from: how.trim_start_matches("hand from ").to_string(), now, lines: Vec::new() });
+                // code by hand is an uncovered line; any other file is one the job does not allow
+                if !(path.ends_with(".rs") || path.ends_with(".toml")) {
+                    not_allowed.push(path.clone());
+                }
+            }
+        }
+    }
+    // a failing test is the job's unless it fails the same way at the job's base
+    let test_in_job = InJob { id: id.clone(), readings: running.join(READINGS_DIR) };
+    let judged = crate::baseline::judge(ctx, &running, &test_in_job, jf.base_commit.as_deref(), &tests)?;
     let opened = runs.first().map_or(i64::MAX, |r| r.seq);
     let reading = |spec: &str| reading_verified(&ctx.root, &all_runs, &folders, &id, opened, spec);
     let verify: Vec<(String, String)> = jf.verify.iter().map(|v| (v.clone(), verified(v, &runs, &tests, &reading).to_string())).collect();
@@ -890,7 +990,8 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     };
     let target_known_at = known_at(jf.target_known, &["preflight", "plan"]);
     let outcome_known_at = known_at(jf.outcome_known, &["verify"]);
-    let mut result: (String, Option<String>) = result_of_parts(&uncovered, &verify, false);
+    let failed_any = !judged.own.is_empty() || runs.iter().any(|r| r.command == "check" && !r.accepted);
+    let mut result: (String, Option<String>) = result_of_parts(&uncovered, &verify, failed_any);
     // the task history: changes (from the open and close counts), verifications, the result
     let mut history_said = Vec::new();
     if let Some(task) = crate::task_records::of_job(store, jf.task_id.as_deref(), jf.revision.as_deref())? {
@@ -927,7 +1028,7 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         for r in runs.iter().filter(|r| r.command == "check") {
             crate::task_records::verification(&task, &format!("custodian check {}", r.name), Some(r.accepted), Some(&r.reason))?;
         }
-        let failed = tests.iter().any(|t| matches!(t.outcome.as_str(), "FAILED" | "failed" | "fail")) || runs.iter().any(|r| r.command == "check" && !r.accepted);
+        let failed = !judged.own.is_empty() || runs.iter().any(|r| r.command == "check" && !r.accepted);
         let (status, why) = result_of(failed, &uncovered, &verify);
         result = (status.to_string(), why.clone());
         let tree = crate::api::IndexKey::of_root(&ctx.root, &Default::default()).ok().map(|k| k.0);
@@ -947,7 +1048,14 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         (Some(t), Ok(qs)) => qs.into_iter().filter(|q| q.task.as_deref().is_some_and(|x| x.starts_with(&format!("{t}/")))).collect(),
         _ => Vec::new(),
     };
-    let refusal = (!uncovered.is_empty()).then(|| ReadingRefusal::BoundedUncovered.refusal(uncovered.iter().map(|u| if u.lines.is_empty() { u.path.clone() } else { format!("{}:{}", u.path, u.lines.iter().map(u32::to_string).collect::<Vec<_>>().join(",")) }).collect::<Vec<_>>().join("; ")));
+    let code_uncovered: Vec<&crate::transform::Uncovered> = uncovered.iter().filter(|u| !not_allowed.contains(&u.path)).collect();
+    let refusal = if !code_uncovered.is_empty() {
+        Some(ReadingRefusal::BoundedUncovered.refusal(code_uncovered.iter().map(|u| if u.lines.is_empty() { u.path.clone() } else { format!("{}:{}", u.path, u.lines.iter().map(u32::to_string).collect::<Vec<_>>().join(",")) }).collect::<Vec<_>>().join("; ")))
+    } else {
+        (!not_allowed.is_empty()).then(|| ReadingRefusal::FileNotAllowed.refusal(format!("{} (an operation writes it, or the job allows it: allow_file)", not_allowed.join("; "))))
+    };
+    let mut said_judged = judged.said.clone();
+    said_judged.extend(judged.pre_existing.iter().map(|p| format!("pre-existing: {} {} {} — {} ({})", p.package, p.target, p.test, p.first_line, p.from)));
     let closing = Closing {
         schema: CLOSING_SCHEMA.into(),
         id: id.clone(),
@@ -967,6 +1075,8 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         mode: Some(mode),
         target_known_at,
         outcome_known_at,
+        target_known: jf.target_known,
+        outcome_known: jf.outcome_known,
         verify,
         transforms: transforms.iter().map(|(s, _)| *s).collect(),
         uncovered,
@@ -974,6 +1084,10 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         result_reason: result.1.clone(),
         decisions_open,
         refusal,
+        base_commit: jf.base_commit.clone(),
+        pre_existing: judged.pre_existing.clone(),
+        failing: judged.own.clone(),
+        touched_files,
     };
     let json = serde_json::to_string_pretty(&closing)? + "\n";
     write_whole(&running.join("closing.json"), json.as_bytes())?;
@@ -1011,6 +1125,7 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     };
     let (r, f) = keep(store, r)?;
     let mut said = count_said;
+    said.extend(said_judged);
     said.extend(history_said);
     said.extend(closing.lines_touched.iter().map(|t| format!("lines touched: {} ({})", t.line, t.route)));
     said.extend(vec![
@@ -1039,7 +1154,7 @@ fn result_of_parts(uncovered: &[crate::transform::Uncovered], verify: &[(String,
         return ("rejected".into(), Some(format!("bounded: {} files touched by hand, not by a transform of the job", uncovered.len())));
     }
     if failed || verify.iter().any(|(_, s)| s == "failed") {
-        return ("failed_test".into(), Some("a test or check the job ran failed".into()));
+        return ("failed_test".into(), Some("a test or check the job ran failed, and not the same way at its base".into()));
     }
     if verify.is_empty() {
         return ("pending".into(), Some("no verification declared: what does done look like? (job start --verify, or answer the decision)".into()));
@@ -1091,6 +1206,112 @@ fn verified(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], readi
             None => "not run",
         },
         _ => "not run",
+    }
+}
+
+/// Files cargo writes from the manifests: a job that changes a dependency changes them through cargo, never by hand.
+pub const CARGO_WRITTEN: &[&str] = &["Cargo.lock"];
+
+/// Whether a path is a file cargo writes ([`CARGO_WRITTEN`]).
+fn cargo_written(path: &str) -> bool {
+    CARGO_WRITTEN.iter().any(|c| path == *c || path.ends_with(&format!("/{c}")))
+}
+
+/// A git line's output in the tree at `root` (the kit's declared git line), when it ran and said yes.
+fn git_out(root: &Path, words: &[&str]) -> Option<String> {
+    let line = crate::exec::Git::in_dir(root.as_os_str()).words(words.iter().map(std::ffi::OsString::from).collect::<Vec<_>>());
+    let plan = crate::exec::Plan::new("git").then(crate::exec::line("git", &line).ok()?);
+    let w = plan.walk(crate::exec::Watch::Quiet, |_, _| {}).ok()?;
+    let w = w.into_iter().next()?;
+    (w.code == Some(0)).then_some(w.stdout)
+}
+
+/// Whether a path is custodian's or code_passenger's own (never the job's code).
+fn own_folder(path: &str) -> bool {
+    path.starts_with(&format!("{}/", crate::store::FOLDER)) || path.starts_with(".passenger/")
+}
+
+/// The files that differ from `base` now: changed against it, and new files git does not ignore (custodian's and
+/// code_passenger's own folders aside).
+fn changed_since(ctx: &Ctx, base: &str) -> BTreeSet<String> {
+    let mut paths: BTreeSet<String> = BTreeSet::new();
+    for out in [git_out(&ctx.root, &["diff", "--name-only", base]), git_out(&ctx.root, &["ls-files", "--others", "--exclude-standard"])].into_iter().flatten() {
+        paths.extend(out.lines().map(str::trim).filter(|l| !l.is_empty() && !own_folder(l)).map(str::to_string));
+    }
+    paths
+}
+
+/// A file's digest now (`none` when it is gone): the transform records' form.
+fn digest_now(ctx: &Ctx, path: &str) -> String {
+    std::fs::read(ctx.root.join(path)).map(|b| stable_digest::StableDigest::sha256(&b).as_str().to_string()).unwrap_or_else(|_| "none".into())
+}
+
+/// The files that already differed from the job's base at open, with their digests then (in the job's data).
+pub const OPEN_FILES: &str = "open_files.json";
+
+/// Every file the job touched since its base (git: changed against the base commit, and new files git does not
+/// ignore; a file that already differed at open counts from its state then), with what carries it: `transform #<seq>` when the job's transforms carry it from its base to now,
+/// `allow_file <glob>`, `cargo` for the lock file, else `hand from <digest>` (the digest the hand edit began from).
+fn files_touched(ctx: &Ctx, folder: &Path, base: &str, allow: &[String], transforms: &[(i64, crate::transform::TransformRecord)]) -> Result<Vec<(String, String)>> {
+    let paths = changed_since(ctx, base);
+    let at_open: BTreeMap<String, String> = std::fs::read_to_string(folder.join(JOB_DATA).join(OPEN_FILES)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let globs: Vec<(String, globset::GlobMatcher)> = allow.iter().filter_map(|g| globset::Glob::new(g).ok().map(|m| (g.clone(), m.compile_matcher()))).collect();
+    let hex = |b: &[u8]| stable_digest::StableDigest::sha256(b).as_str().to_string();
+    let records: Vec<crate::transform::TransformRecord> = transforms.iter().map(|(_, t)| t.clone()).collect();
+    let mut out = Vec::new();
+    for p in paths {
+        let at_base = match at_open.get(&p) {
+            Some(d) => d.clone(),
+            None => git_out(&ctx.root, &["show", &format!("{base}:{p}")]).map(|t| hex(t.as_bytes())).unwrap_or_else(|| "none".into()),
+        };
+        let now = digest_now(ctx, &p);
+        if at_base == now {
+            continue;
+        }
+        let open = BTreeMap::from([(p.clone(), at_base.clone())]);
+        let close = BTreeMap::from([(p.clone(), now)]);
+        let open = if at_base == "none" { BTreeMap::new() } else { open };
+        let close = if close[&p] == "none" { BTreeMap::new() } else { close };
+        let how = match crate::transform::coverage(&open, &close, &records).into_iter().next() {
+            None => format!("transform #{}", transforms.iter().filter(|(_, t)| t.files.iter().any(|f| f.path == p)).map(|(s, _)| s.to_string()).collect::<Vec<_>>().join(", #")),
+            Some(u) => match globs.iter().find(|(_, m)| m.is_match(&p)) {
+                Some((g, _)) => format!("allow_file {g}"),
+                None if cargo_written(&p) => "cargo".to_string(),
+                None => format!("hand from {}", u.from),
+            },
+        };
+        out.push((p, how));
+    }
+    Ok(out)
+}
+
+/// The job's lines touched, exact: `git diff --numstat` against the base (a new file's lines all added; the lock file
+/// cargo writes aside), in place of the counts' net figure for the job; a step's figure stays the counts' net one,
+/// and says so.
+fn exact_lines(ctx: &Ctx, folder: &Path, base: &str, touched: &mut [Touched]) {
+    let at_open: BTreeMap<String, String> = std::fs::read_to_string(folder.join(JOB_DATA).join(OPEN_FILES)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let Some(numstat) = git_out(&ctx.root, &["diff", "--numstat", base]) else { return };
+    let (mut added, mut removed, mut files) = (0usize, 0usize, 0usize);
+    for l in numstat.lines() {
+        let w: Vec<&str> = l.split('\t').collect();
+        if w.len() == 3 && !own_folder(w[2]) && !cargo_written(w[2]) {
+            added += w[0].parse::<usize>().unwrap_or(0);
+            removed += w[1].parse::<usize>().unwrap_or(0);
+            files += 1;
+        }
+    }
+    for p in git_out(&ctx.root, &["ls-files", "--others", "--exclude-standard"]).unwrap_or_default().lines().filter(|p| !p.trim().is_empty() && !own_folder(p) && !cargo_written(p) && at_open.get(*p) != Some(&digest_now(ctx, p))) {
+        added += std::fs::read_to_string(ctx.root.join(p)).map(|t| t.lines().count()).unwrap_or(0);
+        files += 1;
+    }
+    for t in touched.iter_mut() {
+        if t.label == "job" {
+            t.moved.added.lines = added;
+            t.moved.removed.lines = removed;
+            t.line = format!("job: +{added} \u{2212}{removed} across {files} files in {} crates (git diff --numstat {})", t.crates, &base[..base.len().min(12)]);
+        } else if !t.line.contains(": net ") {
+            t.line = t.line.replacen(": +", ": net +", 1);
+        }
     }
 }
 
@@ -1168,6 +1389,63 @@ pub fn declare_verify(ctx: &Ctx, which: Option<&str>, line: &str) -> Result<(Str
     Ok((id, r))
 }
 
+/// The two facts a job starts from, as the job file set them at open, and when each became known: `target_known:
+/// true at open · outcome_known: false at open, known at #128`.
+fn known_line(c: &Closing) -> String {
+    let one = |name: &str, at_open: Option<bool>, at: &Option<String>| -> String {
+        let open = at_open.map(|b| format!("{b} at open")).unwrap_or_else(|| "not set at open".into());
+        match (at_open, at.as_deref()) {
+            (Some(true), _) => format!("{name}: {open}"),
+            (_, Some(a)) if a != "open" => format!("{name}: {open}, known at {a}"),
+            (_, Some(_)) => format!("{name}: {open}"),
+            (_, None) => format!("{name}: {open}, never known"),
+        }
+    };
+    format!("{} · {}", one("target_known", c.target_known, &c.target_known_at), one("outcome_known", c.outcome_known, &c.outcome_known_at))
+}
+
+/// A file a running job may touch that no operation writes (`custodian job allow GLOB`): the glob added to its
+/// job file's `allow_file`, with an `allow` receipt, so the closing receipt says why such a file was touched.
+pub fn declare_allow(ctx: &Ctx, which: Option<&str>, glob: &str) -> Result<(String, Receipt)> {
+    globset::Glob::new(glob).map_err(|e| ReadingRefusal::SpecInvalid.refuse(format!("`{glob}` is not a glob: {e}")))?;
+    let store = ctx.store()?;
+    let running = find(store, JobState::Running, which)?;
+    let mut jf = job_file(&running);
+    let id = jf.id.clone().ok_or_else(|| ReadingRefusal::JobState.refuse(format!("{} was never started", running.display())))?;
+    if !jf.allow_file.iter().any(|g| g == glob) {
+        jf.allow_file.push(glob.to_string());
+    }
+    write_job_file(&running, &jf)?;
+    let digest = crate::digest::of_value(&(&id, "allow_file", glob));
+    let r = Receipt {
+        schema: RECEIPT_SCHEMA.into(),
+        seq: 0,
+        utc: now_utc(),
+        command: "allow".into(),
+        name: id.clone(),
+        spec: None,
+        spec_hash: None,
+        code_digest: None,
+        index_key: None,
+        plan_id: format!("job:{id}"),
+        plan_digest: digest.clone(),
+        operation_digest: digest.clone(),
+        receipt_digest: digest,
+        line: format!("custodian job allow {glob}"),
+        exit_code: Some(0),
+        accepted: true,
+        disposition: "Continue".into(),
+        reason: "allowed".into(),
+        outputs: vec![ctx.rel(&running.join(job_file_name()))],
+        job: Some(id.clone()),
+        reused_seq: None,
+        millis: 0,
+        runner: crate::receipts::RUNNER_IN_PROCESS.into(),
+    };
+    let (r, _) = keep(store, r)?;
+    Ok((id, r))
+}
+
 /// The closing receipt as a page: facts first.
 pub fn render_closing(c: &Closing) -> String {
     let mut s = format!("# job {} — {}\n\n", c.id, c.name);
@@ -1179,7 +1457,7 @@ pub fn render_closing(c: &Closing) -> String {
         s.push_str(&format!("- result: **{}**{}\n", c.result, c.result_reason.as_ref().map(|r| format!(" — {r}")).unwrap_or_default()));
     }
     if let Some(m) = c.mode {
-        s.push_str(&format!("- mode: {} · target known: {} · outcome known: {}\n", m.as_str(), c.target_known_at.clone().unwrap_or_else(|| "never".into()), c.outcome_known_at.clone().unwrap_or_else(|| "never".into())));
+        s.push_str(&format!("- mode: {} · {}\n", m.as_str(), known_line(c)));
     }
     if let Some(r) = &c.refusal {
         s.push_str(&format!("- refused: {r}\n"));
@@ -1188,6 +1466,27 @@ pub fn render_closing(c: &Closing) -> String {
         s.push_str("\n## verification\n\n");
         for (v, st) in &c.verify {
             s.push_str(&format!("- {v}: {st}\n"));
+        }
+    }
+    if let Some(b) = &c.base_commit {
+        s.push_str(&format!("- base: {b}\n"));
+    }
+    if !c.pre_existing.is_empty() {
+        s.push_str(&format!("\n## pre-existing ({}): failing the same way at the base, not the job's\n\n", c.pre_existing.len()));
+        for p in &c.pre_existing {
+            s.push_str(&format!("- {} {} {} — `{}` ({})\n", p.package, p.target, p.test, p.first_line.replace('`', "'"), p.from));
+        }
+    }
+    if !c.failing.is_empty() {
+        s.push_str(&format!("\n## failing, the job's ({})\n\n", c.failing.len()));
+        for f in &c.failing {
+            s.push_str(&format!("- {f}\n"));
+        }
+    }
+    if !c.touched_files.is_empty() {
+        s.push_str(&format!("\n## files touched since the base ({})\n\n", c.touched_files.len()));
+        for (p, how) in &c.touched_files {
+            s.push_str(&format!("- `{p}`: {how}\n"));
         }
     }
     if !c.uncovered.is_empty() {
@@ -1266,7 +1565,7 @@ pub fn brief(ctx: &Ctx, which: &str) -> Result<String> {
         s.push_str(&format!("result: {}{}\n", c.result, c.result_reason.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()));
     }
     if let Some(m) = c.mode {
-        s.push_str(&format!("mode: {} · target known: {} · outcome known: {}\n", m.as_str(), c.target_known_at.clone().unwrap_or_else(|| "never".into()), c.outcome_known_at.clone().unwrap_or_else(|| "never".into())));
+        s.push_str(&format!("mode: {} · {}\n", m.as_str(), known_line(&c)));
     }
     for u in &c.uncovered {
         s.push_str(&format!("touched by hand (bounded): {}{}\n", u.path, if u.lines.is_empty() { String::new() } else { format!(":{}", u.lines.iter().map(u32::to_string).collect::<Vec<_>>().join(",")) }));

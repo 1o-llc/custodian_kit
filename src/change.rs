@@ -58,6 +58,8 @@ vocabulary! {
         Anchor = "anchor" : "a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name)",
         ReplaceBody = "replace_body" : "a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched",
         ChangeDependency = "change_dependency" : "a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features",
+        Inline = "inline" : "a function's body put in place of every call to it (target: a free function, or an associated one without self): each call becomes a block that binds the parameters to the call's arguments with `let`, then the body; the function is removed when it is not `pub` and every use of it was a call",
+        Wrap = "wrap" : "a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched",
     }
 }
 
@@ -90,7 +92,8 @@ impl Operation {
             Extract => &["items", "module"],
             Gate => &["feature"],
             Anchor => &["linkage"],
-            ReplaceBody => &["function"],
+            ReplaceBody | Wrap => &["function"],
+            Inline => &[],
         }
     }
 
@@ -1214,6 +1217,183 @@ pub fn uses_toolkit(spec: &ChangeSpec) -> bool {
     spec.pieces().iter().any(|p| piece(&p.piece).is_some_and(|d| d.family != Family::Step))
 }
 
+/// A body wrapped (`wrap`): the spec's pieces first, then the body as it was (`old`, from its opening brace to its
+/// closing one) as the block's value, the pieces indented one level inside `indent`. None of the pieces may give the
+/// body's value: the old body does.
+pub fn render_wrapped(f: &FnSpec, indent: &str, old: &str) -> std::result::Result<String, String> {
+    if f.body.is_empty() {
+        return Err(format!("{}: wrap needs the pieces that run first", f.name));
+    }
+    let mut out = String::from("{\n");
+    let inner = format!("{indent}    ");
+    for step in &f.body {
+        if step.piece == "value" || (piece(&step.piece).is_some_and(|d| d.family == Family::Expression) && step.bind.is_none()) {
+            return Err(format!("{}: `{}` gives a value, and a wrapped body's value is the body it wraps (`bind` it)", f.name, step.piece));
+        }
+        for l in render_step(step)?.lines() {
+            out.push_str(&format!("{inner}{l}\n"));
+        }
+    }
+    out.push_str(&format!("{inner}{}\n{indent}}}", old.trim()));
+    Ok(out)
+}
+
+/// A call inlined (`inline`): a block that binds each parameter (`pattern`, `type`) to the call's argument with
+/// `let`, then the function's body without its braces (`body`, from its opening brace to its closing one).
+pub fn render_inlined(params: &[(String, String)], args: &[String], body: &str) -> std::result::Result<String, String> {
+    if params.len() != args.len() {
+        return Err(format!("the call passes {} arguments for {} parameters", args.len(), params.len()));
+    }
+    let inner = body.trim().strip_prefix('{').and_then(|b| b.strip_suffix('}')).ok_or("the body is not a block")?;
+    let mut out = String::from("{ ");
+    for ((pat, ty), arg) in params.iter().zip(args) {
+        out.push_str(&format!("let {}: {} = {}; ", pat.trim(), ty.trim(), arg.trim()));
+    }
+    out.push_str(inner.trim());
+    out.push_str(" }");
+    Ok(out)
+}
+
+/// Whether one of klepto's spellings of an argument (`&self`, `&'a mut self`, `self: Box<Self>`, `x: u32`) is the
+/// receiver: klepto's args hold `self` beside the parameters a call passes.
+pub fn is_receiver(arg: &str) -> bool {
+    let n = arg.split(':').next().unwrap_or("").trim().trim_start_matches('&').trim_start_matches("mut ").trim();
+    n == "self" || n.ends_with(" self")
+}
+
+/// What stops a function from being inlined, one line each (none: it can be). The one rule the preflight and the
+/// writer read: a free function or an associated one without `self`, not generic, not `async` or `unsafe`, with a
+/// body; no `return` and no `?` in its body (in the caller they would leave the caller); not calling itself; and
+/// every use of it a call (a function named as a value has no call to put the body in).
+pub fn inline_blockers(k: &klepto::Klepto, item: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(f) = k.functions.iter().find(|x| x.fq_name == item) else { return vec![format!("{item}: not a function the scan captured")] };
+    if f.args.iter().any(|a| is_receiver(a)) {
+        out.push(format!("{item} takes self: only a free function or an associated one without self is inlined"));
+    }
+    if f.is_generic {
+        out.push(format!("{item} is generic: its type parameters would not exist at the call"));
+    }
+    if f.is_async || f.is_unsafe {
+        out.push(format!("{item} is {}: its body does not mean the same inside its callers", if f.is_async { "async" } else { "unsafe" }));
+    }
+    match std::fs::read_to_string(&f.location.path).ok().and_then(|t| syn::parse_file(&t).ok()) {
+        Some(file) => {
+            let line = f.location.line.unwrap_or(0) as usize;
+            let mut v = BodyOf { name: f.name.clone(), line, found: None };
+            syn::visit::Visit::visit_file(&mut v, &file);
+            match v.found {
+                Some(b) => {
+                    let mut e = Escapes::default();
+                    syn::visit::Visit::visit_block(&mut e, &b);
+                    if e.ret {
+                        out.push(format!("{item}'s body returns early (`return`): in a caller it would leave the caller"));
+                    }
+                    if e.question {
+                        out.push(format!("{item}'s body uses `?`: in a caller it would leave the caller"));
+                    }
+                }
+                None => out.push(format!("{item}: no body at {}:{line}", f.location.path.display())),
+            }
+        }
+        None => out.push(format!("{item}: {} cannot be read", f.location.path.display())),
+    }
+    let names = |r: &Option<klepto::Resolution>| matches!(r, Some(klepto::Resolution::Local(id) | klepto::Resolution::External(id)) if id == item);
+    if k.calls.iter().any(|c| names(&c.resolution) && c.enclosing_fn.as_deref() == Some(item)) {
+        out.push(format!("{item} calls itself"));
+    }
+    let calls: std::collections::BTreeSet<(std::path::PathBuf, u32)> = k.calls.iter().filter(|c| names(&c.resolution)).filter_map(|c| Some((c.location.path.clone(), c.location.line?))).collect();
+    for p in k.paths.iter().filter(|p| names(&p.resolution)) {
+        if let Some(l) = p.location.line {
+            if !calls.contains(&(p.location.path.clone(), l)) {
+                out.push(format!("{item} is named as a value at {}:{l}, not called", p.location.path.display()));
+            }
+        }
+    }
+    out
+}
+
+/// The body of the function named `name` whose item starts at `line`.
+struct BodyOf {
+    name: String,
+    line: usize,
+    found: Option<syn::Block>,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for BodyOf {
+    fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+        use syn::spanned::Spanned;
+        if f.sig.ident == self.name && (f.span().start().line..=f.span().end().line).contains(&self.line) {
+            self.found = Some((*f.block).clone());
+        }
+        syn::visit::visit_item_fn(self, f);
+    }
+
+    fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
+        use syn::spanned::Spanned;
+        if f.sig.ident == self.name && (f.span().start().line..=f.span().end().line).contains(&self.line) {
+            self.found = Some(f.block.clone());
+        }
+        syn::visit::visit_impl_item_fn(self, f);
+    }
+}
+
+/// `return` and `?` in a body, outside the closures, async blocks and items nested in it (theirs leave only them).
+#[derive(Default)]
+struct Escapes {
+    ret: bool,
+    question: bool,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for Escapes {
+    fn visit_expr_return(&mut self, e: &'ast syn::ExprReturn) {
+        self.ret = true;
+        syn::visit::visit_expr_return(self, e);
+    }
+    fn visit_expr_try(&mut self, e: &'ast syn::ExprTry) {
+        self.question = true;
+        syn::visit::visit_expr_try(self, e);
+    }
+    fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+    fn visit_expr_async(&mut self, _: &'ast syn::ExprAsync) {}
+    fn visit_item(&mut self, _: &'ast syn::Item) {}
+}
+
+/// The attributes the compiler and its tools own (and `derive`, whose macros only add): none of them rewrites the
+/// item it sits on.
+pub const INERT_ATTRIBUTES: &[&str] = &[
+    "derive", "cfg", "cfg_attr", "doc", "allow", "warn", "deny", "forbid", "expect", "must_use", "non_exhaustive", "repr", "deprecated", "inline", "cold", "track_caller", "automatically_derived", "path", "macro_export", "macro_use", "test", "ignore", "should_panic", "no_mangle", "export_name", "link", "link_name", "link_section", "used", "rustfmt", "clippy", "diagnostic", "target_feature", "global_allocator",
+];
+
+/// The attribute macros on an item, as `#[name] (path)`: attributes whose path resolves to a macro of a crate
+/// (`#[bitpack]` through `use big_bad_bool::bitpack`), which rewrite the item before the compiler sees it. A
+/// derive's helper attribute (`#[serde(..)]`, `#[bits(15)]`) resolves to nothing and is not one.
+pub fn attribute_macros(k: &klepto::Klepto, item: &str) -> Vec<String> {
+    let mut out: Vec<String> = k
+        .attrs
+        .iter()
+        .filter(|a| a.enclosing_item.as_deref() == Some(item) && !INERT_ATTRIBUTES.contains(&a.path.split("::").next().unwrap_or("")))
+        .filter_map(|a| match &a.resolution {
+            Some(klepto::Resolution::Local(p) | klepto::Resolution::External(p)) => Some(format!("#[{}] ({p})", a.path)),
+            _ => None,
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Why `op` cannot be written on `item` as it is declared: the attribute macros that rewrite its fields, for an
+/// operation that writes the fields as declared (a new field, a constructor that names every field). `None` when it
+/// can. The one rule the preflight and the writer read; its refusal is [`ReadingRefusal::MacroRewrites`].
+pub fn rewritten_by(k: &klepto::Klepto, op: Operation, item: &str) -> Option<String> {
+    if !matches!(op, Operation::AddField | Operation::AddConstructor) {
+        return None;
+    }
+    let macros = attribute_macros(k, item);
+    (!macros.is_empty()).then(|| ReadingRefusal::MacroRewrites.refuse(format!("{item} is under {}: {} writes the fields as declared, and the macro lays them out its own way", macros.join(", "), op.as_str())).to_string())
+}
+
 // ---------------------------------------------------------------------------
 // where an operation lands, one rule for the preflight and the writer
 
@@ -1273,6 +1453,12 @@ fn rel(root: &Path, p: &Path) -> String {
 pub fn module_of_file<'k>(k: &'k klepto::Klepto, file: &Path) -> Option<&'k klepto::ModuleInfo> {
     let want = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     k.modules.modules.values().find(|m| !m.inline && m.file.canonicalize().unwrap_or_else(|_| m.file.clone()) == want)
+}
+
+/// The package a crate root belongs to: a binary is a crate root of its own, named after its target (`stored`),
+/// and its package (`cli`) is what cargo checks and what its manifest, dependencies and features are declared on.
+pub fn package_of(k: &klepto::Klepto, crate_root: &str) -> String {
+    k.crate_roots.get(crate_root).cloned().unwrap_or_else(|| crate_root.to_string())
 }
 
 /// The item a target names: its id exactly, else by its trailing segments.
@@ -1346,7 +1532,7 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
     let op = spec.op();
     let at_item = |d: &klepto::ItemDecl, at: fn(u32) -> At| -> Landing {
         let line = d.location.line.unwrap_or(1);
-        Landing { file: rel(root, &d.location.path), module: d.module.clone(), package: d.package.clone(), item: Some(d.id.clone()), at: at(line) }
+        Landing { file: rel(root, &d.location.path), module: d.module.clone(), package: package_of(k, &d.package), item: Some(d.id.clone()), at: at(line) }
     };
     match op {
         ChangeDependency => {
@@ -1382,14 +1568,14 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
             Ok(match op {
                 AddField | AddVariant => at_item(d, |l| At::Inside { line: l }),
                 AddMethod | AddConstructor => match k.impls_of(&d.id).into_iter().find(|i| i.trait_.is_none()) {
-                    Some(i) => Landing { file: rel(root, &i.location.path), module: i.module.clone(), package: i.package.clone(), item: Some(d.id.clone()), at: At::Inside { line: i.location.line.unwrap_or(1) } },
+                    Some(i) => Landing { file: rel(root, &i.location.path), module: i.module.clone(), package: package_of(k, &i.package), item: Some(d.id.clone()), at: At::Inside { line: i.location.line.unwrap_or(1) } },
                     None => at_item(d, |l| At::After { line: l }),
                 },
                 MakeImpl | AddTraitImpl => at_item(d, |l| At::After { line: l }),
                 AddDerive | AddAttribute | Gate | Anchor => at_item(d, |l| At::Above { line: l }),
                 ChangeSignature | Rename | Move => at_item(d, |l| At::At { line: l }),
                 AddTest => at_item(d, |l| At::After { line: l }),
-                ReplaceBody => at_item(d, |l| At::At { line: l }),
+                ReplaceBody | Inline | Wrap => at_item(d, |l| At::At { line: l }),
                 _ => unreachable!("the place-targeting operations are matched above"),
             })
         }

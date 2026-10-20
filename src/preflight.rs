@@ -421,7 +421,7 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
             Operation::ChangeSignature => {
                 let calls: Vec<_> = kind_rows("use-site");
                 let pass = spec.call_sites.as_ref().and_then(|c| c.pass.clone());
-                let adds = spec.function.as_ref().is_some_and(|nf| f.k.functions.iter().find(|x| Some(x.fq_name.as_str()) == land.as_ref().ok().and_then(|l| l.item.as_deref())).is_some_and(|old| nf.params.len() > old.args.len()));
+                let adds = spec.function.as_ref().is_some_and(|nf| f.k.functions.iter().find(|x| Some(x.fq_name.as_str()) == land.as_ref().ok().and_then(|l| l.item.as_deref())).is_some_and(|old| nf.params.len() > old.args.iter().filter(|a| !crate::change::is_receiver(a)).count()));
                 if adds {
                     match &pass {
                         Some(_) => calls.iter().filter_map(|r| r.path.clone()).for_each(|p| {
@@ -468,7 +468,33 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                     pre.push(Check { what: format!("the test module {m} is in {}", l.file), holds: there, detail: if there { module } else { format!("no module {module}") } });
                 }
             }
+            Operation::Inline => {
+                let item = l.item.clone().unwrap_or_default();
+                let blockers = crate::change::inline_blockers(&f.k, &item);
+                pre.push(Check { what: "the function can be inlined".into(), holds: blockers.is_empty(), detail: if blockers.is_empty() { "each call becomes a block: its arguments bound to the parameters, then the body".into() } else { blockers.join("; ") } });
+                let names = |r: &Option<klepto::Resolution>| matches!(r, Some(klepto::Resolution::Local(id) | klepto::Resolution::External(id)) if *id == item);
+                for c in f.k.calls.iter().filter(|c| names(&c.resolution)) {
+                    write.insert(c.location.path.strip_prefix(&f.root).unwrap_or(&c.location.path).to_string_lossy().replace('\\', "/"));
+                }
+                let public = f.k.functions.iter().find(|x| x.fq_name == item).is_some_and(|x| x.is_public);
+                listed.push(if public { format!("{item} is pub: kept, where other crates may name it") } else { format!("{item} is removed: not pub, and every use of it is a call") });
+            }
+            Operation::Wrap => {
+                let item = l.item.clone().unwrap_or_default();
+                let found = f.k.functions.iter().find(|x| x.fq_name == item);
+                pre.push(Check { what: "the target is a function".into(), holds: found.is_some(), detail: found.map(|x| x.fq_name.clone()).unwrap_or_else(|| format!("{item}: not a function the scan captured")) });
+                let name = spec.function.as_ref().map(|x| x.name.clone()).unwrap_or_default();
+                let same = item.rsplit("::").next() == Some(name.as_str());
+                pre.push(Check { what: "the body wrapped is the target's own".into(), holds: same, detail: if same { "its signature, docs and attributes are kept: no caller changes".into() } else { format!("the spec's function is {name}, the target {item}") } });
+                let pieces = spec.function.as_ref().map(|x| crate::change::render_wrapped(x, "", "{}"));
+                pre.push(Check { what: "the pieces run first and the body gives the value".into(), holds: matches!(pieces, Some(Ok(_))), detail: match pieces { Some(Err(e)) => e, _ => "pieces first, then the body as it was".into() } });
+            }
             Operation::AddAttribute => {}
+        }
+        // an attribute macro that rewrites the item: an operation that writes it as declared does not know what the
+        // macro makes of it
+        if let Some(why) = l.item.as_deref().and_then(|i| crate::change::rewritten_by(&f.k, op, i)) {
+            pre.push(Check { what: "no attribute macro rewrites the item".into(), holds: false, detail: why });
         }
         if crate::change::uses_toolkit(spec) {
             let has = f.k.features.get(&l.package).is_some_and(|m| m.dependencies.iter().any(|d| d.name == crate::change::TOOLKIT.0));

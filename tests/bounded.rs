@@ -185,6 +185,9 @@ fn the_four_combinations_of_target_and_outcome_known() {
             preflight::run_preflight(&ctx, &s, Some(&in_job), Runner::InProcess(&wt)).unwrap();
         }
         let (c, _, _) = jobs::close_with(&ctx, &started.id, Some(&w)).unwrap();
+        // the closing record says the two facts as job start set them at open
+        assert_eq!((c.target_known, c.outcome_known), (Some(tk), Some(ok)));
+        assert!(jobs::render_closing(&c).contains(&format!("target_known: {tk} at open")), "{}", jobs::render_closing(&c));
         assert_eq!(c.target_known_at.as_deref().map(|a| a == "open"), Some(tk), "{:?}", c.target_known_at);
         assert_eq!(c.outcome_known_at.is_some(), ok, "{:?}", c.outcome_known_at);
         // no accepted without evidence: unknown outcome is pending, the done question first among the decisions

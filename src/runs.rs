@@ -197,6 +197,9 @@ pub fn run_reading_by(ctx: &Ctx, spec_path: &Path, again: bool, job: Option<&InJ
     let outputs: Vec<String> = summary.iter().flat_map(|s| [s.page.as_ref(), s.json.as_ref(), s.bundle.as_ref()]).flatten().map(|p| ctx.rel(p)).collect();
     let mut receipt = receipt_of(&plan, w, "reading", &spec.name, Some(spec_rel), Some(hash), Some(digest), summary.as_ref().and_then(|s| s.index_key.clone()), outputs, job);
     receipt.runner = runner_word.to_string();
+    if let Some(i) = summary.as_ref().and_then(|s| s.index.clone()) {
+        receipt.reason = format!("{} · index {i}", receipt.reason);
+    }
     if !w.decision.status.accepted {
         let why = w.stderr.trim().to_string();
         if let Some(store) = &ctx.store {

@@ -557,7 +557,9 @@ fn comparable(r: &custodian_kit::api::Receipt, root: &Path, job: &str) -> serde_
     let norm = |s: &str| stamp(&s.replace(&root.display().to_string(), "<root>").replace(job, "<job>"));
     serde_json::json!({
         "command": r.command, "name": r.name, "spec": r.spec, "spec_hash": r.spec_hash, "code_digest": r.code_digest, "index_key": r.index_key,
-        "plan_id": r.plan_id, "line": norm(&r.line), "exit_code": r.exit_code, "accepted": r.accepted, "disposition": r.disposition, "reason": r.reason,
+        "plan_id": r.plan_id, "line": norm(&r.line), "exit_code": r.exit_code, "accepted": r.accepted, "disposition": r.disposition,
+        // the reason without where the index came from (parsed, from the cache, held): each runner's own
+        "reason": r.reason.split(" · index ").next().unwrap_or_default(),
         "outputs": r.outputs.iter().map(|o| norm(o)).collect::<Vec<_>>(), "schema": r.schema,
     })
 }

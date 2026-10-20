@@ -9,7 +9,7 @@ use super::refusal::ReadingRefusal;
 use super::spec::Scope;
 use crate::paths::{PathsTable, Resolving};
 use crate::{klepto_scan, Result, ScanOptions};
-use klepto::{DepKind, EdgeKind, Klepto, Resolution};
+use klepto::{DepKind, EdgeKind, Klepto, KleptoError, Resolution};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -96,6 +96,67 @@ pub struct Facts {
     referrers: HashMap<String, Vec<String>>,
     /// Item id → ids it references.
     references: HashMap<String, Vec<String>>,
+    /// Where the parsed index came from, and how long it took.
+    pub index: IndexSource,
+    /// Whether klepto's syntax trees are held (an index read back from the cache holds none).
+    pub trees: bool,
+}
+
+/// Where a scan's parsed index came from.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum IndexSource {
+    /// klepto parsed the workspace (and the model was kept in the cache when the project has a folder).
+    Parsed { millis: u64 },
+    /// Read back from `.custodian/state/index/<digest>/model.cbor`: the same code was parsed before.
+    FromCache { millis: u64 },
+    /// Held open by `custodian serve`, from a run before this one.
+    FromDaemon,
+}
+
+impl IndexSource {
+    /// `parsed (31204 ms)`, `from cache (812 ms)`, `from daemon`.
+    pub fn line(&self) -> String {
+        match self {
+            IndexSource::Parsed { millis } => format!("parsed ({millis} ms)"),
+            IndexSource::FromCache { millis } => format!("from cache ({millis} ms)"),
+            IndexSource::FromDaemon => "from daemon".to_string(),
+        }
+    }
+}
+
+/// The cache's key for a scan: the klepto that writes the model, the scan's options and the code it reads
+/// (klepto's fingerprint, [`crate::code_digest`]).
+pub fn index_cache_key(root: &Path, opts: &crate::ScanOptions) -> std::result::Result<String, KleptoError> {
+    let code = crate::code_digest(root, opts)?;
+    Ok(crate::digest::short(&crate::digest::of_value(&(Klepto::MODEL_VERSION, format!("{opts:?}"), code)), 24))
+}
+
+/// How many parsed indexes the cache keeps: the newest, and the one before it (a job's base and its tree).
+pub const INDEX_CACHE_KEEP: usize = 2;
+
+/// The model written to its cache file whole (a temporary beside it, then renamed), and the cache cut to the newest
+/// [`INDEX_CACHE_KEEP`]. A model that cannot be written is not kept; the scan's answer stands.
+fn keep_index(file: &Path, k: &Klepto) {
+    let Some(dir) = file.parent() else { return };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let tmp = file.with_extension("cbor.tmp");
+    let written = std::fs::File::create(&tmp).ok().is_some_and(|f| {
+        let mut w = std::io::BufWriter::new(f);
+        ciborium::into_writer(k, &mut w).is_ok() && std::io::Write::flush(&mut w).is_ok()
+    });
+    if !written || std::fs::rename(&tmp, file).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return;
+    }
+    // the cache's own folders, newest first; the older ones are parsed again if their code comes back
+    let Some(index) = dir.parent() else { return };
+    let mut held: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(index).map(|rd| rd.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()).map(|e| (e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), e.path())).collect()).unwrap_or_default();
+    held.sort_by_key(|h| std::cmp::Reverse(h.0));
+    for (_, old) in held.into_iter().skip(INDEX_CACHE_KEEP) {
+        let _ = std::fs::remove_dir_all(old);
+    }
 }
 
 impl Scope {
@@ -110,8 +171,35 @@ impl Facts {
         if !root.join("Cargo.toml").is_file() {
             return Err(ReadingRefusal::NoWorkspace.refuse(root.display()));
         }
+        let opts = scope.scan_options();
+        let started = std::time::Instant::now();
+        // the parsed index, held once per code digest when the project has a folder
+        let cached = crate::store::Store::find(&root).and_then(|s| index_cache_key(&root, &opts).ok().and_then(|key| s.path(&crate::store::named::INDEX_MODEL, &[("digest", &key)]).ok()));
+        if let Some(file) = &cached {
+            if let Some(k) = std::fs::File::open(file).ok().and_then(|f| ciborium::from_reader::<Klepto, _>(std::io::BufReader::new(f)).ok()) {
+                let mut f = Self::from_klepto(root, k, how)?;
+                f.index = IndexSource::FromCache { millis: started.elapsed().as_millis() as u64 };
+                f.trees = false;
+                return Ok(f);
+            }
+        }
+        let k = klepto_scan(&root, &opts).map_err(|e| ReadingRefusal::Scan.refuse(e))?;
+        if let Some(file) = &cached {
+            keep_index(file, &k);
+        }
+        let mut f = Self::from_klepto(root, k, how)?;
+        f.index = IndexSource::Parsed { millis: started.elapsed().as_millis() as u64 };
+        Ok(f)
+    }
+
+    /// The facts from a parse, never from the cache: for a reader that walks the syntax trees.
+    pub fn build_parsed(root: &Path, scope: &Scope, how: Resolving) -> Result<Facts> {
+        let root = root.canonicalize().map_err(|e| ReadingRefusal::NoWorkspace.refuse(format!("{}: {e}", root.display())))?;
+        let started = std::time::Instant::now();
         let k = klepto_scan(&root, &scope.scan_options()).map_err(|e| ReadingRefusal::Scan.refuse(e))?;
-        Self::from_klepto(root, k, how)
+        let mut f = Self::from_klepto(root, k, how)?;
+        f.index = IndexSource::Parsed { millis: started.elapsed().as_millis() as u64 };
+        Ok(f)
     }
 
     pub fn from_klepto(root: PathBuf, mut k: Klepto, how: Resolving) -> Result<Facts> {
@@ -199,7 +287,7 @@ impl Facts {
                 (maintenance::levels::LevelTable::shipped().names(), "attributes")
             }
         };
-        Ok(Facts { root, k, packages, links, marks, levels, marks_from, paths, how, file_index, file_package, items_by_id, referrers, references })
+        Ok(Facts { root, k, packages, links, marks, levels, marks_from, paths, how, file_index, file_package, items_by_id, referrers, references, index: IndexSource::Parsed { millis: 0 }, trees: true })
     }
 
     /// `/`-separated, relative to the root when under it.

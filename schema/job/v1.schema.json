@@ -66,6 +66,18 @@
         "outcome_known": {
           "type": "boolean",
           "description": "At open: the job declared its verification."
+        },
+        "base_commit": {
+          "type": "string",
+          "description": "The commit the job opened at (git rev-parse HEAD at job start): the base a failing test is judged against, and where test --affected measures the job's change from."
+        },
+        "baseline": {
+          "type": "boolean",
+          "description": "Run the tests the target reaches at open, and keep their outcomes as the job's baseline."
+        },
+        "allow_file": {
+          "type": "string",
+          "description": "A file the job may touch that no operation writes (a test's expected output, a fixture), as a glob from the root. Repeats: one value per line, in order."
         }
       }
     }

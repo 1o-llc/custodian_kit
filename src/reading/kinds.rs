@@ -1194,8 +1194,12 @@ fn test_case(f: &Facts, id: &str) -> Option<TestCase> {
     let pkg = f.k.packages.get(&d.package)?;
     let mut segs: Vec<&str> = id.split("::").collect();
     let root = segs.remove(0).to_string();
-    let target = if root == d.package {
+    let target = if root == d.package && pkg.targets.iter().any(|t| t.kind == "lib" || t.kind == "proc-macro") {
         "lib".to_string()
+    } else if root == d.package {
+        // a package with no library: the binary named as the package is the root
+        let b = pkg.targets.iter().find(|t| t.kind == "bin" && t.name.replace('-', "_") == root)?;
+        format!("bin:{}", b.name)
     } else {
         // the target whose crate-root name this is (klepto names a root after its target)
         let t = pkg.targets.iter().find(|t| {
@@ -1215,6 +1219,13 @@ pub(crate) fn tests_reaching(f: &Facts, seeds: &BTreeSet<String>) -> Vec<TestCas
     let tests = f.tests();
     let reached = f.closure_of(seeds.iter().map(String::as_str));
     let mut cases: Vec<TestCase> = tests.iter().filter(|t| reached.contains(*t) || seeds.contains(*t)).filter_map(|t| test_case(f, t)).collect();
+    cases.sort();
+    cases
+}
+
+/// Every test of the named crates (their unit tests, their integration tests, their binaries' tests).
+pub(crate) fn tests_of_crates(f: &Facts, crates: &BTreeSet<String>) -> Vec<TestCase> {
+    let mut cases: Vec<TestCase> = f.tests().iter().filter(|t| f.item(t).is_some_and(|d| crates.contains(&d.package))).filter_map(|t| test_case(f, t)).collect();
     cases.sort();
     cases
 }
@@ -1259,9 +1270,16 @@ fn affected_tests(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     if spec.change.files.is_empty() && spec.change.items.is_empty() {
         return Err(ReadingRefusal::NoChange.refuse(&spec.name));
     }
-    let seeds = changed_items(f, &spec.change.files, &spec.change.items);
-    let cases = tests_reaching(f, &seeds);
-    let mut rows: Vec<CodeQueryResult> = spec.change.files.iter().map(|p| named("changed-file", p.clone(), f.package_of_rel(p).map(|c| c.name.clone()), "in the change", vec![])).collect();
+    let mut seeds = changed_items(f, &spec.change.files, &spec.change.items);
+    // a changed file that holds no item (a manifest, a test's expected output, a fixture) changes its crate: every
+    // item of it is a seed, and every test of it runs
+    let whole: BTreeSet<String> = spec.change.files.iter().filter(|p| !p.ends_with(".rs")).filter_map(|p| f.package_of_rel(p).map(|c| c.name.clone())).collect();
+    seeds.extend(f.k.items.iter().filter(|d| whole.contains(&d.package)).map(|d| d.id.clone()));
+    let mut cases = tests_reaching(f, &seeds);
+    cases.extend(tests_of_crates(f, &whole));
+    cases.sort();
+    cases.dedup();
+    let mut rows: Vec<CodeQueryResult> = spec.change.files.iter().map(|p| named("changed-file", p.clone(), f.package_of_rel(p).map(|c| c.name.clone()), if p.ends_with(".rs") { "in the change" } else { "in the change: not Rust, so every test of its crate" }, vec![])).collect();
     rows.extend(test_rows(f, &cases, "a test whose closure reaches the change"));
     let crates: BTreeSet<&str> = cases.iter().map(|c| c.package.as_str()).collect();
     let mut ans = Answer::default();
