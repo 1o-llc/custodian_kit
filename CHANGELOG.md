@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.4 (2026-10-20)
+
+The parsed index 0.3.3 keeps was too big to keep: 975 MB to 1.1 GB for the kit's workspace, on a disk that ran down
+to 126 MB free twice that night. Now the model is compressed and capped, and every reading that walks the code
+parses. Nothing public removed: the rustdoc JSON of 0.3.3 and 0.3.4 differ only by added items. Pinned to 9f8e65c.
+
+- The kept model is CBOR compressed with zstd (level 3, `INDEX_CACHE_ZSTD_LEVEL`), `index/<digest>/model.cbor.zst`:
+  60 MB for the kit's workspace, read back in 3.4 s as before (was [src/reading/facts.rs#L139 at 0.3.3](https://github.com/1o-llc/custodian_kit/blob/75108fcb96af5dfcaad4cfd64954bb2bcf6bb56d/src/reading/facts.rs#L139),
+  [src/reading/facts.rs#L179 at 0.3.3](https://github.com/1o-llc/custodian_kit/blob/75108fcb96af5dfcaad4cfd64954bb2bcf6bb56d/src/reading/facts.rs#L179); now [src/reading/facts.rs#L153](https://github.com/1o-llc/custodian_kit/blob/9f8e65cd8af4334b76f29c4e3736dcab70085ade/src/reading/facts.rs#L153), [src/reading/facts.rs#L195](https://github.com/1o-llc/custodian_kit/blob/9f8e65cd8af4334b76f29c4e3736dcab70085ade/src/reading/facts.rs#L195),
+  [src/store.rs#L85](https://github.com/1o-llc/custodian_kit/blob/9f8e65cd8af4334b76f29c4e3736dcab70085ade/src/store.rs#L85)).
+- A model over 256 MB compressed (`INDEX_CACHE_MAX_BYTES`) is not kept; the scan says so on the reading's record and
+  its receipt, `parsed (35901 ms; not kept: 300 MB, over the 256 MB the cache holds)` (`IndexSource::ParsedNotKept`,
+  [src/reading/facts.rs#L115](https://github.com/1o-llc/custodian_kit/blob/9f8e65cd8af4334b76f29c4e3736dcab70085ade/src/reading/facts.rs#L115), [src/reading/facts.rs#L142](https://github.com/1o-llc/custodian_kit/blob/9f8e65cd8af4334b76f29c4e3736dcab70085ade/src/reading/facts.rs#L142), [src/reading/facts.rs#L203](https://github.com/1o-llc/custodian_kit/blob/9f8e65cd8af4334b76f29c4e3736dcab70085ade/src/reading/facts.rs#L203)).
+- 0.3.3's uncompressed `model.cbor` is let go by the next scan that keeps a model ([src/reading/facts.rs#L148](https://github.com/1o-llc/custodian_kit/blob/9f8e65cd8af4334b76f29c4e3736dcab70085ade/src/reading/facts.rs#L148)).
+- `duplicates` parses, as `count` and `bundle` do: its shapes are the function bodies, which a model read back from
+  the cache does not hold (was [src/reading/spec.rs#L125 at 0.3.3](https://github.com/1o-llc/custodian_kit/blob/75108fcb96af5dfcaad4cfd64954bb2bcf6bb56d/src/reading/spec.rs#L125); now [src/reading/spec.rs#L126](https://github.com/1o-llc/custodian_kit/blob/9f8e65cd8af4334b76f29c4e3736dcab70085ade/src/reading/spec.rs#L126)).
+
+### Proof
+
+- tests/index.rs, `the_second_scan_of_the_same_code_reads_the_index_back_and_a_change_parses_again`: the model on
+  disk is `model.cbor.zst`, under the cap, 0.3.3's file beside it gone after the next scan;
+  `a_reading_from_the_cache_says_so_and_a_count_parses_for_its_trees`: a duplicates reading says `index parsed`, and
+  the line of a model not kept.
+- On the kit's workspace (release build, a copy outside the kit): parsed in 34.8 s at 5.5 GB, kept as 60 MB (was
+  1.1 GB); read back in 3.4 s, 64,133 items and 1,936 files the same; the 1.1 GB `model.cbor` was let go.
+- Every suite passes: the lib tests and every integration file.
+
 ## 0.3.3 (2026-10-20)
 
 Two real runs found these. The first bounded job in the kit (item-hold) did its work and closed `failed_test`: 26
