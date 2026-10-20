@@ -28,6 +28,8 @@ tantivy = "0.26.1"
 klepto = "0.3.3"
 syn = { version = "2", features = ["full", "visit", "extra-traits"] }
 quote = "1"
+# the patterns reading: a body's tokens with their places in its file (a filling taken as written)
+proc-macro2 = { version = "1", features = ["span-locations"] }
 toml_edit = "0.22"
 globset = "0.4"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

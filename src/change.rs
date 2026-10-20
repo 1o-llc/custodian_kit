@@ -904,6 +904,11 @@ fn template_slots(t: &str) -> Vec<(String, bool)> {
     out
 }
 
+/// The slots a piece's macro takes (its template's), by the piece's name; none for a name that is not a piece.
+pub fn slots_of(name: &str) -> Vec<String> {
+    piece(name).map(|d| template_slots(d.template).into_iter().map(|(s, _)| s).collect()).unwrap_or_default()
+}
+
 /// A piece checked against its declaration: known, its required slots given, nothing it does not take.
 pub fn check_piece(p: &Piece) -> std::result::Result<&'static PieceDecl, String> {
     let d = piece(&p.piece).ok_or_else(|| format!("`{}` is not a toolkit piece (simple_impl {}) or a step (let, value, raw)", p.piece, TOOLKIT.1))?;

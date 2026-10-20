@@ -13,6 +13,7 @@ pub mod diag;
 pub mod facts;
 pub mod impact;
 pub mod kinds;
+pub mod patterns;
 pub mod refusal;
 pub mod count;
 pub mod render;

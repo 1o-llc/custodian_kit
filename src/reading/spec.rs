@@ -92,6 +92,7 @@ vocabulary! {
         Sweep = "sweep" : "a read-only walk of an undeclared tree (the one walk custodian makes): files by extension, crates, TOML directories, the routes to declare; never in a job",
         Impact = "impact" : "everything a change to a crate, a file or an item entails, in one reading: its definitions, use sites, constructions, matches, impls, dependents, reach, the tests that cover it, the features and feature configurations that build it, the linkage records naming it, and the cost of the change by dimension, each measured, heuristic or unknown",
         Linkage = "linkage" : "the architectural linkage records (why declarations are bound together) naming the target, `*` for all: each bound declaration resolved through klepto, stale when it no longer resolves, to review when its file changed since the record was made; comment anchors with no record behind them",
+        Patterns = "patterns" : "every function body in scope (`*`, or crates by name) against the simple_impl toolkit: its shape, the toolkit pieces whose expansion it holds (exact: the call expands to the same tokens; near: the difference named) with the replace_body spec that swaps them, the shapes that repeat across crates and no piece writes (ranked by count times size, each with a body and a proposed macro), and the counts by crate",
     }
 }
 
@@ -147,6 +148,7 @@ impl ReadingKind {
             ReadingKind::Sweep => "swept",
             ReadingKind::Impact => "impact",
             ReadingKind::Linkage => "linkage",
+            ReadingKind::Patterns => "pattern",
         }
     }
 
@@ -310,6 +312,51 @@ pub struct ReadingSpec {
     pub change: Change,
     #[serde(default)]
     pub bundle: BundleOptions,
+    #[serde(default)]
+    pub patterns: PatternOptions,
+}
+
+/// patterns: what counts as a shape worth a macro of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatternOptions {
+    /// A shape no piece writes is a candidate when it repeats at least this many times...
+    #[serde(default = "default_min_repeats")]
+    pub min_repeats: usize,
+    /// ... in at least this many crates.
+    #[serde(default = "default_min_crates")]
+    pub min_crates: usize,
+    /// ... and has at least this many tokens that are not holes.
+    #[serde(default = "default_min_size")]
+    pub min_size: usize,
+    /// How many candidates the reading lists (all are counted).
+    #[serde(default = "default_candidates")]
+    pub candidates: usize,
+    /// klepto's shaping: bodies with fewer significant tokens get no klepto shape.
+    #[serde(default = "default_min_tokens")]
+    pub min_tokens: usize,
+}
+
+fn default_min_repeats() -> usize {
+    5
+}
+
+fn default_min_crates() -> usize {
+    2
+}
+
+fn default_min_size() -> usize {
+    6
+}
+
+fn default_candidates() -> usize {
+    100
+}
+
+impl Default for PatternOptions {
+    fn default() -> Self {
+        Self { min_repeats: default_min_repeats(), min_crates: default_min_crates(), min_size: default_min_size(), candidates: default_candidates(), min_tokens: default_min_tokens() }
+    }
 }
 
 /// bundle: what the bundle leaves out. `filters` are the filters word's flag
