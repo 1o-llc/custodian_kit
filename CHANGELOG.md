@@ -1,5 +1,65 @@
 # Changelog
 
+## 0.3.5 (unreleased)
+
+Three things an agent asked for as custodian's user, each read from the
+records alone. After a job, the message a person reads was written by hand
+each morning; now `handoff` makes it from the job's records. Before changing
+a crate, nothing said who brought it in or why; now `why` does. And the
+brief said "tokens: not measured here (no source in the records)"; now every
+reading keeps what it stood for. Nothing is removed from the API. Every link
+is pinned to a8f0f53.
+
+- `handoff`: `of_job` reads a job's file, closing receipt, receipts, task
+  history, transform records and count diff into one `Handoff`
+  ([src/handoff.rs#L245](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/handoff.rs#L245)); `render` writes it in a fixed order, what
+  waits on a person first, then what the job was for, what changed, what was
+  decided and by whom, what was verified, and what runs next
+  ([src/handoff.rs#L465](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/handoff.rs#L465)). A failure is pre-existing only when a closed
+  job's run before this job's first transform failed the same test
+  ([src/handoff.rs#L378](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/handoff.rs#L378)); otherwise it says it is not known. Lists stop
+  at five, next steps at eight, the text at sixty lines. `Reader::Agent` adds
+  the exact lines, a failed line's `cargo test` naming only its failures
+  ([src/handoff.rs#L449](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/handoff.rs#L449)), and the routes. `job_folder` finds the job
+  closed last by its closing time ([src/handoff.rs#L191](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/handoff.rs#L191)).
+- `why`: `of` takes a `crate:` or `decl:` route ([src/why.rs#L188](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/why.rs#L188)): the
+  task revisions whose change records touch its files
+  ([src/why.rs#L142](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/why.rs#L142)), the linkage records that bind it
+  ([src/why.rs#L169](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/why.rs#L169)), the readings that name it. git's first and last
+  commit come from a declared line, `exec::git_log_paths`
+  ([src/exec.rs#L144](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/exec.rs#L144)), which the caller runs with its receipt; `render`
+  says "no record" for an empty section ([src/why.rs#L235](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/why.rs#L235)).
+- `cost`: a reading's cost is the files its answer names, a row's file or a
+  crate row's `Cargo.toml` ([src/cost.rs#L100](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/cost.rs#L100)), their bytes when it is
+  made, and tokens estimated as bytes / 4 ([src/cost.rs#L118](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/cost.rs#L118)). A reuse
+  saves the same number ([src/cost.rs#L143](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/cost.rs#L143)). The record is kept under
+  the receipt's number, `data/costs/<seq>.json`, a new part of the folder
+  ([src/store.rs#L84](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/store.rs#L84)); the receipt is receipt_history's and is left as it
+  is, because a field added to it would break every crate that builds one.
+  The reading runner keeps a record for each reading
+  ([src/runs.rs#L219](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/runs.rs#L219)) and each reuse ([src/runs.rs#L145](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/runs.rs#L145)). `sum`
+  adds them per reading kind and per job ([src/cost.rs#L247](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/cost.rs#L247)), and
+  `brief_line` is the brief's line ([src/cost.rs#L274](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/cost.rs#L274)).
+- `receipts::is_reading_run` is the one rule for which receipts are reading
+  runs, whatever word an older custodian wrote ([src/receipts.rs#L63](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/receipts.rs#L63)).
+  The kit's own job of 2026-10-19 wrote `run` and `count`; before, those
+  readings were missed by anything that looked for `reading`.
+
+Proof: `cargo test` has 227 tests, the 219 of 0.3.2 and eight new.
+`a_handoff_is_made_from_the_records_in_its_order_and_pinned`
+([tests/handoff.rs#L202](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/tests/handoff.rs#L202)) pins a bounded job's handoff whole, for a
+person and for an agent: a refused preflight, a decision answered and one
+open, two failures with one pre-existing, a test line that stopped.
+`why_names_the_task_history_and_the_linkage_record_of_a_route`
+([tests/handoff.rs#L220](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/tests/handoff.rs#L220)), `a_readings_cost_is_the_sum_of_its_files`
+([src/cost.rs#L354](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/cost.rs#L354)), `a_reuse_saves_the_readings_cost_and_the_brief_says_both`
+([src/cost.rs#L372](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/cost.rs#L372)), the layout golden with `custodian.cost`
+([tests/layout.rs#L35](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/tests/layout.rs#L35)), the four unit tests of the rules: `a_route_names_its_crate_its_items_and_its_dependency`
+([src/why.rs#L297](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/why.rs#L297)), `git_logs_lines_read_back_as_commits_and_their_ends` ([src/why.rs#L307](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/why.rs#L307)),
+`a_failed_test_lines_cargo_line_names_only_its_failures` ([src/handoff.rs#L695](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/handoff.rs#L695)) and
+`a_long_handoff_stops_at_its_cap_and_says_how_much_more` ([src/handoff.rs#L705](https://github.com/1o-llc/custodian_kit/blob/a8f0f538feaf1371762c72aadfdcf78af851996b/src/handoff.rs#L705)). The rustdoc JSON of 0.3.2 against this: 5,124
+public items before, 5,451 after, 327 added, 0 removed or changed.
+
 ## 0.3.4 (2026-10-20)
 
 The parsed index 0.3.3 keeps was too big to keep: 975 MB to 1.1 GB for the kit's workspace, on a disk that ran down
