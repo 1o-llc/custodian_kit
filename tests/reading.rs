@@ -105,6 +105,14 @@ fn patterns_shape_every_function_and_find_the_shapes_repeated_across_crates() {
     assert_eq!(lp.attributes["crates"], "2");
     assert!(lp.attributes["proposed"].contains('!'));
     assert!(!rows(&r, "crate").is_empty());
+    // each exact match by a named piece is a change spec file, scoped to its crate, that keeps the expansion
+    let files = custodian_kit::reading::patterns::spec_files(&r.report);
+    let exact = fns.iter().filter(|f| f.attributes["status"] == "exact").count();
+    assert!(exact > 0 && files.len() == exact, "{} files for {exact} exact matches", files.len());
+    for (name, text) in &files {
+        let s = custodian_kit::change::ChangeSpec::from_toml(text).unwrap_or_else(|e| panic!("{name}: {e}\n{text}"));
+        assert!(name == &format!("{}.toml", s.name) && s.same_expansion && s.scope.write.len() == 1 && s.scope.write[0].starts_with("crate:"), "{text}");
+    }
 }
 
 #[test]

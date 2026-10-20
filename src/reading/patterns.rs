@@ -51,13 +51,35 @@ struct FileJob {
     fns: HashMap<(u32, u32), String>,
 }
 
+/// The change spec files of a patterns reading: one TOML file per function matched exactly by a named piece (never
+/// the catch-all `simple_method`, never a near match), named by its spec (`<name>.toml`), so a preflight, a transform
+/// or a batch is driven from them as they are.
+pub fn spec_files(report: &super::ReadingReport) -> Vec<(String, String)> {
+    report
+        .query
+        .results
+        .iter()
+        .filter(|r| r.kind == "function" && r.attributes.get("status").map(String::as_str) == Some("exact"))
+        .filter(|r| !r.attributes.get("pieces").is_some_and(|p| p.split(", ").any(|x| x == "simple_method")))
+        .filter_map(|r| r.attributes.get("spec"))
+        .filter_map(|s| serde_json::from_str::<crate::change::ChangeSpec>(s).ok())
+        .filter(|s| s.same_expansion)
+        .filter_map(|s| s.to_toml().ok().map(|t| (format!("{}.toml", s.name), t)))
+        .collect()
+}
+
 /// One function matched into its row.
 fn row(src: &Source, job: &FileJob, at: proc_macro2::Span, parts: FnParts, ctx: &Context) -> Option<FnRow> {
     let FnParts { sig, body: block, .. } = parts;
     let s = at.start();
     let id = job.fns.get(&(s.line as u32, s.column as u32))?;
     let m: FnMatch = matcher::match_fn(src, parts, ctx);
-    let spec = matcher::spec_for(&m, src, id, parts, false).or_else(|| matcher::spec_for(&m, src, id, parts, true));
+    // the swap writes the target's own crate: its scope says so, so a spec file from the reading preflights as it is
+    let scoped = |mut s: crate::change::ChangeSpec| {
+        s.scope.write = vec![format!("crate:{}", job.package)];
+        s
+    };
+    let spec = matcher::spec_for(&m, src, id, parts, false).or_else(|| matcher::spec_for(&m, src, id, parts, true)).map(scoped);
     let mut pieces: Vec<(String, Level)> = Vec::new();
     let mut calls: Vec<(String, String)> = Vec::new();
     if let Some(w) = &m.whole {

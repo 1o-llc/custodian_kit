@@ -31,6 +31,7 @@ use crate::reading::refusal::ReadingRefusal;
 use crate::reading::spec::vocabulary;
 use crate::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 vocabulary! {
@@ -496,6 +497,11 @@ pub struct ChangeSpec {
     pub postconditions: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub decisions: Vec<Question>,
+    /// The change keeps what the function compiles to (a body swapped for the toolkit calls whose expansion it already
+    /// is): `cargo expand` of the target before and after, the same tokens in the normal form, is a postcondition of
+    /// the transform.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub same_expansion: bool,
 }
 
 /// The change spec's schema.
@@ -1554,6 +1560,52 @@ pub fn module_of_file<'k>(k: &'k klepto::Klepto, file: &Path) -> Option<&'k klep
 /// and its package (`cli`) is what cargo checks and what its manifest, dependencies and features are declared on.
 pub fn package_of(k: &klepto::Klepto, crate_root: &str) -> String {
     k.crate_roots.get(crate_root).cloned().unwrap_or_else(|| crate_root.to_string())
+}
+
+/// One package a transform's proof compiles, and whether its tests compile too.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ProofPackage {
+    pub package: String,
+    pub tests: bool,
+    /// Why it is checked: `lands`, `direct dependent`, `reads <item>`.
+    pub why: String,
+}
+
+/// Whether an operation changes what code elsewhere reads of its target (its signature, its name, its place, its
+/// fields or variants, whether it is built): the readers of the target are checked too. Every other operation
+/// changes the target's own crate only, and its direct dependents are the furthest a mistake can show.
+pub fn reaches_readers(op: Operation) -> bool {
+    use Operation::*;
+    matches!(op, ChangeSignature | Rename | Move | Extract | Gate | AddField | AddVariant | Inline | ChangeDependency | DeclareFeature)
+}
+
+/// The packages a transform's proof compiles: the one it lands in (with its tests), each package that depends on
+/// it directly, and, for an operation that changes what others read of its target, each package holding an occurrence
+/// klepto resolves to the target. Never the whole closure of dependents: a body or an addition in one crate compiles
+/// in a dependent's dependent only if it does in the direct one.
+pub fn proof_packages(k: &klepto::Klepto, spec: &ChangeSpec, land: &Landing) -> Vec<ProofPackage> {
+    let mut out: BTreeMap<String, ProofPackage> = BTreeMap::new();
+    let mut add = |p: &str, tests: bool, why: String| {
+        if k.features.contains_key(p) {
+            out.entry(p.to_string()).or_insert(ProofPackage { package: p.to_string(), tests, why });
+        }
+    };
+    add(&land.package, true, "lands".into());
+    for (dependent, deps) in &k.package_deps {
+        if deps.contains(&land.package) {
+            add(dependent, false, "direct dependent".into());
+        }
+    }
+    if reaches_readers(spec.op()) {
+        if let Some(item) = land.item.as_deref() {
+            let names_it = |r: &Option<klepto::Resolution>| matches!(r, Some(klepto::Resolution::Local(x) | klepto::Resolution::External(x)) if x == item || x.starts_with(&format!("{item}::")));
+            let roots = k.paths.iter().filter(|o| names_it(&o.resolution)).map(|o| o.module_path.first().cloned()).chain(k.calls.iter().filter(|o| names_it(&o.resolution)).map(|o| o.module_path.first().cloned()));
+            for root in roots.flatten() {
+                add(&package_of(k, &root), false, format!("reads {item}"));
+            }
+        }
+    }
+    out.into_values().collect()
 }
 
 /// The item a target names: its id exactly, else by its trailing segments.

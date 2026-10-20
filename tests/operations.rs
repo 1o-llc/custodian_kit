@@ -359,3 +359,20 @@ fn a_value_step_with_a_closure_or_a_macro_call_is_reported_not_refused() {
     assert_eq!(custodian_kit::change::code_in_value("println!(\"{}\", f(|y| y))"), (1, vec!["println".to_string()]));
     assert_eq!(custodian_kit::change::code_in_value("a + b.len()"), (0, vec![]));
 }
+
+/// p depends on a, a on c: a body swapped in c is compiled in c (its tests too) and in a, never in p, a dependent's
+/// dependent; a rename reaches the readers of what it renames as well.
+#[test]
+fn a_proof_compiles_the_crate_and_its_direct_dependents_never_a_dependents_dependent() {
+    let (store, _ctx, w) = forms("proof");
+    let spec_of = |text: &str| -> custodian_kit::change::ChangeSpec { toml::from_str(text).unwrap() };
+    let body = spec_of("name = \"b\"\nobjective = \"o\"\noperation = \"replace_body\"\ntarget = \"c::c\"\nsame_expansion = true\n\n[function]\nname = \"c\"\nbody = [{ piece = \"value\", value = \"1\" }]\n");
+    assert!(body.same_expansion);
+    let land = custodian_kit::change::landing(w.klepto(), &store.root, &body).unwrap();
+    let got = |s: &custodian_kit::change::ChangeSpec| custodian_kit::change::proof_packages(w.klepto(), s, &land).into_iter().map(|p| (p.package, p.tests, p.why)).collect::<Vec<_>>();
+    assert_eq!(got(&body), [("a".to_string(), false, "direct dependent".to_string()), ("c".to_string(), true, "lands".to_string())]);
+    assert!(!custodian_kit::change::reaches_readers(custodian_kit::change::Operation::ReplaceBody));
+    let rename = spec_of("name = \"r\"\nobjective = \"o\"\noperation = \"rename\"\ntarget = \"c::c\"\nnew_name = \"cc\"\n");
+    assert!(custodian_kit::change::reaches_readers(rename.op()));
+    assert!(got(&rename).iter().all(|(p, ..)| p != "p"), "{:?}", got(&rename));
+}

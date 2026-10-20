@@ -346,6 +346,13 @@ pub fn write(base: &Path, report: &ReadingReport) -> Result<(PathBuf, PathBuf, P
     if let Some(bytes) = &report.artifact {
         crate::store::write_whole(&page.with_extension("bundle"), bytes)?;
     }
+    // a patterns reading's swaps as change spec files, one per exact match, beside the reading
+    if report.kind == ReadingKind::Patterns {
+        let specs = page.with_extension("specs");
+        for (name, text) in patterns::spec_files(report) {
+            crate::store::write_whole(&specs.join(name), text.as_bytes())?;
+        }
+    }
     Ok((page, json, latest))
 }
 

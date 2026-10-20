@@ -874,6 +874,8 @@ pub fn spec_for(m: &FnMatch, src: &Source, item: &str, f: FnParts, near_too: boo
         objective: format!("{item}: its body as simple_impl toolkit calls"),
         operation: Some(Operation::ReplaceBody),
         target: item.to_string(),
+        // an exact swap compiles to what the body compiled to: the transform proves it by cargo expand
+        same_expansion: !near_too,
         ..ChangeSpec::default()
     };
     if let Some(w) = m.whole.as_ref().filter(|w| usable(w.level) && w.shape().position == Position::Function) {

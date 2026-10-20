@@ -81,6 +81,21 @@ pub struct TransformRecord {
     pub reverts: Option<String>,
 }
 
+/// A function's expansion before and after a change, in the toolkit's proof form (its locals named by where they are
+/// bound, the prelude's names short): kept beside the transform's record (`<record>.expansion.json`), its verdict one of
+/// the record's postconditions (`expands <function> the same`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Expansion {
+    pub function: String,
+    pub package: String,
+    pub before: String,
+    pub after: String,
+    pub same: bool,
+    /// The `cargo expand` line, and how long the two expansions took.
+    pub line: String,
+    pub millis: i64,
+}
+
 impl TransformRecord {
     /// Every check and postcondition held.
     pub fn proved(&self) -> bool {
