@@ -192,6 +192,10 @@
             "items": {
               "type": "string",
               "description": "A changed item path. Repeats: one value per line, in order."
+            },
+            "signatures": {
+              "type": "string",
+              "description": "A public item whose signature the change alters or removes, as <file>#<path in the file>: the tests of its readers run too. Repeats: one value per line, in order."
             }
           }
         },

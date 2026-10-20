@@ -129,6 +129,59 @@ fn a_code_changing_step_needs_a_preflight_of_this_spec_over_this_code() {
     assert!(!d.go && d.reason.contains("the spec changed since preflight"), "{}", d.reason);
 }
 
+/// A preflight's verdict and findings, without what differs by run (when, how long, which receipt the impact had).
+fn verdict(p: &preflight::Preflight) -> serde_json::Value {
+    let mut v = serde_json::to_value(p).unwrap();
+    for k in ["utc", "millis", "impact_seq"] {
+        v.as_object_mut().unwrap().remove(k);
+    }
+    v
+}
+
+#[test]
+fn a_batch_preflight_gives_each_member_the_verdict_its_own_preflight_gives() {
+    let (store, ctx) = project("batch");
+    let w = ws(&store.root);
+    // every kind of verdict: authorized, a precondition broken, a write outside the scope (a decision asked), a name
+    // taken, a match that stops compiling, a target that does not resolve, a body on another function, a body swap
+    let specs: Vec<PathBuf> = vec![
+        spec(&store.root, "config-digest", ADD_DIGEST),
+        spec(&store.root, "no-default", &ADD_DIGEST.replace("default = \"String::new()\"\n", "").replace("config-digest", "no-default")),
+        spec(&store.root, "outside", &format!("{}\n[scope]\nwrite = [\"crate:app\"]\n", ADD_DIGEST.replace("config-digest", "outside"))),
+        spec(&store.root, "socket-again", "name = \"socket-again\"\nobjective = \"o\"\noperation = \"make_fn\"\ntarget = \"crate:core_lib\"\n\n[function]\nname = \"socket\"\n"),
+        spec(&store.root, "mode-paused", "name = \"mode-paused\"\nobjective = \"a paused mode\"\noperation = \"add_variant\"\ntarget = \"core_lib::Mode\"\n\n[variant]\nname = \"Paused\"\n"),
+        spec(&store.root, "nowhere", "name = \"nowhere\"\nobjective = \"o\"\noperation = \"add_attribute\"\ntarget = \"core_lib::no_such_function\"\nattribute = \"#[must_use]\"\n"),
+        spec(&store.root, "token-other", "name = \"token-other\"\nobjective = \"o\"\noperation = \"replace_body\"\ntarget = \"core_lib::token\"\n\n[function]\nname = \"socket\"\n\n[[function.body]]\npiece = \"value\"\nvalue = \"None\"\n"),
+        spec(&store.root, "token-guarded", "name = \"token-guarded\"\nobjective = \"o\"\noperation = \"replace_body\"\ntarget = \"core_lib::token\"\n\n[function]\nname = \"token\"\n\n[[function.body]]\npiece = \"value\"\nvalue = \"std::env::var(\\\"FIX_TOKEN\\\").ok().filter(|t| !t.is_empty())\"\n"),
+    ];
+    let singles: Vec<preflight::Preflight> = specs.iter().map(|s| preflight::run_preflight(&ctx, s, None, Runner::InProcess(&w)).unwrap().preflight).collect();
+    assert!(singles.iter().any(|p| p.authorized) && singles.iter().filter(|p| !p.authorized).count() >= 5, "{:?}", singles.iter().map(|p| (&p.spec_name, p.authorized)).collect::<Vec<_>>());
+    let batch = preflight::run_preflight_batch(&ctx, "batch.list", &specs, None, &w).unwrap();
+    assert_eq!(batch.preflights.len(), specs.len());
+    for (one, member) in singles.iter().zip(&batch.preflights) {
+        assert_eq!(verdict(one), verdict(member), "{}: the batch's verdict is its own preflight's", one.spec_name);
+    }
+    for (one, m) in singles.iter().zip(&batch.batch.members) {
+        assert_eq!((m.name.as_str(), m.authorized, m.reason.as_str(), m.why.clone()), (one.spec_name.as_str(), one.authorized, one.reason(), one.headline_why()));
+    }
+    // one receipt for the batch, listing each member and its verdict
+    let r = batch.receipt.clone().unwrap();
+    assert_eq!(r.command, preflight::BATCH_COMMAND);
+    assert_eq!(preflight::batch_record(&store.root, &r).unwrap(), batch.batch);
+    // the gate takes the batch's receipt as each member's preflight: go for the authorized, no for the rest
+    let changes: Vec<custodian_kit::change::ChangeSpec> = specs.iter().map(|p| custodian_kit::change::ChangeSpec::from_path(p).unwrap()).collect();
+    let refs: Vec<&custodian_kit::change::ChangeSpec> = changes.iter().collect();
+    let gates = preflight::gate_all(&store, &refs, &batch.batch.code_digest).unwrap();
+    for ((d, rec), one) in gates.iter().zip(&singles) {
+        assert_eq!(d.go, one.authorized, "{}: {}", one.spec_name, d.reason);
+        assert_eq!(rec.as_ref().unwrap().seq, r.seq, "{}: the newest preflight is the batch's", one.spec_name);
+    }
+    // the single gate reads it the same way
+    let (d, rec) = preflight::gate(&store, &changes[0], &batch.batch.code_digest).unwrap();
+    assert!(d.go && d.reason.contains(&format!("#{}", r.seq)), "{}", d.reason);
+    assert_eq!(rec.unwrap().name, "config-digest");
+}
+
 #[test]
 fn a_decision_answered_once_is_never_asked_again_in_any_task() {
     let (store, _) = project("decide");

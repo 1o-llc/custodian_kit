@@ -78,6 +78,10 @@
         "allow_file": {
           "type": "string",
           "description": "A file the job may touch that no operation writes (a test's expected output, a fixture), as a glob from the root. Repeats: one value per line, in order."
+        },
+        "budget": {
+          "type": "string",
+          "description": "The job's budget, hours=<n>,battery=<percent>: a step whose measured time would take the job past its hours is refused before it starts; under the battery floor no cargo line starts."
         }
       }
     }

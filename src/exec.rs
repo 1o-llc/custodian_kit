@@ -243,6 +243,11 @@ pub fn git_diff_names(root: &Path, git_ref: &str) -> GitInRooted<Git> {
     Git::in_dir(root.as_os_str()).words(["diff", "--name-only", git_ref])
 }
 
+/// `git -C ROOT show REF:PATH`: a file as it was at a ref.
+pub fn git_show(root: &Path, git_ref: &str, path: &str) -> GitInRooted<Git> {
+    Git::in_dir(root.as_os_str()).words(["show".to_string(), format!("{git_ref}:{path}")])
+}
+
 /// `git -C ROOT rev-parse HEAD`: the commit the tree is at.
 pub fn git_head(root: &Path) -> GitInRooted<Git> {
     Git::in_dir(root.as_os_str()).words(["rev-parse", "HEAD"])
@@ -379,6 +384,23 @@ impl Line {
     }
 }
 
+/// `pmset`, macOS's power settings: `pmset -g batt`, the battery's charge and whether it is charging
+/// ([`crate::power`]).
+#[derive(CompositeShell, Debug, Clone, Copy, Default)]
+#[shell(program = "pmset")]
+#[composite(command = "-g", method = "get", ty = PmsetGet, init = "what")]
+pub struct Pmset;
+
+/// `pmset -g WHAT`: one of the power settings' readings (`batt`: the battery).
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "-g")]
+#[exit_status(code = 0, word = "read")]
+pub struct PmsetGet {
+    #[builder(init_required, into)]
+    #[arg(positional)]
+    pub what: OsString,
+}
+
 /// How a line's output is seen while it runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Watch {
@@ -446,6 +468,10 @@ impl Plan {
             }
             let op = self.plan.operation_by_logical_id(&id).cloned().ok_or_else(|| ReadingRefusal::LineRefused.refuse(format!("{}: no line {id}", self.plan.plan_id)))?;
             let l = self.lines.iter().find(|l| l.id == id).expect("a plan's line is its own");
+            // James's rule: no cargo line starts on a dying battery
+            if crate::power::is_cargo(&op.program) {
+                crate::power::cargo_may_start()?;
+            }
             let started = Instant::now();
             let mut cmd = std::process::Command::new(&op.program);
             cmd.args(&op.argv);

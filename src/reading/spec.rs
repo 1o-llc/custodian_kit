@@ -279,6 +279,12 @@ pub struct Change {
     pub git_ref: Option<String>,
     #[serde(default)]
     pub items: Vec<String>,
+    /// The public items whose signature the change alters or removes, each `<file>#<path in the file>` (a type, a
+    /// function, `Type` for its methods): the tests of their readers run too. Without one, the tests the change
+    /// reaches run in the crates it changes and their direct dependents only ([`crate::testrun::signature_changes`]
+    /// finds them in a git ref's diff).
+    #[serde(default)]
+    pub signatures: Vec<String>,
 }
 
 impl Change {

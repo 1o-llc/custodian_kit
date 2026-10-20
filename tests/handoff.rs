@@ -193,6 +193,7 @@ The verification test:holds is satisfied.
 - Read impact-core_lib_Config in the job: done is that reading changing from the one before it.
 - Make the 2 failing tests pass, or show from a run before the change that they failed already.
 - Build 1 test line again and read why it stopped.
+Paid one member at a time: 3 preflights paid one by one (0.0 s each): `custodian preflight --batch LIST` reads the code once for all of them.
 ";
 
 const AGENT_TAIL: &str = "

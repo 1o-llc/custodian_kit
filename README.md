@@ -307,6 +307,24 @@ whose flaga rules authorize it or name what is missing. A bounded job needs
 its target and its outcome known. `preflight::gate` lets a code-changing step
 run only on a preflight of this spec's digest over this code's digest.
 
+`preflight::run_preflight_batch` preflights many specs over one reading of the
+code: one scan, one code digest, one code graph for the batch, each member's
+impact answered from it and each member checked by the same rules as its own
+preflight, so each gets the verdict its own preflight gives. One receipt
+(`preflight-batch`) lists every member and its verdict; `preflight::gate_all`
+takes it as each member's preflight.
+
+## Time, the battery, the kept build
+
+`step_time` reads what custodian's own steps cost from the receipts (a
+preflight, a transform, a batch's compile, a test line, a reading, an index
+parse): a job's planned cost before it runs, each figure measured here or
+unknown; a job's `hours=<n>,battery=<percent>` budget; the step kinds a job
+paid one member at a time where a batch form exists. `power` is James's
+battery rule: under 20% and not charging, no cargo line starts (`CUST0042`).
+`proof_place` is the one copy and kept build per workspace that every proof
+and every test run uses.
+
 ## Decisions, plans, linkage
 
 A question is asked once. `questions::ask` writes it as a task_history

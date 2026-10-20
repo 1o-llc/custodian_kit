@@ -347,3 +347,145 @@ mod tests {
         assert_eq!(Configuration::of_target(&all.target_with("bin:tool")), ("bin:tool".to_string(), all));
     }
 }
+
+/// The public surface of one Rust file, each item's signature as tokens, by its path in the file: a function's
+/// signature (not its body), a type's definition, a trait's items' signatures, a constant's or static's type (not its
+/// value), a re-export; a method of an inherent impl under its type's path (`Type`), its signature added to the
+/// type's. Doc comments are left out: they change no reader. A file that does not parse has none.
+pub fn public_signatures(text: &str) -> BTreeMap<String, String> {
+    use quote::ToTokens;
+    fn is_pub(v: &syn::Visibility) -> bool {
+        matches!(v, syn::Visibility::Public(_))
+    }
+    fn attrs(a: &[syn::Attribute]) -> String {
+        a.iter().filter(|x| !x.path().is_ident("doc")).map(|x| x.to_token_stream().to_string()).collect::<Vec<_>>().join(" ")
+    }
+    fn walk(items: &[syn::Item], prefix: &str, out: &mut BTreeMap<String, String>) {
+        let key = |name: &str| if prefix.is_empty() { name.to_string() } else { format!("{prefix}::{name}") };
+        for item in items {
+            match item {
+                syn::Item::Fn(x) if is_pub(&x.vis) => {
+                    out.insert(key(&x.sig.ident.to_string()), format!("{} {}", attrs(&x.attrs), x.sig.to_token_stream()));
+                }
+                syn::Item::Struct(x) if is_pub(&x.vis) => {
+                    let mut y = x.clone();
+                    y.attrs.retain(|a| !a.path().is_ident("doc"));
+                    y.fields.iter_mut().for_each(|f| f.attrs.retain(|a| !a.path().is_ident("doc")));
+                    out.insert(key(&x.ident.to_string()), y.to_token_stream().to_string());
+                }
+                syn::Item::Enum(x) if is_pub(&x.vis) => {
+                    let mut y = x.clone();
+                    y.attrs.retain(|a| !a.path().is_ident("doc"));
+                    y.variants.iter_mut().for_each(|v| v.attrs.retain(|a| !a.path().is_ident("doc")));
+                    out.insert(key(&x.ident.to_string()), y.to_token_stream().to_string());
+                }
+                syn::Item::Union(x) if is_pub(&x.vis) => {
+                    out.insert(key(&x.ident.to_string()), format!("{} union {} {}", attrs(&x.attrs), x.ident, x.fields.to_token_stream()));
+                }
+                syn::Item::Trait(x) if is_pub(&x.vis) => {
+                    let sigs: Vec<String> = x
+                        .items
+                        .iter()
+                        .map(|i| match i {
+                            syn::TraitItem::Fn(f) => f.sig.to_token_stream().to_string(),
+                            syn::TraitItem::Type(t) => format!("type {} {}", t.ident, t.bounds.to_token_stream()),
+                            syn::TraitItem::Const(c) => format!("const {}: {}", c.ident, c.ty.to_token_stream()),
+                            other => other.to_token_stream().to_string(),
+                        })
+                        .collect();
+                    out.insert(key(&x.ident.to_string()), format!("{} trait {} {} : {} {{ {} }}", attrs(&x.attrs), x.ident, x.generics.to_token_stream(), x.supertraits.to_token_stream(), sigs.join("; ")));
+                }
+                syn::Item::Type(x) if is_pub(&x.vis) => {
+                    out.insert(key(&x.ident.to_string()), format!("type {} {} = {}", x.ident, x.generics.to_token_stream(), x.ty.to_token_stream()));
+                }
+                syn::Item::Const(x) if is_pub(&x.vis) => {
+                    out.insert(key(&x.ident.to_string()), format!("const {}: {}", x.ident, x.ty.to_token_stream()));
+                }
+                syn::Item::Static(x) if is_pub(&x.vis) => {
+                    out.insert(key(&x.ident.to_string()), format!("static {} {}: {}", x.mutability.to_token_stream(), x.ident, x.ty.to_token_stream()));
+                }
+                syn::Item::Use(x) if is_pub(&x.vis) => {
+                    let t = x.tree.to_token_stream().to_string();
+                    out.insert(key(&format!("use {t}")), t);
+                }
+                syn::Item::Mod(x) if is_pub(&x.vis) => {
+                    if let Some((_, inner)) = &x.content {
+                        walk(inner, &key(&x.ident.to_string()), out);
+                    }
+                }
+                syn::Item::Impl(x) if x.trait_.is_none() => {
+                    let ty = match &*x.self_ty {
+                        syn::Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
+                        _ => None,
+                    };
+                    let Some(ty) = ty else { continue };
+                    for i in &x.items {
+                        if let syn::ImplItem::Fn(f) = i {
+                            if is_pub(&f.vis) {
+                                let e = out.entry(key(&ty)).or_default();
+                                e.push_str(&format!(" | {} {}", attrs(&f.attrs), f.sig.to_token_stream()));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    if let Ok(file) = syn::parse_file(text) {
+        walk(&file.items, "", &mut out);
+    }
+    out
+}
+
+/// The public items whose signature a change alters or removes, as an affected_tests reading's
+/// `change.signatures` (`<file>#<path in the file>`): each changed Rust file read at `git_ref` (a declared `git
+/// show` line; a file new since has no public item to alter) and as it is now (a file gone has every one removed),
+/// their [`public_signatures`] compared. An item added is no reader's change.
+pub fn signature_changes(root: &std::path::Path, git_ref: &str, files: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for file in files.iter().filter(|f| f.ends_with(".rs")) {
+        let before = Plan::new("git-show")
+            .then(match exec::line("git-show", &exec::git_show(root, git_ref, file)) {
+                Ok(l) => l,
+                Err(_) => continue,
+            })
+            .walk(Watch::Quiet, |_, _| {})
+            .ok()
+            .and_then(|w| w.into_iter().next())
+            .filter(|w| w.code == Some(0))
+            .map(|w| public_signatures(&w.stdout))
+            .unwrap_or_default();
+        let now = std::fs::read_to_string(root.join(file)).map(|t| public_signatures(&t)).unwrap_or_default();
+        for (path, sig) in &before {
+            if now.get(path) != Some(sig) {
+                let path = path.strip_prefix("use ").map(|_| "*").unwrap_or(path);
+                out.push(format!("{file}#{path}"));
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::public_signatures;
+
+    #[test]
+    fn a_body_or_a_doc_changes_no_signature_and_a_parameter_or_a_field_does() {
+        let before = "/// one\npub fn level() -> u32 {\n    1\n}\npub struct Config {\n    pub name: String,\n}\nimpl Config {\n    pub fn new() -> Self { Config { name: String::new() } }\n    fn hidden(&self) {}\n}\nfn private() {}\npub const N: u32 = 1;\n";
+        let body = before.replace("    1\n", "    { 1 }\n").replace("/// one", "/// the level").replace("fn hidden(&self) {}", "fn hidden(&self) { let _ = 1; }").replace("fn private() {}", "fn private(x: u8) {}").replace("= 1;", "= 2;");
+        assert_eq!(public_signatures(before), public_signatures(&body), "bodies, docs, private items and a constant's value are no reader's change");
+        let a = public_signatures(before);
+        let param = public_signatures(&before.replace("pub fn level() -> u32", "pub fn level(at: u8) -> u32"));
+        assert_ne!(a["level"], param["level"]);
+        let field = public_signatures(&before.replace("pub name: String,", "pub name: String,\n    pub digest: String,"));
+        assert_ne!(a["Config"], field["Config"]);
+        let method = public_signatures(&before.replace("pub fn new() -> Self", "pub fn new(name: &str) -> Self"));
+        assert_ne!(a["Config"], method["Config"], "a method's signature is its type's");
+        assert!(!a.contains_key("private"));
+    }
+}

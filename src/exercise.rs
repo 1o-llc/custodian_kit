@@ -855,6 +855,12 @@ pub struct Summary {
     pub cases: Vec<Case>,
     /// The `check` receipt named `exercise`.
     pub receipt: Option<i64>,
+    /// The time the exercise's steps took, per step kind, from its job's receipts ([`crate::step_time::times`]).
+    #[serde(default)]
+    pub step_times: Vec<crate::step_time::StepTime>,
+    /// The step kinds it paid one member at a time where a batch form exists.
+    #[serde(default)]
+    pub per_member: Vec<String>,
 }
 
 impl Summary {
@@ -904,6 +910,8 @@ impl Summary {
             findings,
             cases,
             receipt: None,
+            step_times: Vec::new(),
+            per_member: Vec::new(),
         }
     }
 
@@ -980,6 +988,15 @@ pub fn markdown(s: &Summary) -> String {
             c.note.as_ref().map(|n| format!(": {}", n.chars().take(80).collect::<String>())).unwrap_or_default()
         ));
     }
+    if !s.step_times.is_empty() {
+        m.push_str("\n## time per step kind\n\n");
+        for t in &s.step_times {
+            m.push_str(&format!("- {}: {} runs, {} members, {}{}\n", t.kind, t.runs, t.members, crate::step_time::duration(t.millis), t.per_member().map(|p| format!(" ({} a member)", crate::step_time::duration(p))).unwrap_or_default()));
+        }
+    }
+    for f in &s.per_member {
+        m.push_str(&format!("- paid one member at a time: {f}\n"));
+    }
     m
 }
 
@@ -1050,7 +1067,13 @@ pub fn report(ctx: &Ctx, which: Option<&str>) -> Result<(Summary, PathBuf)> {
     }
     found.sort();
     let folder = found.pop().ok_or_else(|| ReadingRefusal::NoJob.refuse(format!("no exercise job {}", which.unwrap_or("(any)"))))?;
-    let s = summary_of(&folder).ok_or_else(|| ReadingRefusal::MissingInput.refuse(format!("{}: no {DIR}/{SUMMARY_FILE} (did its cases run?)", folder.display())))?;
+    let mut s = summary_of(&folder).ok_or_else(|| ReadingRefusal::MissingInput.refuse(format!("{}: no {DIR}/{SUMMARY_FILE} (did its cases run?)", folder.display())))?;
+    // an exercise written before its summary kept the time per step kind: its closing receipt's
+    if s.step_times.is_empty() {
+        if let Some(c) = std::fs::read_to_string(folder.join("closing.json")).ok().and_then(|t| serde_json::from_str::<crate::jobs::Closing>(&t).ok()) {
+            (s.step_times, s.per_member) = (c.step_times, c.per_member);
+        }
+    }
     Ok((s, folder))
 }
 
@@ -1637,6 +1660,19 @@ pub fn run_in_job(ctx: &Ctx, folder: &Path, job: &InJob, task: &TaskRef) -> Resu
     let mut cases = env.cases;
     cases.sort_by_key(|c| c.n);
     let mut summary = Summary::of(&job.id, &options, opened, cases, &cells);
+    // the time per step kind: each case's own receipts (a case runs in a copy with its own journal), and the job's
+    let mut receipts: Vec<Receipt> = Vec::new();
+    for c in &summary.cases {
+        let Some(tree) = &c.tree else { continue };
+        for e in std::fs::read_dir(dir.join(tree).join(".custodian/data/receipts")).into_iter().flatten().flatten() {
+            if let Some(r) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<Receipt>(&t).ok()) {
+                receipts.push(r);
+            }
+        }
+    }
+    receipts.extend(ctx.store()?.journal()?.runs_of_job(&job.id)?);
+    summary.step_times = crate::step_time::times(&receipts);
+    summary.per_member = crate::step_time::per_member(&summary.step_times, &receipts);
     // the job's verification: a check receipt, accepted when nothing was found
     let store = ctx.store()?;
     let json = serde_json::to_string_pretty(&summary)? + "\n";

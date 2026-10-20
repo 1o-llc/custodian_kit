@@ -187,6 +187,12 @@ pub struct Handoff {
     /// The targets of the job's readings, and the job's own target: the routes it worked on.
     pub routes: Vec<String>,
     pub runs: usize,
+    /// What runs next costs, from this workspace's receipts ([`crate::step_time::Estimate::line`]).
+    #[serde(default)]
+    pub planned: Option<String>,
+    /// The step kinds the job paid one member at a time where a batch form exists.
+    #[serde(default)]
+    pub per_member: Vec<String>,
 }
 
 /// `2026-10-19T21:19:31Z` → `2026-10-19 21:19Z`.
@@ -276,6 +282,11 @@ pub fn of_job(root: &Path, store: &Store, folder: &Path, receipts: &[Receipt], s
         },
         ..Handoff::default()
     };
+    // what runs next costs, measured here; the steps paid one member at a time
+    let times = crate::step_time::times(receipts);
+    h.planned = Some(crate::step_time::estimate(&times, &crate::step_time::planned_in(store, receipts)).line());
+    let own: Vec<Receipt> = runs.iter().map(|r| (*r).clone()).collect();
+    h.per_member = closing.as_ref().map(|c| c.per_member.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| crate::step_time::per_member(&crate::step_time::times(&own), &own));
     // the task history: intent, result, decisions
     let records = match (&jf.task_id, &jf.revision) {
         (Some(t), Some(r)) => {
@@ -722,6 +733,12 @@ pub fn render(h: &Handoff, reader: Reader) -> String {
         out.push("Nothing: the job is complete.".into());
     } else {
         out.extend(listed_up_to(&next, "steps", NEXT_SHOWN));
+    }
+    if let Some(p) = h.planned.as_ref().filter(|p| !p.starts_with("nothing planned")) {
+        out.push(format!("What waits costs, from this workspace's receipts: {p}."));
+    }
+    for f in &h.per_member {
+        out.push(format!("Paid one member at a time: {f}."));
     }
     if reader == Reader::Agent {
         if !lines.is_empty() {

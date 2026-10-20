@@ -116,17 +116,33 @@ pub fn read(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, how:
 
 /// Answers `spec` over a scan already made (a workspace held open).
 pub fn read_facts(facts: &Facts, spec_path: &Path, spec: &ReadingSpec, stamp: &str) -> Result<ReadingReport> {
+    read_facts_over(facts, None, spec_path, spec, stamp)
+}
+
+/// [`read_facts`] over a code graph already made from the same scan (`graph_from_klepto` of `facts`), so readings
+/// answered one after another over one scan (a batch's preflights) make the graph once, not once each. `None` makes
+/// it here, as `read_facts` does; a kind that walks the syntax trees over an index read back from the cache makes its
+/// own from the parse it needs.
+pub fn read_facts_over(facts: &Facts, graph: Option<&crate::CodeGraph>, spec_path: &Path, spec: &ReadingSpec, stamp: &str) -> Result<ReadingReport> {
     // a kind that walks the syntax trees, over an index read back from the cache (which holds none): parsed for it
     let parsed;
-    let facts = if spec.kind.walks_trees() && !facts.trees {
+    let reparsed = spec.kind.walks_trees() && !facts.trees;
+    let facts = if reparsed {
         parsed = Facts::build_parsed(&facts.root, &spec.scope, facts.how)?;
         &parsed
     } else {
         facts
     };
     let spec = &resolved(facts, spec)?;
-    let graph = crate::graph_from_klepto(&facts.root, &facts.k);
-    let index_key = crate::index_key_of(&graph, &spec.query_args()).ok().map(|r| r.key.key_id);
+    let made;
+    let graph = match graph.filter(|_| !reparsed) {
+        Some(g) => g,
+        None => {
+            made = crate::graph_from_klepto(&facts.root, &facts.k);
+            &made
+        }
+    };
+    let index_key = crate::index_key_of(graph, &spec.query_args()).ok().map(|r| r.key.key_id);
     let answer = kinds::answer(facts, spec)?;
 
     let mut binaries = BTreeMap::new();

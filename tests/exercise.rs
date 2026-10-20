@@ -114,7 +114,11 @@ fn an_exercise_runs_its_cases_on_copies_and_keeps_what_it_found() {
         assert_eq!(d.one("code").unwrap(), f.code.as_str());
         assert_eq!(d.one("receipt").ok(), f.receipt.as_deref());
     }
+    // the time per step kind, from each case's receipts: three preflights, one at a time, named
+    assert!(s.step_times.iter().any(|t| t.kind == "preflight" && t.runs == 3), "{:?}", s.step_times);
+    assert!(s.per_member.iter().any(|f| f.starts_with("3 preflights paid one by one")), "{:?}", s.per_member);
     let page = exercise::markdown(&s);
+    assert!(page.contains("## time per step kind"), "{page}");
     assert!(page.contains("## operation × unit") && page.contains("| add_field | item | 1 | 1 | 0 |"), "{page}");
     // and the report reads it back by the job's id
     let (again, _) = exercise::report(&ctx, Some(&started.id)).unwrap();

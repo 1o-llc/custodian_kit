@@ -64,6 +64,9 @@ pub mod exercise;
 pub mod baseline;
 pub mod cost;
 pub mod why;
+pub mod power;
+pub mod proof_place;
+pub mod step_time;
 pub mod handoff;
 
 #[cfg(test)]

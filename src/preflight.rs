@@ -905,9 +905,43 @@ pub const ALREADY_IN_PLACE: &str = "not authorized: already in place";
 /// this code (its digest now). Go only when it authorized the change; a spec edited or code moved since is
 /// preflighted again.
 pub fn gate(store: &Store, spec: &ChangeSpec, code_digest: &str) -> Result<(crate::decisions::Decided, Option<Receipt>)> {
+    let mut all = gate_all(store, &[spec], code_digest)?;
+    Ok(all.pop().unwrap_or_else(|| (decided_on(spec, &[], code_digest), None)))
+}
+
+/// [`gate`] for several specs over the same code, the journal read once: each spec's newest preflight, its own
+/// receipt or its line in a batch preflight's receipt ([`BATCH_COMMAND`]), decides it by the same rule. A member of a
+/// batch goes on the batch's receipt: the receipt handed back is the batch's, under the member's name, spec and verdict.
+pub fn gate_all(store: &Store, specs: &[&ChangeSpec], code_digest: &str) -> Result<Vec<(crate::decisions::Decided, Option<Receipt>)>> {
     let journal = store.journal()?;
+    let runs = journal.runs()?;
+    let names: BTreeSet<&str> = specs.iter().map(|s| s.name.as_str()).collect();
+    // each name's preflights in journal order: its own receipts, and its lines in the batches that name it
+    let mut by_name: BTreeMap<String, Vec<Receipt>> = BTreeMap::new();
+    for r in &runs {
+        if r.command == "preflight" && names.contains(r.name.as_str()) {
+            by_name.entry(r.name.clone()).or_default().push(r.clone());
+        } else if r.command == BATCH_COMMAND {
+            let Some(batch) = batch_record(&store.root, r) else { continue };
+            for m in batch.members.iter().filter(|m| names.contains(m.name.as_str())) {
+                by_name.entry(m.name.clone()).or_default().push(m.receipt_in(r));
+            }
+        }
+    }
+    Ok(specs
+        .iter()
+        .map(|spec| {
+            let all = by_name.get(&spec.name).map(Vec::as_slice).unwrap_or(&[]);
+            let digest = spec.digest();
+            let same = all.iter().rev().find(|r| r.spec_hash.as_deref() == Some(digest.as_str()) && r.code_digest.as_deref() == Some(code_digest)).cloned();
+            (decided_on(spec, all, code_digest), same)
+        })
+        .collect())
+}
+
+/// The gate's decision for `spec` from its preflights `all` (journal order).
+fn decided_on(spec: &ChangeSpec, all: &[Receipt], code_digest: &str) -> crate::decisions::Decided {
     let digest = spec.digest();
-    let all: Vec<Receipt> = journal.runs()?.into_iter().filter(|r| r.command == "preflight" && r.name == spec.name).collect();
     let same = all.iter().rev().find(|r| r.spec_hash.as_deref() == Some(digest.as_str()) && r.code_digest.as_deref() == Some(code_digest)).cloned();
     let q = crate::decisions::journal_tool().required_question_spec("preflight", "transform", "did a preflight of this spec over this code authorize it?");
     let d = match (&same, all.last()) {
@@ -917,7 +951,217 @@ pub fn gate(store: &Store, spec: &ChangeSpec, code_digest: &str) -> Result<(crat
         (None, Some(last)) => crate::decisions::Decided { question: q, facts: vec![format!("#{}", last.seq)], go: false, reason: format!("the code moved since preflight #{}: preflight it again", last.seq) },
         (None, None) => crate::decisions::Decided { question: q, facts: Vec::new(), go: false, reason: "no preflight of this spec: custodian preflight SPEC".into() },
     };
-    Ok((d, same))
+    d
+}
+
+/// A batch preflight receipt's `command`: one receipt for a batch of change specs, its record listing each member and
+/// its verdict ([`BatchPreflight`]).
+pub const BATCH_COMMAND: &str = "preflight-batch";
+
+pub const PREFLIGHT_BATCH_SCHEMA: &str = "custodian.preflight-batch.v1";
+
+/// One member of a batch preflight: its spec and its verdict, as its own preflight would give them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchMember {
+    pub name: String,
+    /// The spec file, relative to the root.
+    pub spec: String,
+    pub spec_digest: String,
+    pub authorized: bool,
+    /// `authorized`, `not authorized` or `not authorized: already in place` ([`Preflight::reason`]); a spec that could not
+    /// be read, `refused: <why>`.
+    pub reason: String,
+    /// Why it is not authorized, in one line ([`Preflight::headline_why`]).
+    #[serde(default)]
+    pub why: Option<String>,
+    /// The member's own record (`data/preflight/<spec>/<stamp>.json`), relative to the root.
+    #[serde(default)]
+    pub record: Option<String>,
+}
+
+impl BatchMember {
+    /// The batch's receipt `r` as this member's preflight receipt: the batch's number, the member's name, spec, digest
+    /// and verdict. What the gate hands back for a member.
+    pub fn receipt_in(&self, r: &Receipt) -> Receipt {
+        Receipt {
+            name: self.name.clone(),
+            spec: Some(self.spec.clone()),
+            spec_hash: Some(self.spec_digest.clone()),
+            reason: self.reason.clone(),
+            exit_code: Some(if self.authorized { 0 } else { 1 }),
+            outputs: self.record.iter().cloned().chain(r.outputs.iter().cloned()).collect(),
+            ..r.clone()
+        }
+    }
+}
+
+/// A batch preflight: every member preflighted over one reading of the code (one scan, one code digest, one code
+/// graph), each member's preconditions checked by the same rules as its own preflight.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchPreflight {
+    pub schema: String,
+    /// The list's name (its file, relative to the root, or as given).
+    pub list: String,
+    pub code_digest: String,
+    pub members: Vec<BatchMember>,
+    pub authorized: usize,
+    pub utc: String,
+    pub millis: i64,
+}
+
+impl BatchPreflight {
+    /// The page a person reads: the count first, then each member and its verdict.
+    pub fn markdown(&self) -> String {
+        let mut s = format!("# preflight — batch {} ({} members)\n\n- authorized: **{} of {}**\n- code digest: `{}`\n- one reading of the code for the batch, each member's preconditions checked as its own preflight checks them ({} ms)\n\n| member | verdict | why |\n|---|---|---|\n", self.list, self.members.len(), self.authorized, self.members.len(), self.code_digest, self.millis);
+        for m in &self.members {
+            s.push_str(&format!("| {} | {} | {} |\n", m.name, m.reason, m.why.clone().unwrap_or_default().replace('|', "/")));
+        }
+        s
+    }
+}
+
+/// What a batch preflight run left.
+#[derive(Debug, Clone)]
+pub struct BatchRan {
+    pub batch: BatchPreflight,
+    /// Each member's preflight, in the list's order (a spec that could not be read has none).
+    pub preflights: Vec<Preflight>,
+    pub receipt: Option<Receipt>,
+    pub receipt_file: Option<PathBuf>,
+    pub outputs: Vec<String>,
+    pub said: Vec<String>,
+}
+
+/// A batch preflight's record, from its receipt.
+pub fn batch_record(root: &Path, r: &Receipt) -> Option<BatchPreflight> {
+    let json = r.outputs.iter().find(|o| o.ends_with(".json"))?;
+    serde_json::from_str(&std::fs::read_to_string(root.join(json)).ok()?).ok()
+}
+
+/// The preflights of the specs at `spec_paths`, as a batch: the code read once for all of them (one scan, the
+/// workspace `ws` holds open; one code digest; one code graph), each member's impact answered from that reading, and
+/// each member's preconditions, scope, names and decisions checked by [`assess`], the rules its own preflight checks
+/// by, so each member gets the verdict its own [`run_preflight`] would give. Each member's record and page are kept
+/// as its own preflight keeps them; one receipt ([`BATCH_COMMAND`]) names the batch's record, which lists each member
+/// and its verdict, and [`gate_all`] takes it as each member's preflight. In a running job, the task history gets each
+/// member's impact and open decisions, as its own preflight writes them.
+pub fn run_preflight_batch(ctx: &Ctx, list: &str, spec_paths: &[PathBuf], job: Option<&InJob>, ws: &crate::api::Workspace) -> Result<BatchRan> {
+    let started = std::time::Instant::now();
+    let mut said = Vec::new();
+    let store = ctx.store.as_ref();
+    let how = if job.is_some() { crate::paths::Resolving::Job } else { crate::paths::Resolving::Free };
+    // the one reading: the scan the workspace holds (else one made here), its code graph, its code digest
+    let scope = crate::reading::spec::ReadingSpec::search(crate::reading::spec::ReadingKind::Impact, "x")?.scope;
+    let facts_owned;
+    let facts = if ws.scope == scope {
+        ws.facts()
+    } else {
+        facts_owned = Facts::build(&ctx.root, &scope, how)?;
+        &facts_owned
+    };
+    let graph = crate::graph_from_klepto(&facts.root, &facts.k);
+    let code_digest = crate::code_digest(&ctx.root, &scope.scan_options()).map_err(|e| ReadingRefusal::NoWorkspace.refuse(e))?;
+    let view = store.and_then(job_view);
+    let task = match (store, job, &view) {
+        (Some(s), Some(_), Some((_, folder))) => {
+            let jf = crate::jobs::job_file(folder);
+            crate::task_records::of_job(s, jf.task_id.as_deref(), jf.revision.as_deref())?
+        }
+        _ => None,
+    };
+    let stamp = crate::runs::stamp();
+    let mut members = Vec::new();
+    let mut preflights = Vec::new();
+    for spec_path in spec_paths {
+        let spec_rel = ctx.rel(&spec_path.canonicalize().unwrap_or_else(|_| spec_path.to_path_buf()));
+        let spec = match ChangeSpec::from_path(spec_path) {
+            Ok(s) => s,
+            Err(e) => {
+                members.push(BatchMember { name: spec_rel.clone(), spec: spec_rel, spec_digest: String::new(), authorized: false, reason: format!("refused: {e}"), why: None, record: None });
+                continue;
+            }
+        };
+        // the member's impact, answered from the batch's reading (its own preflight's search, its own spec file)
+        let target = impact_target(&spec);
+        let ispec = crate::reading::spec::ReadingSpec::search(crate::reading::spec::ReadingKind::Impact, &target)?;
+        let dir = match (store, job) {
+            (_, Some(j)) => j.readings.parent().map(|p| p.join("steps")).unwrap_or_else(|| j.readings.clone()),
+            (Some(s), None) => s.dir_of(&named::PREFLIGHT, &[("name", &spec.name), ("stamp", "x")])?,
+            (None, None) => std::env::temp_dir().join(format!("custodian-preflight-{}", std::process::id())),
+        };
+        let ipath = dir.join(crate::oneo::Doc::Reading.file_name(&ispec.name));
+        write_whole(&ipath, ispec.to_1o().or_else(|_| toml::to_string(&ispec).map_err(|e| ReadingRefusal::Write.refuse(e)))?.as_bytes())?;
+        let impact = match crate::reading::read_facts_over(facts, Some(&graph), &ipath, &ispec, &stamp) {
+            Ok(rep) => Some((ImpactRecord::of(&rep), None, rep.query.results.iter().chain(&rep.unresolved).cloned().collect())),
+            Err(e) => {
+                said.push(format!("{}: impact not read: {e}", spec.name));
+                None
+            }
+        };
+        let index_key = impact.as_ref().and_then(|(i, _, _): &(ImpactRecord, Option<i64>, Vec<crate::CodeQueryResult>)| i.index_key.clone());
+        let p = assess(facts, store, &spec_rel, &spec, impact, view.as_ref().map(|(v, _)| v.clone()), &code_digest, index_key)?;
+        let record = match store {
+            Some(s) => {
+                let json_path = s.path(&named::PREFLIGHT, &[("name", &spec.name), ("stamp", &stamp)])?;
+                write_whole(&json_path, (serde_json::to_string_pretty(&p)? + "\n").as_bytes())?;
+                write_whole(&json_path.with_extension("md"), p.markdown().as_bytes())?;
+                Some(ctx.rel(&json_path))
+            }
+            None => None,
+        };
+        if let Some(t) = &task {
+            if let Some(i) = &p.impact {
+                t.write(i.to_record(None))?;
+            }
+            for q in &p.decisions {
+                crate::questions::ask(store.expect("a job's task is in a store"), t, q)?;
+            }
+        }
+        members.push(BatchMember { name: spec.name.clone(), spec: spec_rel, spec_digest: p.spec_digest.clone(), authorized: p.authorized, reason: p.reason().into(), why: p.headline_why(), record });
+        preflights.push(p);
+    }
+    let authorized = members.iter().filter(|m| m.authorized).count();
+    let batch = BatchPreflight { schema: PREFLIGHT_BATCH_SCHEMA.into(), list: list.to_string(), code_digest: code_digest.clone(), members, authorized, utc: crate::runs::now_utc(), millis: started.elapsed().as_millis() as i64 };
+    said.push(format!("preflights: {} of {} authorized, over one reading of the code ({} ms)", authorized, batch.members.len(), batch.millis));
+    let Some(store) = store else {
+        return Ok(BatchRan { batch, preflights, receipt: None, receipt_file: None, outputs: Vec::new(), said });
+    };
+    let slug = crate::jobs::slug_of(list.rsplit('/').next().unwrap_or(list));
+    let json_path = store.path(&named::PREFLIGHT, &[("name", &format!("batch-{slug}")), ("stamp", &stamp)])?;
+    let json = serde_json::to_string_pretty(&batch)? + "\n";
+    write_whole(&json_path, json.as_bytes())?;
+    let md_path = json_path.with_extension("md");
+    write_whole(&md_path, batch.markdown().as_bytes())?;
+    let outputs = vec![ctx.rel(&json_path), ctx.rel(&md_path)];
+    let digest = crate::digest::tagged(&json);
+    let r = Receipt {
+        schema: RECEIPT_SCHEMA.into(),
+        seq: 0,
+        utc: batch.utc.clone(),
+        command: BATCH_COMMAND.into(),
+        name: list.to_string(),
+        spec: Some(list.to_string()),
+        spec_hash: Some(crate::digest::of_value(&batch.members.iter().map(|m| (&m.name, &m.spec_digest)).collect::<Vec<_>>())),
+        code_digest: Some(code_digest),
+        index_key: None,
+        plan_id: format!("preflight-batch:{list}"),
+        plan_digest: digest.clone(),
+        operation_digest: digest.clone(),
+        receipt_digest: digest,
+        line: format!("custodian preflight --batch {list}"),
+        exit_code: Some(if authorized == batch.members.len() { 0 } else { 1 }),
+        accepted: true,
+        disposition: "Continue".into(),
+        reason: format!("{authorized} of {} authorized", batch.members.len()),
+        outputs: outputs.clone(),
+        job: job.map(|j| j.id.clone()),
+        reused_seq: None,
+        millis: batch.millis,
+        runner: crate::receipts::RUNNER_IN_PROCESS.into(),
+    };
+    let (r, f) = crate::receipts::keep(store, r)?;
+    said.push(format!("batch preflight record: {} · receipt #{} {}", outputs.join(" + "), r.seq, ctx.rel(&f)));
+    Ok(BatchRan { batch, preflights, receipt: Some(r), receipt_file: Some(f), outputs, said })
 }
 
 #[cfg(test)]

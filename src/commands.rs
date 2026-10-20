@@ -187,7 +187,6 @@ pub fn klepto_index_key_json(root: impl AsRef<Path>, max_depth: usize, args: &[S
 /// The polymorphic index key of a query over a graph: the registry's key for
 /// what those flags select (the same pipeline as `klepto-index-key-json`).
 pub fn index_key_of(graph: &CodeGraph, args: &[String]) -> Result<CodeKleptoIndexKeyReceipt> {
-    let graph = graph.clone();
     let (requested_index_options, field_plan_args) = parse_code_search_index_args(args);
     let mut candidate_index_options = requested_index_options.clone();
     candidate_index_options.write_index = false;
@@ -198,12 +197,12 @@ pub fn index_key_of(graph: &CodeGraph, args: &[String]) -> Result<CodeKleptoInde
     let (klepto_options, context_args) = parse_klepto_field_plan_args(&search_args);
     let (context_options, query_args) = parse_code_context_args(&context_args);
     let spec = parse_code_query_spec(&query_args);
-    let report = run_code_query(&graph, spec);
+    let report = run_code_query(graph, spec);
     let pin_set = build_pin_set_from_query_report(&report);
     let context = build_context_report_from_pin_set(&pin_set, context_options);
     let plan = build_klepto_field_plan_from_context(&context, search_options, klepto_options);
     let candidate = build_tantivy_index_receipt_from_klepto_plan(&plan, candidate_index_options)?;
-    Ok(build_klepto_index_key_receipt(&graph, plan, candidate, requested_index_options))
+    Ok(build_klepto_index_key_receipt(graph, plan, candidate, requested_index_options))
 }
 
 

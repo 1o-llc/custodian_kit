@@ -1280,18 +1280,70 @@ fn affected_tests(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     cases.extend(tests_of_crates(f, &whole));
     cases.sort();
     cases.dedup();
+    // the crates whose tests run: the proof's rule (change::proof_packages), the crates the change is in and their
+    // direct dependents, and the readers of a public item whose signature it alters; a further dependent's test is
+    // named, not run
+    let (run_in, why) = affected_crates(f, spec);
+    let (cases, further): (Vec<TestCase>, Vec<TestCase>) = cases.into_iter().partition(|c| run_in.contains(&c.package));
     let mut rows: Vec<CodeQueryResult> = spec.change.files.iter().map(|p| named("changed-file", p.clone(), f.package_of_rel(p).map(|c| c.name.clone()), if p.ends_with(".rs") { "in the change" } else { "in the change: not Rust, so every test of its crate" }, vec![])).collect();
+    rows.extend(run_in.iter().map(|c| named("affected-crate", c.clone(), Some(c.clone()), why.get(c).map(String::as_str).unwrap_or("affected"), vec![])));
     rows.extend(test_rows(f, &cases, "a test whose closure reaches the change"));
+    rows.extend(further.iter().map(|c| item_row(f, "test-further", &c.id, "reaches the change from a further dependent: run only when a public signature it reads changes", vec![("filter", c.filter.clone()), ("test_target", c.target.clone())])));
     let crates: BTreeSet<&str> = cases.iter().map(|c| c.package.as_str()).collect();
     let mut ans = Answer::default();
     ans.count("files changed", spec.change.files.len());
     ans.count("items changed", seeds.len());
     ans.count("tests reaching the change", cases.len());
+    ans.count("tests of further dependents, not run", further.len());
     ans.count("crates with such tests", crates.len());
     ans.count("cargo test lines", test_lines(&cases).len());
     ans.count("tests in the scan", f.tests().len());
     ans.rows = rows;
     Ok(ans)
+}
+
+/// The crates whose tests a change's test run runs, and why each: the crates its files are in (`changed`), each crate
+/// that depends on one of them directly (`direct dependent`), and for each public item whose signature it alters
+/// (`spec.change.signatures`) each crate holding an occurrence klepto resolves to it (`reads <item>`); an item no
+/// longer in the scan (removed, renamed) has its readers in every crate that depends on its crate, near or far
+/// (`depends on <crate>, whose <item> is gone`). The proof's rule, `change::proof_packages`, for a change read from
+/// a diff: never the closure of dependents for a body.
+pub fn affected_crates(f: &Facts, spec: &ReadingSpec) -> (BTreeSet<String>, BTreeMap<String, String>) {
+    let mut why: BTreeMap<String, String> = BTreeMap::new();
+    let changed: BTreeSet<String> = spec.change.files.iter().filter_map(|p| f.package_of_rel(p).map(|c| c.name.clone())).chain(spec.change.items.iter().filter_map(|i| item_id(f, i).ok()).filter_map(|id| f.item(&id).map(|d| d.package.clone()))).collect();
+    for c in &changed {
+        why.insert(c.clone(), "changed".into());
+    }
+    for (dependent, deps) in &f.k.package_deps {
+        if changed.iter().any(|c| deps.contains(c)) {
+            why.entry(dependent.clone()).or_insert_with(|| "direct dependent".into());
+        }
+    }
+    for s in &spec.change.signatures {
+        let Some((file, path)) = s.split_once('#') else { continue };
+        let Some(m) = crate::change::module_of_file(&f.k, &f.root.join(file)) else { continue };
+        let item = format!("{}::{path}", m.path);
+        let names_it = |r: &Option<klepto::Resolution>| matches!(r, Some(klepto::Resolution::Local(x) | klepto::Resolution::External(x)) if *x == item || x.starts_with(&format!("{item}::")));
+        if f.item(&item).is_some() || f.k.functions.iter().any(|x| x.fq_name == item) {
+            let roots = f.k.paths.iter().filter(|o| names_it(&o.resolution)).map(|o| o.module_path.first().cloned()).chain(f.k.calls.iter().filter(|o| names_it(&o.resolution)).map(|o| o.module_path.first().cloned()));
+            for root in roots.flatten() {
+                why.entry(crate::change::package_of(&f.k, &root)).or_insert_with(|| format!("reads {item}"));
+            }
+        } else if let Some(owner) = f.package_of_rel(file).map(|c| c.name.clone()) {
+            let mut reach: BTreeSet<String> = BTreeSet::from([owner.clone()]);
+            loop {
+                let more: Vec<String> = f.k.package_deps.iter().filter(|(d, deps)| !reach.contains(*d) && deps.iter().any(|x| reach.contains(x))).map(|(d, _)| d.clone()).collect();
+                if more.is_empty() {
+                    break;
+                }
+                for d in more {
+                    why.entry(d.clone()).or_insert_with(|| format!("depends on {owner}, whose {item} is gone"));
+                    reach.insert(d);
+                }
+            }
+        }
+    }
+    (why.keys().cloned().collect(), why)
 }
 
 // ---------------------------------------------------------------------------

@@ -212,6 +212,11 @@ pub struct JobFile {
     /// A bounded job's other touched files need a transform.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow_file: Vec<String>,
+    /// The job's budget, `hours=<n>,battery=<percent>` ([`crate::step_time::Budget`]): a step whose measured time would
+    /// take the job past its hours is refused before it starts; under the battery floor no cargo line starts. The
+    /// workspace's `budget` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<String>,
 }
 
 /// A count a job took, the lines it touched between two counts, the counts
@@ -855,6 +860,12 @@ pub struct Closing {
     /// <glob>`, `cargo` (the lock file cargo writes from the manifests), or `hand`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub touched_files: Vec<(String, String)>,
+    /// The time the job's steps took, per step kind, from its receipts ([`crate::step_time::times`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub step_times: Vec<crate::step_time::StepTime>,
+    /// The step kinds the job paid one member at a time where a batch form exists ([`crate::step_time::per_member`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub per_member: Vec<String>,
 }
 
 pub const CLOSING_SCHEMA: &str = "custodian.job_closing.v1";
@@ -1100,6 +1111,8 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         pre_existing: judged.pre_existing.clone(),
         failing: judged.own.clone(),
         touched_files,
+        step_times: crate::step_time::times(&runs),
+        per_member: crate::step_time::per_member(&crate::step_time::times(&runs), &runs),
     };
     let json = serde_json::to_string_pretty(&closing)? + "\n";
     write_whole(&running.join("closing.json"), json.as_bytes())?;
@@ -1579,6 +1592,18 @@ pub fn render_closing(c: &Closing) -> String {
         s.push_str(&format!("- {item}: {level}\n"));
     }
     s.push_str(&format!("\n## items touched: {}\n", c.touched.len()));
+    if !c.step_times.is_empty() {
+        s.push_str("\n## time per step kind\n\n| kind | runs | members | time | per member |\n|---|---|---|---|---|\n");
+        for t in &c.step_times {
+            s.push_str(&format!("| {} | {} | {} | {} | {} |\n", t.kind, t.runs, t.members, crate::step_time::duration(t.millis), t.per_member().map(crate::step_time::duration).unwrap_or_else(|| "-".into())));
+        }
+    }
+    if !c.per_member.is_empty() {
+        s.push_str("\n## paid one member at a time (a batch form exists)\n\n");
+        for f in &c.per_member {
+            s.push_str(&format!("- {f}\n"));
+        }
+    }
     s
 }
 

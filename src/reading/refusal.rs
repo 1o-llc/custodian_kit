@@ -90,6 +90,10 @@ pub enum ReadingRefusal {
     MacroRewrites,
     #[liaise(code = 41, msg = "a file the job touched is neither code a transform wrote nor a file the job allows (allow_file)")]
     FileNotAllowed,
+    #[liaise(code = 42, msg = "the battery is under 20% and not charging: no cargo line starts on a dying battery (plug the laptop in and run it again; the job stays open)")]
+    LowBattery,
+    #[liaise(code = 43, msg = "the step would run past the job's budget: refused before it starts (the job stays open)")]
+    OverBudget,
     #[liaise(code = 101, msg = "the bundle filters break the word's own rules")]
     FiltersRefused,
     #[liaise(code = 102, msg = "the route holds no file the filters keep")]
