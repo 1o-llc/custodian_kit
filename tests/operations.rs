@@ -88,3 +88,22 @@ fn wrap_is_authorized_when_its_pieces_run_first_and_refused_when_one_gives_the_v
     assert_eq!(custodian_kit::change::render_wrapped(&f, "", "{\n    1\n}").unwrap(), "{\n    let _seen = 1u8;\n    {\n    1\n}\n}");
     assert_eq!(custodian_kit::change::render_inlined(&[("n".into(), "u32".into())], &["o".into()], "{\n    n * 2\n}").unwrap(), "{ let n: u32 = o; n * 2 }");
 }
+
+#[test]
+fn declare_feature_reads_its_list_and_makes_a_dep_entrys_dependency_optional() {
+    let (store, ctx, w) = project("feature");
+    // `dep:marks` on a required dependency: authorized, and the dependency becomes optional in the same step
+    let p = preflight::run_preflight(&ctx, &spec(&store.root, "f", "name = \"f\"\nobjective = \"o\"\noperation = \"declare_feature\"\ntarget = \"crate:shop\"\nfeature = \"marks\"\nenables = [\"dep:marks\"]\n"), None, Runner::InProcess(&w)).unwrap().preflight;
+    assert!(p.authorized, "{:?} {:?}", p.reasons, p.preconditions);
+    assert_eq!(p.write_set, ["shop/Cargo.toml"]);
+    assert!(p.listed.iter().any(|l| l.starts_with("marks becomes optional")), "{:?}", p.listed);
+    let s = custodian_kit::change::ChangeSpec::from_path(&store.root.join(".custodian/data/specs/changes/f.toml")).unwrap();
+    let d = custodian_kit::change::feature_declaration(w.klepto(), &store.root, &s).unwrap();
+    assert_eq!((d.made_optional.clone(), d.was.clone(), d.problems.is_empty()), (vec!["marks".to_string()], None, true));
+    // refused: a dependency the crate does not have, a feature it does not declare, a name cargo does not take
+    for (name, enables, why) in [("json", "[\"dep:serde\"]", "has no dependency serde"), ("both", "[\"json\"]", "declares no feature json"), ("no way", "[]", "not a feature name")] {
+        let text = format!("name = \"x\"\nobjective = \"o\"\noperation = \"declare_feature\"\ntarget = \"crate:shop\"\nfeature = \"{name}\"\nenables = {enables}\n");
+        let p = preflight::run_preflight(&ctx, &spec(&store.root, "x", &text), None, Runner::InProcess(&w)).unwrap().preflight;
+        assert!(!p.authorized && p.preconditions.iter().any(|c| !c.holds && c.detail.contains(why)), "{name}: {:?}", p.preconditions);
+    }
+}

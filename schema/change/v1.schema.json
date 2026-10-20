@@ -45,7 +45,8 @@
             "replace_body",
             "change_dependency",
             "inline",
-            "wrap"
+            "wrap",
+            "declare_feature"
           ],
           "description": "What the writer does (the operations table in custodian_kit's README)."
         },
@@ -2586,6 +2587,10 @@
             "features": {
               "type": "string",
               "description": "A feature. Repeats: one value per line, in order."
+            },
+            "optional": {
+              "type": "boolean",
+              "description": "true: the dependency is optional (a feature turns it on with dep:<name>); false: required again."
             }
           },
           "required": [
@@ -2612,6 +2617,10 @@
             "features": {
               "type": "string",
               "description": "A feature. Repeats: one value per line, in order."
+            },
+            "optional": {
+              "type": "boolean",
+              "description": "true: the dependency is optional (a feature turns it on with dep:<name>); false: required again."
             }
           },
           "required": [
@@ -2633,7 +2642,11 @@
         },
         "feature": {
           "type": "string",
-          "description": "gate: the crate feature."
+          "description": "gate: the crate feature; declare_feature: the feature declared."
+        },
+        "enables": {
+          "type": "string",
+          "description": "declare_feature: what the feature turns on (dep:<name>, <dependency>/<feature>, another feature). Repeats: one value per line, in order."
         },
         "linkage": {
           "type": "string",

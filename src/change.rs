@@ -60,6 +60,7 @@ vocabulary! {
         ChangeDependency = "change_dependency" : "a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features",
         Inline = "inline" : "a function's body put in place of every call to it (target: a free function, or an associated one without self): each call becomes a block that binds the parameters to the call's arguments with `let`, then the body; the function is removed when it is not `pub` and every use of it was a call",
         Wrap = "wrap" : "a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched",
+        DeclareFeature = "declare_feature" : "a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given",
     }
 }
 
@@ -90,7 +91,7 @@ impl Operation {
             Rename => &["new_name"],
             Move => &["to"],
             Extract => &["items", "module"],
-            Gate => &["feature"],
+            Gate | DeclareFeature => &["feature"],
             Anchor => &["linkage"],
             ReplaceBody | Wrap => &["function"],
             Inline => &[],
@@ -100,7 +101,7 @@ impl Operation {
     /// Whether the operation's target is an existing item (else a place: a module route, a crate).
     pub fn targets_an_item(self) -> bool {
         use Operation::*;
-        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | ChangeDependency | Extract)
+        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | ChangeDependency | DeclareFeature | Extract)
     }
 
     /// The name the operation makes, which must be free where it lands.
@@ -375,6 +376,10 @@ pub struct DependencySpec {
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<String>,
+    /// `optional = true`: the dependency is optional, turned on by a feature that names it `dep:<name>`
+    /// (`declare_feature`); `false` makes it required again. Unset leaves it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optional: Option<bool>,
 }
 
 /// What a change may read and write: routes (`crate:<name>`, `crate:<name>/src/<file>.rs`, `decl:<name>`).
@@ -459,9 +464,13 @@ pub struct ChangeSpec {
     /// `extract`: the items moved out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<String>,
-    /// `gate`: the crate feature.
+    /// `gate`: the crate feature; `declare_feature`: the feature declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feature: Option<String>,
+    /// `declare_feature`: what the feature turns on (`dep:chrono`, `serde/derive`, another feature); empty, it turns
+    /// on nothing but itself (a feature that only gates code).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enables: Vec<String>,
     /// `anchor`: the linkage record's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linkage: Option<String>,
@@ -1557,6 +1566,77 @@ pub fn dependency_changes(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) ->
     Ok(out)
 }
 
+/// A feature `declare_feature` writes, read against the crate's manifest as klepto reads it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FeatureDeclaration {
+    pub package: String,
+    pub feature: String,
+    pub enables: Vec<String>,
+    /// The list the crate declares the feature with now (`None`: not declared).
+    pub was: Option<Vec<String>>,
+    /// The required dependencies a `dep:<name>` in the list makes optional: cargo takes `dep:` only for an
+    /// optional dependency, so declaring the feature is what makes it one.
+    pub made_optional: Vec<String>,
+    /// Why it cannot be declared as asked; empty when it can.
+    pub problems: Vec<String>,
+}
+
+/// Whether `name` is a feature name cargo takes: letters, digits, `_`, `-`, `+`, `.`, starting with a letter, a
+/// digit or `_`.
+fn feature_name_ok(name: &str) -> bool {
+    let mut c = name.chars();
+    c.next().is_some_and(|f| f.is_alphanumeric() || f == '_') && name.chars().all(|x| x.is_alphanumeric() || "_-+.".contains(x))
+}
+
+/// The feature `spec` declares (`declare_feature`): its list checked one entry at a time against the crate's
+/// dependencies and features, the required dependencies its `dep:` entries make optional, and the list it had.
+pub fn feature_declaration(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::result::Result<FeatureDeclaration, String> {
+    let (package, _) = route_file(k, root, &spec.target).ok_or_else(|| format!("`{}` is not a crate:<name> route of the workspace", spec.target))?;
+    let m = k.features.get(&package).ok_or_else(|| format!("{package}: klepto has no feature model for it"))?;
+    let feature = spec.feature.clone().unwrap_or_default();
+    let mut d = FeatureDeclaration { package: package.clone(), feature: feature.clone(), enables: spec.enables.clone(), ..Default::default() };
+    if !feature_name_ok(&feature) {
+        d.problems.push(format!("`{feature}` is not a feature name cargo takes"));
+    }
+    d.was = m.features.get(&feature).filter(|i| !i.implicit).map(|i| i.enables.iter().map(enable_text).collect());
+    let dep = |n: &str| m.dependencies.iter().find(|x| x.name == n.replace('-', "_") && x.kind != klepto::DepKind::Dev);
+    for e in &spec.enables {
+        if let Some(n) = e.strip_prefix("dep:") {
+            match dep(n) {
+                Some(x) if !x.optional => d.made_optional.push(x.name.clone()),
+                Some(_) => {}
+                None => d.problems.push(format!("`{e}`: {package} has no dependency {n} (add_dependency adds it)")),
+            }
+        } else if let Some((n, f)) = e.split_once('/') {
+            let n = n.trim_end_matches('?');
+            if dep(n).is_none() {
+                d.problems.push(format!("`{e}`: {package} has no dependency {n}"));
+            }
+            if f.is_empty() {
+                d.problems.push(format!("`{e}` names no feature of {n}"));
+            }
+        } else if e == &feature {
+            d.problems.push(format!("`{e}`: a feature cannot turn itself on"));
+        } else if !m.features.get(e.as_str()).is_some_and(|i| !i.implicit) {
+            d.problems.push(format!("`{e}`: {package} declares no feature {e} (declare it first, or write dep:{e} for the dependency)"));
+        }
+    }
+    d.made_optional.sort();
+    d.made_optional.dedup();
+    if d.was.as_ref() == Some(&spec.enables) {
+        d.problems.push(format!("{package} already declares {feature} = {:?}: nothing to change", spec.enables));
+    }
+    Ok(d)
+}
+
+fn enable_text(e: &klepto::FeatureEnable) -> String {
+    match e {
+        klepto::FeatureEnable::Feature(f) => f.clone(),
+        klepto::FeatureEnable::Dep(d) => format!("dep:{d}"),
+        klepto::FeatureEnable::DepFeature { dep, feature, weak } => format!("{dep}{}/{feature}", if *weak { "?" } else { "" }),
+    }
+}
+
 /// Where `spec`'s operation lands in the scan, or why it cannot.
 pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::result::Result<Landing, String> {
     use Operation::*;
@@ -1578,9 +1658,9 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
                 at: At::Manifest,
             })
         }
-        MakeStruct | MakeEnum | MakeFn | AddModule | Extract | AddDependency => {
+        MakeStruct | MakeEnum | MakeFn | AddModule | Extract | AddDependency | DeclareFeature => {
             let (package, file) = route_file(k, root, &spec.target).ok_or_else(|| format!("`{}` is not a crate:<name> or crate:<name>/<file>.rs route of the workspace", spec.target))?;
-            if op == AddDependency {
+            if matches!(op, AddDependency | DeclareFeature) {
                 let m = k.packages.get(&package).map(|p| rel(root, &p.manifest_path)).unwrap_or_default();
                 return Ok(Landing { file: m, module: package.clone(), package, item: None, at: At::Manifest });
             }

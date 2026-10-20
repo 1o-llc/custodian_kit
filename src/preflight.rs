@@ -363,11 +363,27 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                 let dep = spec.dependency.as_ref().map(|d| d.name.replace('-', "_")).unwrap_or_default();
                 let has = f.k.features.get(&l.package).is_some_and(|m| m.dependencies.iter().any(|d| d.name.replace('-', "_") == dep));
                 pre.push(Check { what: format!("{} does not depend on {dep} yet", l.package), holds: !has, detail: if has { "it does: nothing to add".into() } else { "a new line".into() } });
+                if spec.dependency.as_ref().and_then(|d| d.optional) == Some(true) {
+                    listed.push(format!("{dep} is optional: cargo gives it the feature {dep} until a feature names it dep:{dep} (declare_feature)"));
+                }
             }
+            Operation::DeclareFeature => match crate::change::feature_declaration(&f.k, &f.root, spec) {
+                Ok(d) => {
+                    let was = match &d.was {
+                        Some(w) => format!("declared now as {w:?}, becomes {:?}", d.enables),
+                        None => format!("a new feature: {:?}", d.enables),
+                    };
+                    pre.push(Check { what: format!("{} can declare {} as asked", d.package, d.feature), holds: d.problems.is_empty(), detail: if d.problems.is_empty() { was } else { d.problems.join("; ") } });
+                    for n in &d.made_optional {
+                        listed.push(format!("{n} becomes optional: dep:{n} turns it on, so code that uses it compiles only with {} on", d.feature));
+                    }
+                }
+                Err(e) => pre.push(Check { what: "the feature's crate".into(), holds: false, detail: e }),
+            },
             Operation::Gate => {
                 let feat = spec.feature.clone().unwrap_or_default();
                 let declared = f.k.features.get(&l.package).is_some_and(|m| m.features.contains_key(&feat));
-                pre.push(Check { what: format!("{} declares the feature {feat}", l.package), holds: declared, detail: if declared { "declared".into() } else { "declare it first (code_passenger's features document)".into() } });
+                pre.push(Check { what: format!("{} declares the feature {feat}", l.package), holds: declared, detail: if declared { "declared".into() } else { "declare it first (declare_feature)".into() } });
                 // a use outside the item stops compiling without the feature, unless it is gated by the feature too, or
                 // sits in a crate whose dependency on this one turns the feature on
                 let item = l.item.clone().unwrap_or_default();

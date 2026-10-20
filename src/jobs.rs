@@ -965,12 +965,18 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     };
     let mut not_allowed = Vec::new();
     if mode == JobMode::Bounded {
+        // a file the job allows is carried, whatever its lines; any other file but code is one the job does not
+        // allow (CUST0041), never an uncovered line
+        uncovered.retain(|u| !touched_files.iter().any(|(p, how)| p == &u.path && how.starts_with("allow_file")));
+        for u in uncovered.iter().filter(|u| !is_code_file(&u.path)) {
+            not_allowed.push(u.path.clone());
+        }
         for (path, how) in touched_files.iter().filter(|(_, how)| how.starts_with("hand")) {
             if !uncovered.iter().any(|u| &u.path == path) {
                 let now = std::fs::read(ctx.root.join(path)).map(|b| stable_digest::StableDigest::sha256(&b).as_str().to_string()).unwrap_or_else(|_| "none".into());
                 uncovered.push(crate::transform::Uncovered { path: path.clone(), from: how.trim_start_matches("hand from ").to_string(), now, lines: Vec::new() });
                 // code by hand is an uncovered line; any other file is one the job does not allow
-                if !(path.ends_with(".rs") || path.ends_with(".toml")) {
+                if !is_code_file(path) && !not_allowed.contains(path) {
                     not_allowed.push(path.clone());
                 }
             }
@@ -1049,8 +1055,11 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         _ => Vec::new(),
     };
     let code_uncovered: Vec<&crate::transform::Uncovered> = uncovered.iter().filter(|u| !not_allowed.contains(&u.path)).collect();
+    // one refusal per close: code written by hand (CUST0031) names the files no operation writes too
     let refusal = if !code_uncovered.is_empty() {
-        Some(ReadingRefusal::BoundedUncovered.refusal(code_uncovered.iter().map(|u| if u.lines.is_empty() { u.path.clone() } else { format!("{}:{}", u.path, u.lines.iter().map(u32::to_string).collect::<Vec<_>>().join(",")) }).collect::<Vec<_>>().join("; ")))
+        let lines = code_uncovered.iter().map(|u| if u.lines.is_empty() { u.path.clone() } else { format!("{}:{}", u.path, u.lines.iter().map(u32::to_string).collect::<Vec<_>>().join(",")) }).collect::<Vec<_>>().join("; ");
+        let files = if not_allowed.is_empty() { String::new() } else { format!("; and files no operation writes, not allowed: {} (allow_file)", not_allowed.join("; ")) };
+        Some(ReadingRefusal::BoundedUncovered.refusal(format!("{lines}{files}")))
     } else {
         (!not_allowed.is_empty()).then(|| ReadingRefusal::FileNotAllowed.refusal(format!("{} (an operation writes it, or the job allows it: allow_file)", not_allowed.join("; "))))
     };
@@ -1321,6 +1330,13 @@ pub const CODE_LANGUAGES: &[&str] = &["Rust", "TOML"];
 
 /// A bounded job's files that no transform of it covers, from its open and close counts of the workspace, each with
 /// the lines changed by hand when code_passenger holds a snapshot of the state the hand edit began from.
+/// Whether a file a job touched is code an operation writes: Rust, or a crate's manifest (`add_dependency`,
+/// `change_dependency`, `declare_feature`). Its lines by hand are uncovered lines (CUST0031); any other file by hand
+/// needs `allow_file` (CUST0041).
+pub fn is_code_file(path: &str) -> bool {
+    path.ends_with(".rs") || path.rsplit('/').next() == Some("Cargo.toml")
+}
+
 fn uncovered_lines(ctx: &Ctx, folder: &Path, transforms: &[crate::transform::TransformRecord]) -> Result<Vec<crate::transform::Uncovered>> {
     let counts = taken(folder);
     let of = |label: &str| counts.iter().rfind(|t| t.route == "*" && t.label == label).cloned();

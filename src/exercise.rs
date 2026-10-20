@@ -119,7 +119,7 @@ pub fn units_of(op: Operation) -> &'static [Unit] {
     match op {
         MakeStruct | MakeEnum | MakeFn | AddModule => &[Unit::File, Unit::Module, Unit::Crate],
         Extract => &[Unit::File, Unit::Module],
-        AddDependency | ChangeDependency => &[Unit::Crate],
+        AddDependency | ChangeDependency | DeclareFeature => &[Unit::Crate],
         MakeImpl | AddTraitImpl | AddField | AddVariant | AddDerive => &[Unit::Item],
         AddMethod | AddConstructor => &[Unit::Impl, Unit::Item],
         AddAttribute | Gate | Anchor | Rename | Move => &[Unit::Item, Unit::Function],
@@ -137,7 +137,7 @@ mod word {
     /// is `Unit::ALL[i]`), and how it runs; its rules are checked by flaga_solver.
     #[bitpack(storage = u64, version = 1)]
     pub struct ExerciseWord {
-        #[bits(24)]
+        #[bits(32)]
         #[describe("the operations an exercise runs, bit i the vocabulary's i-th")]
         ops: u32,
         #[bits(6)]
@@ -474,7 +474,7 @@ fn new_dependency(k: &Klepto, root: &Path, package: &str) -> Option<DependencySp
         }
         let from = p.root.canonicalize().unwrap_or_else(|_| p.root.clone());
         let to = other.root.canonicalize().unwrap_or_else(|_| other.root.clone());
-        return Some(DependencySpec { name: other.cargo_name.clone(), version: None, path: Some(relative_path(&from, &to)), features: Vec::new() });
+        return Some(DependencySpec { name: other.cargo_name.clone(), version: None, path: Some(relative_path(&from, &to)), features: Vec::new(), optional: None });
     }
     let lock: toml::Value = std::fs::read_to_string(root.join("Cargo.lock")).ok()?.parse().ok()?;
     let mut locked: Vec<(String, String)> = lock
@@ -486,7 +486,7 @@ fn new_dependency(k: &Klepto, root: &Path, package: &str) -> Option<DependencySp
         .filter(|(n, _)| !named.contains(&n.replace('-', "_")))
         .collect();
     locked.sort();
-    locked.into_iter().next().map(|(name, v)| DependencySpec { name, version: Some(format!("={v}")), path: None, features: Vec::new() })
+    locked.into_iter().next().map(|(name, v)| DependencySpec { name, version: Some(format!("={v}")), path: None, features: Vec::new(), optional: None })
 }
 
 /// A dependency a crate names, changed to a source that resolves the same: a path dependency given its crate's
@@ -508,10 +508,10 @@ fn changed_dependency(k: &Klepto, root: &Path, package: &str) -> Option<Dependen
         }
         if let Some(path) = v.get("path").and_then(|p| p.as_str()) {
             let version = k.packages.get(&name.replace('-', "_")).map(|p| p.version.clone())?;
-            return Some(DependencySpec { name: name.clone(), version: Some(version), path: Some(path.to_string()), features: Vec::new() });
+            return Some(DependencySpec { name: name.clone(), version: Some(version), path: Some(path.to_string()), features: Vec::new(), optional: None });
         }
         if let Some(l) = locked(name) {
-            return Some(DependencySpec { name: name.clone(), version: Some(format!("={l}")), path: None, features: Vec::new() });
+            return Some(DependencySpec { name: name.clone(), version: Some(format!("={l}")), path: None, features: Vec::new(), optional: None });
         }
     }
     None
@@ -582,6 +582,7 @@ pub fn spec_for(k: &Klepto, root: &Path, op: Operation, t: &Target, n: u64, crat
         }
         AddAttribute => s.attribute = Some("#[allow(dead_code)]".into()),
         Gate => s.feature = Some(first_feature(k, &t.package)?),
+        DeclareFeature => s.feature = Some(format!("exercise-feature-{n}")),
         Anchor => s.linkage = Some(format!("exercise-link-{n}")),
         Rename => {
             let old = last(&t.route);

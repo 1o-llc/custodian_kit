@@ -152,4 +152,13 @@ fn a_bounded_job_names_every_file_it_touched_and_a_file_no_operation_writes_need
     assert!(c.refusal.is_none(), "{:?}", c.refusal);
     assert_eq!(c.result, "pending", "the verification did not run: {:?}", c.result_reason);
     assert!(c.touched_files.iter().any(|(p, how)| p == "crates/core_lib/tests/ui/case.stderr" && how == "allow_file crates/*/tests/ui/*.stderr"), "{:?}", c.touched_files);
+    // a TOML file that is no crate's manifest (a features document) is a file no operation writes: CUST0041, the
+    // same code as the .stderr, never the hand-written code lines of CUST0031
+    job(&store, "z", "{ job { name \"z\" kind \"specs\" mode \"bounded\" target \"crate:core_lib\" verify \"test:x\" } }\n");
+    let started = jobs::start_with(&ctx, Some("z"), false, Some(&w)).unwrap();
+    std::fs::write(store.root.join("features.toml"), "default = []\n").unwrap();
+    let (c, _, _) = jobs::close_with(&ctx, &started.id, Some(&w)).unwrap();
+    assert_eq!(c.refusal.as_ref().map(|r| r.code.as_str()), Some("CUST0041"), "{:?}", c.refusal);
+    assert!(c.refusal.as_ref().unwrap().message.contains("features.toml"));
+    assert!(jobs::is_code_file("crates/core_lib/Cargo.toml") && jobs::is_code_file("crates/core_lib/src/lib.rs") && !jobs::is_code_file("features.toml"));
 }
