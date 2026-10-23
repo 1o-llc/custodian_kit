@@ -76,6 +76,10 @@ pub fn page(report: &ReadingReport) -> String {
     for c in &report.counts {
         s.push_str(&format!("- {}: {}\n", c.what, c.n));
     }
+    if let Some(r) = &report.requirements {
+        s.push_str(&super::requirements::render::page(r));
+        return s;
+    }
     if report.query.results.is_empty() {
         s.push_str("\nno sites.\n");
     }

@@ -1,0 +1,8 @@
+# the outer workspace; inner/ is a workspace of its own, which this root does not hold
+[workspace]
+members = ["app"]
+exclude = ["inner"]
+resolver = "2"
+
+[workspace.dependencies]
+bytesish = { path = "bytesish" }

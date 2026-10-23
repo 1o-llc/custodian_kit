@@ -1,0 +1,5 @@
+# app asks dup 0.2 at a path holding dup 0.1.0: cargo refuses, and which side moves is a choice
+[workspace]
+members = ["app"]
+exclude = ["dup"]
+resolver = "2"

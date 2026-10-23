@@ -155,6 +155,16 @@ pub struct Preflight {
     pub in_place: Vec<String>,
     pub utc: String,
     pub millis: i64,
+    /// For a dependency or feature change: the requirements reading that says what it needs from the manifests, as
+    /// the line to run. A reference only: it decides nothing here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirements: Option<String>,
+}
+
+/// The requirements line a preflight names for a dependency or feature change (`None` for any other operation).
+pub fn requirements_line(spec: &ChangeSpec, spec_rel: &str) -> Option<String> {
+    matches!(spec.op(), Operation::AddDependency | Operation::ChangeDependency | Operation::DeclareFeature)
+        .then(|| format!("custodian requirements {} --spec {spec_rel}: what this change needs from the manifests, the lock and the toolchain (advisory; this preflight does not wait on it)", spec.target))
 }
 
 impl Preflight {
@@ -234,6 +244,9 @@ impl Preflight {
             for r in &self.raw {
                 s.push_str(&format!("- `{}`\n", r.replace('`', "'")));
             }
+        }
+        if let Some(r) = &self.requirements {
+            s.push_str(&format!("\n## requirements\n\n- `{}`\n", r.split(": ").next().unwrap_or(r)));
         }
         if let Some(i) = &self.impact {
             s.push_str(&format!("\n## impact (reading #{})\n\n{}\n\n| dimension | value | basis | from |\n|---|---|---|---|\n", self.impact_seq.map(|n| n.to_string()).unwrap_or_else(|| "-".into()), i.line()));
@@ -759,6 +772,7 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
         in_place,
         utc: crate::runs::now_utc(),
         millis: started.elapsed().as_millis() as i64,
+        requirements: requirements_line(spec, spec_rel),
     })
 }
 
@@ -838,6 +852,9 @@ pub fn run_preflight(ctx: &Ctx, spec_path: &Path, job: Option<&InJob>, runner: R
     let view = store.and_then(job_view).map(|(v, _)| v);
     let p = assess(facts, store, &spec_rel, &spec, impact, view, &code_digest, index_key)?;
     said.push(format!("preflight {}: {} — {}", spec.name, if p.authorized { "authorized" } else { "not authorized" }, p.headline_why().unwrap_or_else(|| p.flags.join(", "))));
+    if let Some(r) = &p.requirements {
+        said.push(format!("requirements: {r}"));
+    }
     if !p.reasons.is_empty() {
         said.push(format!("  the rules it breaks: {}", p.reasons.join("; ")));
     }

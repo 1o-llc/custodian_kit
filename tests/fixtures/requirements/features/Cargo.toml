@@ -1,0 +1,4 @@
+# the four feature forms over members that cargo reads offline
+[workspace]
+members = ["app", "lib", "tool"]
+resolver = "2"

@@ -109,6 +109,53 @@ pub struct Plan {
     pub decisions: Vec<Question>,
     pub answered: Vec<crate::questions::Decision>,
     pub steps: Vec<PlanStep>,
+    /// The requirements reading of the intent: what it leaves unresolved, and the steps it orders before the code's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirements: Option<PlanRequirements>,
+}
+
+/// What the requirements reading of a plan's intent found, folded into the plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanRequirements {
+    /// The reading's receipt (its own, or the one it reused).
+    pub seq: Option<i64>,
+    pub target: String,
+    /// One line per unsatisfied finding, errors first.
+    pub unresolved: Vec<String>,
+    /// The required steps that are not a change spec (a root manifest's table, a members entry), in their order:
+    /// before step 1.
+    pub first: Vec<String>,
+}
+
+/// The requirements reading of a plan's intent over the workspace, through
+/// the reading path (a receipt, or a reuse): the prerequisites face only, so cargo runs `metadata` and nothing else.
+#[allow(clippy::too_many_arguments)]
+fn read_requirements(ctx: &Ctx, name: &str, intent: &str, target: &str, dir: &Path, job: Option<&InJob>, runner: Runner<'_>, said: &mut Vec<String>) -> Option<(Option<i64>, crate::reading::requirements::RequirementsReport)> {
+    use crate::reading::spec::{ReadingKind, ReadingSpec};
+    let mut spec = ReadingSpec::search(ReadingKind::Requirements, target).ok()?;
+    spec.name = format!("requirements-plan-{}", crate::jobs::slug_of(name));
+    spec.requirements.intent = Some(intent.to_string());
+    spec.requirements.faces = vec!["prerequisites".into()];
+    let report = match &ctx.store {
+        Some(_) => {
+            let p = dir.join(format!("{}.toml", spec.name));
+            write_whole(&p, toml::to_string(&spec).ok()?.as_bytes()).ok()?;
+            match crate::runs::run_reading_by(ctx, &p, false, job, runner) {
+                Ok(r) => {
+                    said.extend(r.said.iter().cloned());
+                    let seq = r.receipt.as_ref().map(|x| x.reused_seq.unwrap_or(x.seq));
+                    let rep = r.receipt.as_ref().and_then(|x| x.outputs.iter().find(|o| o.ends_with(".json"))).and_then(|j| crate::reading::load(&ctx.root.join(j)).ok());
+                    rep.and_then(|rep| rep.requirements).map(|x| (seq, x))
+                }
+                Err(e) => {
+                    said.push(format!("requirements not read: {e}"));
+                    None
+                }
+            }
+        }
+        None => crate::reading::read(&ctx.root, Path::new(&spec.name), &spec, &crate::runs::stamp(), if job.is_some() { crate::paths::Resolving::Job } else { crate::paths::Resolving::Free }).ok().and_then(|r| r.requirements).map(|x| (None, x)),
+    };
+    report
 }
 
 fn words_of(intent: &str) -> Vec<String> {
@@ -423,12 +470,34 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
     let decided = ctx.store.as_ref().map(crate::questions::decided).transpose()?.unwrap_or_default();
     let (answered, open): (Vec<Question>, Vec<Question>) = questions.into_iter().partition(|q| decided.contains_key(&q.id));
     let answered: Vec<crate::questions::Decision> = answered.iter().filter_map(|q| decided.get(&q.id).cloned()).collect();
-    let steps: Vec<PlanStep> = candidates
+    let mut steps: Vec<PlanStep> = candidates
         .iter()
         .take(read)
         .enumerate()
         .map(|(i, c)| PlanStep { n: i + 1, operation: c.operations.first().cloned().unwrap_or_default(), target: c.target.clone(), what: format!("{} {} (it names {}); other operations: {}", c.operations.first().cloned().unwrap_or_default(), c.target, c.words.join(", "), c.operations.iter().skip(1).cloned().collect::<Vec<_>>().join(", ")), status: "proposed".into(), spec: None })
         .collect();
+    // what the change needs from the manifests, read before any step: a dependency the crate must declare is a step
+    // of its own (add_dependency), first; every other required step is listed before step 1; what can be reused is
+    // reuse
+    let mut reuse = reuse;
+    // over the whole workspace: the intent's own words say which crate the change lands in (`to app`)
+    let req_target = ".".to_string();
+    let requirements = read_requirements(ctx, name, intent, &req_target, &dir, job, runner, &mut said).map(|(seq, r)| {
+        use crate::reading::requirements::{Check, Status};
+        let mut first_steps: Vec<PlanStep> = Vec::new();
+        for f in r.findings.iter().filter(|f| f.check == Check::NeedDeclared && f.status == Status::Unsatisfied) {
+            if let (Some(k), Some(a)) = (&f.krate, &f.action) {
+                first_steps.push(PlanStep { n: 0, operation: Operation::AddDependency.as_str().into(), target: format!("crate:{k}"), what: a.clone(), status: "proposed".into(), spec: None });
+            }
+        }
+        let first: Vec<String> = r.steps.iter().filter(|s| s.required && !first_steps.iter().any(|p| p.what == s.action)).map(|s| s.action.clone()).collect();
+        reuse.extend(r.reuse.iter().map(|x| Reuse { name: "requirements".into(), what: x.clone(), words: Vec::new() }));
+        steps.splice(0..0, first_steps);
+        PlanRequirements { seq, target: req_target.clone(), unresolved: r.unresolved_lines(), first }
+    });
+    for (i, s) in steps.iter_mut().enumerate() {
+        s.n = i + 1;
+    }
     let plan = Plan {
         schema: PLAN_SCHEMA.into(),
         name: name.into(),
@@ -449,6 +518,7 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
         decisions: open,
         answered,
         steps,
+        requirements,
     };
     let Some(store) = &ctx.store else {
         return Ok(Ran { plan, receipt: None, outputs: Vec::new(), said });
@@ -526,6 +596,21 @@ pub fn markdown(p: &Plan) -> String {
         s.push_str("\n## answered before (not asked again)\n\n");
         for d in &p.answered {
             s.push_str(&format!("- {} → {} ({})\n", d.question, d.answer, d.task));
+        }
+    }
+    if let Some(r) = &p.requirements {
+        s.push_str(&format!("\n## requirements (reading #{} over `{}`)\n\n", r.seq.map(|n| n.to_string()).unwrap_or_else(|| "-".into()), r.target));
+        if r.unresolved.is_empty() {
+            s.push_str("nothing unresolved.\n");
+        }
+        for u in &r.unresolved {
+            s.push_str(&format!("- {u}\n"));
+        }
+        if !r.first.is_empty() {
+            s.push_str("\nbefore step 1:\n\n");
+            for f in &r.first {
+                s.push_str(&format!("- {f}\n"));
+            }
         }
     }
     s.push_str("\n## proposed steps (each becomes a change spec when approved: custodian plan approve)\n\n");

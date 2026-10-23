@@ -42,6 +42,21 @@ git_ref = "main"
 [bundle]
 filters = ["no_tests", "only_src"]
 no_features = ["metrics"]
+
+[requirements]
+intent = "add hex to one_db_kernel"
+change_spec = "specs/changes/add-hex.toml"
+faces = ["prerequisites", "rust"]
+
+[[requirements.needs]]
+member = "one_db_kernel"
+dependency = "hex"
+version = "0.4"
+features = ["serde", "alloc"]
+path = "../hex"
+optional = false
+new_crate = "crates/hex"
+said = "intent"
 "#;
 
 const ONEO: &str = r#"{
@@ -84,6 +99,23 @@ const ONEO: &str = r#"{
       filters "no_tests"
       filters "only_src"
       no_features "metrics"
+    }
+    requirements {
+      intent "add hex to one_db_kernel"
+      needs {
+        member "one_db_kernel"
+        dependency "hex"
+        version "0.4"
+        features "serde"
+        features "alloc"
+        path "../hex"
+        optional false
+        new_crate "crates/hex"
+        said "intent"
+      }
+      change_spec "specs/changes/add-hex.toml"
+      faces "prerequisites"
+      faces "rust"
     }
   }
 }
@@ -153,6 +185,8 @@ fn the_reading_schema_carries_the_vocabularies() {
     assert_eq!(enum_of(&s, &["kind"]), ReadingKind::ALL.iter().map(|k| k.as_str()).collect::<Vec<_>>());
     assert_eq!(enum_of(&s, &["declared_in", "role"]), DeclaredRole::ALL.iter().map(|k| k.as_str()).collect::<Vec<_>>());
     assert_eq!(enum_of(&s, &["duplicates", "level"]), klepto::SHAPE_LEVELS.iter().map(|l| l.name()).collect::<Vec<_>>());
+    let faces = enum_of(&s, &["requirements", "faces"]);
+    assert_eq!(faces, custodian_kit::reading::requirements::FacesWord::all_names());
     let filters = enum_of(&s, &["bundle", "filters"]);
     custodian_kit::bundle::FiltersWord::from_names(filters.iter().copied()).expect("every schema filter is a filter of the word");
 }

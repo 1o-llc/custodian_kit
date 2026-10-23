@@ -1,0 +1,5 @@
+# app → vendor/a → vendor/b, and vendor/b is not there
+[workspace]
+members = ["app"]
+exclude = ["vendor"]
+resolver = "2"

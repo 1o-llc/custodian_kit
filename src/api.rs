@@ -146,7 +146,13 @@ pub struct SearchKey {
 impl SearchKey {
     /// The key of `spec` over the code at `root`, without parsing it.
     pub fn of(root: &Path, spec: &ReadingSpec) -> Result<SearchKey, Refusal> {
-        let code = crate::code_digest(root, &spec.scope.scan_options()).map_err(|e| Refusal::from(RefusalCode::Scan.refuse(e)))?;
+        // the requirements reading rests on the manifests, the lock, the toolchain files and its own needs, not on
+        // the sources klepto fingerprints (and it answers when cargo cannot read the manifests)
+        let code = if spec.kind == ReadingKind::Requirements {
+            crate::reading::requirements::input_digest(root, spec)?
+        } else {
+            crate::code_digest(root, &spec.scope.scan_options()).map_err(|e| Refusal::from(RefusalCode::Scan.refuse(e)))?
+        };
         Ok(SearchKey { spec_hash: crate::runs::spec_hash(spec), index_key: IndexKey::of_code_digest(&code), code_digest: code })
     }
 }
@@ -194,14 +200,24 @@ impl Reading {
     }
 }
 
+/// A spec whose kind reads no scan (a sweep, a requirements reading) answered at `root`: no workspace is opened, so
+/// it answers where klepto cannot (a requirements reading over a broken manifest).
+pub fn run_at(root: &Path, how: Resolving, spec: &ReadingSpec) -> Result<Reading, Refusal> {
+    if spec.kind.needs_scan() {
+        return Err(RefusalCode::SpecInvalid.refuse(format!("{}: a {} reading reads a scan; open a workspace for it", spec.name, spec.kind)).into());
+    }
+    let stamp = crate::runs::stamp();
+    Ok(Reading { report: crate::reading::read(root, Path::new(&spec.name), spec, &stamp, how)? })
+}
+
 /// `spec` answered over `ws`. A spec whose scope is not the workspace's is
 /// refused (open the workspace for it: [`Workspace::open_for`]).
 pub fn run(ws: &Workspace, spec: &ReadingSpec) -> Result<Reading, Refusal> {
-    if spec.kind != ReadingKind::Sweep && spec.scope != ws.scope {
+    if spec.kind.needs_scan() && spec.scope != ws.scope {
         return Err(RefusalCode::SpecInvalid.refuse(format!("{}: its scope is not the open workspace's; open one for it", spec.name)).into());
     }
     let stamp = crate::runs::stamp();
-    let report = if spec.kind == ReadingKind::Sweep {
+    let report = if !spec.kind.needs_scan() {
         crate::reading::read(&ws.root, Path::new(&spec.name), spec, &stamp, ws.how)?
     } else {
         crate::reading::read_facts(ws.facts(), Path::new(&spec.name), spec, &stamp)?

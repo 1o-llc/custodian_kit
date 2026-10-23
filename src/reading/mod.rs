@@ -15,6 +15,7 @@ pub mod impact;
 pub mod kinds;
 pub mod patterns;
 pub mod refusal;
+pub mod requirements;
 pub mod count;
 pub mod render;
 pub mod scope;
@@ -79,6 +80,9 @@ pub struct ReadingReport {
     /// of the reading's digest: the same answer from a cache is the same reading.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<String>,
+    /// A `requirements` reading's report (`custodian.requirements.v1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirements: Option<requirements::RequirementsReport>,
 }
 
 /// What a kind found, before it becomes a report.
@@ -108,6 +112,9 @@ pub fn read(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, how:
     if spec.kind == ReadingKind::Sweep {
         return read_sweep(root, spec_path, spec, stamp, how);
     }
+    if spec.kind == ReadingKind::Requirements {
+        return requirements::read(root, spec_path, spec, stamp, how);
+    }
     // a kind that walks the syntax trees is answered over a parse: read straight from one (no index read back
     // from the cache only to be parsed again, none kept)
     let facts = if spec.kind.walks_trees() { Facts::build_parsed(root, &spec.scope, how)? } else { Facts::build(root, &spec.scope, how)? };
@@ -124,6 +131,10 @@ pub fn read_facts(facts: &Facts, spec_path: &Path, spec: &ReadingSpec, stamp: &s
 /// it here, as `read_facts` does; a kind that walks the syntax trees over an index read back from the cache makes its
 /// own from the parse it needs.
 pub fn read_facts_over(facts: &Facts, graph: Option<&crate::CodeGraph>, spec_path: &Path, spec: &ReadingSpec, stamp: &str) -> Result<ReadingReport> {
+    // a kind answered without a scan is answered at the scan's root
+    if !spec.kind.needs_scan() {
+        return read(&facts.root, spec_path, spec, stamp, facts.how);
+    }
     // a kind that walks the syntax trees, over an index read back from the cache (which holds none): parsed for it
     let parsed;
     let reparsed = spec.kind.walks_trees() && !facts.trees;
@@ -210,6 +221,7 @@ pub fn read_facts_over(facts: &Facts, graph: Option<&crate::CodeGraph>, spec_pat
         count: answer.count,
         headline: answer.headline,
         index: Some(facts.index.line()),
+        requirements: None,
     })
 }
 
@@ -274,6 +286,7 @@ fn read_sweep(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, ho
         count: None,
         headline: Vec::new(),
         index: None,
+        requirements: None,
     })
 }
 
@@ -391,7 +404,7 @@ pub fn answer(spec_path: &Path, root: &Path, out: &str, stamp: &str, how: crate:
         spec.change.files.extend(files.lines().filter(|l| !l.trim().is_empty()).map(str::to_string));
     }
     let report = match ws {
-        Some(ws) if spec.kind != ReadingKind::Sweep && ws.scope == spec.scope => read_facts(ws.facts(), spec_path, &spec, stamp)?,
+        Some(ws) if spec.kind.needs_scan() && ws.scope == spec.scope => read_facts(ws.facts(), spec_path, &spec, stamp)?,
         _ => read(root, spec_path, &spec, stamp, how)?,
     };
     let (page, json, latest) = if out == "-" {

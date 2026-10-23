@@ -45,6 +45,7 @@ pub fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
         ReadingKind::Impact => super::impact::answer(f, spec),
         ReadingKind::Linkage => crate::linkage::answer(f, spec),
         ReadingKind::Patterns => super::patterns::answer(f, spec),
+        ReadingKind::Requirements => Err(ReadingRefusal::SpecInvalid.refuse("a requirements reading is read without a scan")),
     }
 }
 

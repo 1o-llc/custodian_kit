@@ -47,7 +47,8 @@
             "sweep",
             "impact",
             "linkage",
-            "patterns"
+            "patterns",
+            "requirements"
           ],
           "description": "What the reading reads (the kinds table in custodian_kit's README)."
         },
@@ -217,6 +218,70 @@
             "no_features": {
               "type": "string",
               "description": "A feature whose gated files and items are left out. Repeats: one value per line, in order."
+            }
+          }
+        },
+        "requirements": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "requirements: what the intended change is, what it needs, and which faces are read.",
+          "properties": {
+            "intent": {
+              "type": "string",
+              "description": "What the change is for, in the asker's words: the crate it lands in and the packages it brings are read from it."
+            },
+            "needs": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "One thing the change needs: a dependency in a crate, or a new crate. Repeats: one value per line, in order.",
+              "properties": {
+                "member": {
+                  "type": "string",
+                  "description": "The crate the dependency lands in (a member's package name), or the new crate's name."
+                },
+                "dependency": {
+                  "type": "string",
+                  "description": "The dependency, by its package name."
+                },
+                "version": {
+                  "type": "string",
+                  "description": "The version requirement asked for, as cargo writes one."
+                },
+                "features": {
+                  "type": "string",
+                  "description": "A feature of the dependency the change needs on. Repeats: one value per line, in order."
+                },
+                "path": {
+                  "type": "string",
+                  "description": "A path source, relative to the member's directory."
+                },
+                "optional": {
+                  "type": "boolean",
+                  "description": "Whether the dependency is optional."
+                },
+                "new_crate": {
+                  "type": "string",
+                  "description": "A new crate's directory, relative to the root."
+                },
+                "said": {
+                  "type": "string",
+                  "description": "Where the need came from."
+                }
+              }
+            },
+            "change_spec": {
+              "type": "string",
+              "description": "The change spec the needs were made from, as it was named."
+            },
+            "faces": {
+              "type": "string",
+              "enum": [
+                "prerequisites",
+                "rust",
+                "lock",
+                "no_cargo"
+              ],
+              "description": "A face read: prerequisites, rust, lock; no_cargo reads the manifests only. None is every face. Repeats: one value per line, in order."
             }
           }
         }

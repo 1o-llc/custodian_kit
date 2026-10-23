@@ -1,0 +1,4 @@
+# edition 2024 first compiles on Rust 1.85; app promises 1.80
+[workspace]
+members = ["app"]
+resolver = "2"

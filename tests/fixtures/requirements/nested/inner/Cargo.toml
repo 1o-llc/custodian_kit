@@ -1,0 +1,8 @@
+# its own workspace: core inherits from here, never from the outer root
+[workspace]
+members = ["core"]
+exclude = ["hexish"]
+resolver = "2"
+
+[workspace.dependencies]
+hexish = { path = "hexish" }

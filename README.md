@@ -98,6 +98,7 @@ enum; a test holds the two equal.
 | `impact` | everything a change to a crate, a file or an item entails, in one reading: its definitions, use sites, constructions, matches, impls, dependents, reach, the tests that cover it, the features and feature configurations that build it, the linkage records naming it, and the cost of the change by dimension, each measured, heuristic or unknown |
 | `linkage` | the architectural linkage records (why declarations are bound together) naming the target, `*` for all: each bound declaration resolved through klepto, stale when it no longer resolves, to review when its file changed since the record was made; comment anchors with no record behind them |
 | `patterns` | every function body in scope (`*`, or crates by name) against the simple_impl toolkit: its shape, the toolkit pieces whose expansion it holds (exact: the call expands to the same tokens; near: the difference named) with the replace_body spec that swaps them, the shapes that repeat across crates and no piece writes (ranked by count times size, each with a body and a proposed macro), and the counts by crate |
+| `requirements` | what an intended change needs from the workspace as it is, without compiling: the manifests read with no cargo (each crate's governing workspace root by cargo's rule, `workspace = true` against it, paths, renames, features in their four forms), then the intent's or the change spec's needs against cargo metadata; each crate's rust-version and edition against the lock's demands and the installed toolchain; the packages the lock holds in more than one version (cargo tree -d); every finding observed, inferred or unknown, with an order of steps, required or recommended |
 
 ### The toolkit's shapes (`patterns`)
 
@@ -111,6 +112,161 @@ expansion reads the same in the normal form (`toolkit::normal`): exact. A near m
 again by `cargo run --example toolkit_shapes -- <new dir>`, and `toolkit::tests` holds the shipped one equal to a
 fresh expansion. Each function row carries the replace_body spec (`spec`, JSON) that code_passenger's `to-toolkit`
 makes; the shapes no piece writes come with a proposed macro for the suite.
+
+### What a change needs (`requirements`)
+
+An agent that integrates a crate without reading the manifests first learns what is missing one cargo error at a
+time: a `workspace = true` with no entry in the root, a path that points nowhere, a feature the dependency does not
+have. Six of those in a row, each one a round trip through a person, is what this reading is for. It reads the
+manifests before anything is changed and says in one report what the intended change needs and whether each is there.
+
+It never compiles and never writes a manifest, a lock or a source file. The cargo lines it runs are
+`cargo metadata --frozen` (no lock written, no network; `--no-deps` when that is refused) and
+`cargo tree --duplicates --locked --offline`, and the toolchain's `rustc -vV` and `rustup show active-toolchain`, each
+a declared line run in the workspace's directory and listed in the reading's provenance with its exit. Where cargo
+metadata reads the workspace, cargo is the truth: nothing here resolves a version or recomputes cargo's resolve
+(klepto 0.3.5's `CargoWorkspace` reads its JSON as it is). The manifest scanner is for the state cargo cannot speak in
+yet, a broken manifest, and every finding says which of the two it came from and whether it is observed, inferred or
+unknown.
+
+- **prerequisites**: every Cargo.toml the target needs, read as TOML with toml_edit (each key's line from its span).
+  A crate's governing root is found by cargo's own rule: the crate itself when it has `[workspace]`, else the root
+  `package.workspace` names, else the nearest ancestor with `[workspace]` that does not exclude it. Never the top
+  folder by default, so a nested independent workspace is its own root. Against that root: `workspace = true`
+  dependencies, `field.workspace = true`, `[lints] workspace = true`, members that name no crate, a crate its root
+  does not hold. Path dependencies are followed to the end of the chain (the package there must have the
+  dependency's name, at a version its requirement admits). Dev-dependencies marked optional, renames, target tables,
+  named registries no config declares. Every `[features]` entry in its four forms (`f`, `dep:x`, `x/f`, `x?/f`)
+  through klepto's feature model. Requirements spread across members and dependencies no `.rs` file names are
+  informational. Then the requirement side: each need checked against cargo's resolve (declared in the crate it
+  lands in, the version the lock holds, the feature on and what turns it on, the source), its impact (the crate's
+  dependencies and dependents in the resolve, and the `impact` and `affected_tests` lines that follow it item by
+  item), and what can be reused (the root's entry, the version already locked and who uses it).
+- **rust**: per crate its rust-version and edition, the highest rust-version a package of its lock demands (its
+  closure in cargo's resolve), the toolchain installed for the workspace, and the three disagreements: a crate
+  promising an older Rust than its lock allows, a lock newer than the installed toolchain, an edition its declared
+  minimum cannot compile (the last also without cargo).
+- **lock**: every package the lock holds in more than one version, from `cargo tree -d` as cargo prints it: the
+  packages whose requirement pulls each version in (with the requirement and the line it is written on), how many
+  times it compiles because of the split, and the one requirement change that would leave one version when there is
+  one (inferred: cargo tree after the change is the proof).
+
+```toml
+name = "add-hex"
+question = "what does adding hex to one_db_kernel need"
+kind = "requirements"
+target = "crate:one_db_kernel"      # `.` reads every workspace under the root; a directory reads the one there
+
+[requirements]
+intent = "add hex/serde to one_db_kernel"
+faces = ["prerequisites", "rust", "lock"]   # none is all three; `no_cargo` reads the manifests only
+
+[[requirements.needs]]                      # needs written out; the intent's words and a change spec make them too
+member = "one_db_kernel"
+dependency = "hex"
+version = "0.4"
+features = ["serde"]
+```
+
+The intent's words become needs: the crate it lands in (`to app`, `crate:app`), and the packages it names that a
+manifest or the lock already holds (`hex`, `hex@0.4`, `hex/serde`); a name spelled as code that nothing holds is a
+need of its own, unknown. A change spec gives its `add_dependency`, `change_dependency` and `declare_feature`
+operations as needs (`reading::requirements::needs::of_change`). The faces are one big-bad-bool word, checked by
+flaga_solver: the lock's shape is cargo's answer, so `lock` cannot go with `no_cargo`.
+
+The report (`custodian.requirements.v1`, the reading record's `requirements`) has the brief's sections: the requested
+outcome and scope; the current state (each root, its members and tables, cargo's word, where the scanner and cargo
+agree or part); the satisfied prerequisites; the unsatisfied ones, each with its severity, manifest, line, section,
+field, requirement, evidence, consequence and action; compatibility (the Rust table, the lock's shape); impact and
+reuse; the suggested order, each step required or recommended with how to see it done, and never a version the
+reading did not read; the unknowns; the provenance (every manifest's digest, the lock's, the lines run with their
+exits, and the mutation: none).
+
+Its reuse key's code half is the digest of the manifests, the locks, the toolchain files, the `.cargo/config.toml`s
+and the spec's requirements (`requirements::input_digest`): an edit to a source file is the same reading, an edit to
+a manifest or the lock is a new one. It is not a gate: a preflight of a dependency or feature change names the line
+to run; `plan make` reads it for the plan's intent and folds it in (a dependency to declare is a step of its own,
+`add_dependency`, first; the other required steps are listed before step 1; what can be reused is reuse); a handoff
+carries the newest one's unresolved findings.
+
+What it cannot claim: that the code compiles (`cargo check` is named as the next verification, and not run); what
+proc macros, build scripts, native libraries and the API between crates expect; any feature combination besides the
+one cargo resolved; a registry package that is not in the lock (it reads offline); a toolchain installed after a
+kept reading (the key reads files; `--again` reads again).
+
+| face | what it means |
+|---|---|
+| `prerequisites` | the manifests and workspaces a change needs, read without cargo, then what the intent or the spec requires against cargo metadata |
+| `rust` | each crate's rust-version and edition against the lock's demands and the installed toolchain |
+| `lock` | the packages the lock holds in more than one version, from cargo tree -d |
+
+| basis | what it means |
+|---|---|
+| `observed` | read as it is: a file's text, or cargo's own output |
+| `inferred` | follows from what was read by a stated rule (cargo's documented behaviour, a semver query, a text search); cargo has not confirmed it |
+| `unknown` | not established by this reading; the finding names what would establish it |
+
+| status | what it means |
+|---|---|
+| `satisfied` | present, with its evidence |
+| `unsatisfied` | missing or broken: a step in the order fixes it |
+| `informational` | neither: a fact the change should know |
+
+| severity | what it means |
+|---|---|
+| `error` | cargo refuses it, or the intended change cannot work without it |
+| `warn` | cargo accepts it, but a promise is false or something is ignored |
+| `info` | worth knowing; not presumed a mistake |
+
+| read from | what it means |
+|---|---|
+| `manifest` | the manifest scanner: Cargo.toml read as TOML, no cargo |
+| `metadata` | cargo metadata --frozen (or --no-deps), as cargo printed it |
+| `tree` | cargo tree --duplicates --locked --offline, as cargo printed it |
+| `toolchain` | rustc -vV and rustup show active-toolchain, run in the workspace root |
+| `lockfile` | Cargo.lock read as TOML |
+| `intent` | the intent's words, the change spec or the reading spec's needs |
+| `sources` | a text search of a crate's .rs files |
+
+| check | what it means |
+|---|---|
+| `manifest_unreadable` | a Cargo.toml that is not TOML: cargo refuses everything that reads it |
+| `not_a_member` | the crate's governing root (the nearest ancestor with [workspace] that does not exclude it, as cargo finds it) does not list it: cargo refuses it ("believes it's in a workspace when it's not") |
+| `member_missing` | a [workspace] members entry that names a directory with no Cargo.toml |
+| `workspace_not_a_root` | package.workspace points at a manifest with no [workspace] |
+| `duplicate_package_name` | two crates of one workspace with one package name |
+| `workspace_dependency_missing` | a `workspace = true` dependency whose governing root has no [workspace.dependencies] entry of that name (or no root at all) |
+| `workspace_field_missing` | a [package] field inherited with `workspace = true` that the root's [workspace.package] does not set |
+| `workspace_lints_missing` | [lints] workspace = true with no [workspace.lints] in the root |
+| `inherited_key_ignored` | a key beside `workspace = true` that cargo ignores (version, path, git, ...): the root's entry decides |
+| `path_missing` | a path dependency (or patch) whose directory has no Cargo.toml |
+| `path_names_other_package` | a path dependency whose directory holds a package of another name |
+| `path_version_mismatch` | a path dependency's version requirement that the package at the path does not meet: cargo refuses it, and which side moves is a choice |
+| `optional_dev_dependency` | a dev-dependency marked optional: cargo refuses it |
+| `registry_unconfigured` | a dependency on a named registry no .cargo/config.toml at or above the root (or in CARGO_HOME) declares |
+| `feature_entry_unknown` | a [features] entry naming no feature and no dependency, `dep:x` on a dependency that is not optional, or `x/f` on no dependency |
+| `renamed_dependency` | a dependency whose key is not its package (`package = ...`): source names it by the key |
+| `requirement_spread` | one package required with different requirements across the workspace |
+| `possibly_unused` | a dependency whose name no .rs file of the crate holds as a word (a text search: macros, build scripts and lib names that differ hide uses) |
+| `workspace_dependency_unused` | a [workspace.dependencies] entry no member inherits |
+| `outside_any_workspace` | manifests under the root that no workspace holds and nothing depends on |
+| `metadata_read` | cargo metadata read the workspace: cargo's resolve is the truth from here |
+| `metadata_refused` | cargo metadata refused the workspace: its words, as it printed them |
+| `scanner_and_cargo_disagree` | the scanner and cargo part: cargo's word stands, and the scanner's limit is named |
+| `need_declared` | a dependency the change needs, declared in the crate it lands in or not |
+| `need_version` | the version the change asks for against the versions the lock holds |
+| `need_feature` | a feature the change needs on a dependency: whether the dependency has it, and what turns it on |
+| `need_source` | where a needed dependency comes from: a path, the lock, or a registry this reading does not fetch |
+| `need_new_crate` | a new crate's directory: the root that would govern it, whether its members take it, its name free |
+| `need_unnamed` | a name in the intent that nothing in the manifests or the lock holds |
+| `feature_combinations` | the feature combinations no resolve read and no build ran |
+| `edition_needs_newer_rust` | a rust-version older than the first Rust that compiles the crate's edition |
+| `rust_version_below_lock` | a crate that promises a rust-version older than a package of its lock demands |
+| `rust_version_undeclared` | a crate that promises no rust-version, with what its lock demands |
+| `toolchain_below_lock` | a lock that demands a newer Rust than the toolchain installed for the workspace |
+| `toolchain_unknown` | the installed toolchain could not be read |
+| `duplicate_versions` | a package the lock holds in more than one version |
+| `tree_refused` | cargo tree refused: the lock's shape is read from Cargo.lock's text, its forcing requirements unknown |
 
 ## Declaration roles
 

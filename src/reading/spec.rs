@@ -93,6 +93,7 @@ vocabulary! {
         Impact = "impact" : "everything a change to a crate, a file or an item entails, in one reading: its definitions, use sites, constructions, matches, impls, dependents, reach, the tests that cover it, the features and feature configurations that build it, the linkage records naming it, and the cost of the change by dimension, each measured, heuristic or unknown",
         Linkage = "linkage" : "the architectural linkage records (why declarations are bound together) naming the target, `*` for all: each bound declaration resolved through klepto, stale when it no longer resolves, to review when its file changed since the record was made; comment anchors with no record behind them",
         Patterns = "patterns" : "every function body in scope (`*`, or crates by name) against the simple_impl toolkit: its shape, the toolkit pieces whose expansion it holds (exact: the call expands to the same tokens; near: the difference named) with the replace_body spec that swaps them, the shapes that repeat across crates and no piece writes (ranked by count times size, each with a body and a proposed macro), and the counts by crate",
+        Requirements = "requirements" : "what an intended change needs from the workspace as it is, without compiling: the manifests read with no cargo (each crate's governing workspace root by cargo's rule, `workspace = true` against it, paths, renames, features in their four forms), then the intent's or the change spec's needs against cargo metadata; each crate's rust-version and edition against the lock's demands and the installed toolchain; the packages the lock holds in more than one version (cargo tree -d); every finding observed, inferred or unknown, with an order of steps, required or recommended",
     }
 }
 
@@ -150,7 +151,15 @@ impl ReadingKind {
             ReadingKind::Impact => "impact",
             ReadingKind::Linkage => "linkage",
             ReadingKind::Patterns => "pattern",
+            ReadingKind::Requirements => "requirement",
         }
+    }
+
+    /// Whether the kind is answered over klepto's scan of the sources. A sweep walks an undeclared tree; the
+    /// requirements reading reads manifests and cargo's own output, so it answers when cargo cannot (a broken
+    /// manifest) and never parses the code.
+    pub fn needs_scan(self) -> bool {
+        !matches!(self, ReadingKind::Sweep | ReadingKind::Requirements)
     }
 
     /// Kinds whose answer needs each member's `tests/` read too.
@@ -321,6 +330,9 @@ pub struct ReadingSpec {
     pub bundle: BundleOptions,
     #[serde(default)]
     pub patterns: PatternOptions,
+    /// requirements: the intent, the needs, the faces.
+    #[serde(default, skip_serializing_if = "super::requirements::RequirementsOptions::is_empty")]
+    pub requirements: super::requirements::RequirementsOptions,
 }
 
 /// patterns: what counts as a shape worth a macro of its own.

@@ -1,0 +1,5 @@
+# app and tool pull two versions of dup (path packages, so cargo reads it offline)
+[workspace]
+members = ["app", "tool"]
+exclude = ["dup-0.1", "dup-0.2"]
+resolver = "2"

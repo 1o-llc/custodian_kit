@@ -1,0 +1,14 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["fast"]
+fast = ["lib/quick"]
+extra = ["dep:tool"]
+weakx = ["tool?/x"]
+
+[dependencies]
+lib = { path = "../lib" }
+tool = { path = "../tool", optional = true }

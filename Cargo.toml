@@ -25,7 +25,7 @@ thiserror = "1"
 tantivy = "0.26.1"
 # reading specs: klepto is the one extractor; syn reads the attribute and macro tokens klepto hands over,
 # TOML declarations with their spans, and the UTC stamp of each reading
-klepto = "0.3.4"
+klepto = "0.3.5"
 syn = { version = "2", features = ["full", "visit", "extra-traits"] }
 quote = "1"
 # the patterns reading: a body's tokens with their places in its file (a filling taken as written)

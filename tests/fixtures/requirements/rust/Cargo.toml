@@ -1,0 +1,4 @@
+# app promises 1.60 and its lock demands 1.80 (lib); future demands 1.999, newer than any toolchain
+[workspace]
+members = ["app", "lib", "future"]
+resolver = "2"

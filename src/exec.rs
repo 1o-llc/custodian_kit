@@ -60,7 +60,87 @@ pub struct ExecReading {
 #[composite(command = "check", method = "check", ty = CargoCheck, init = "manifest_path")]
 #[composite(command = "expand", method = "expand", ty = CargoExpand, init = "manifest_path,package")]
 #[composite(command = "generate-lockfile", method = "generate_lockfile", ty = CargoGenerateLockfile, init = "manifest_path")]
+#[composite(command = "metadata", ty = CargoMetadata, init = "manifest_path")]
+#[composite(command = "tree", ty = CargoTree, init = "manifest_path")]
 pub struct Cargo;
+
+/// `cargo metadata --manifest-path M --format-version 1 [--frozen | --no-deps]`: the workspace as cargo reads it
+/// (the requirements reading's truth). `--frozen` resolves from the lock as it is, no network and no lock written;
+/// `--no-deps` reads the members and resolves nothing.
+#[allow(clippy::duplicated_attributes)]
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "metadata")]
+#[exit_status(code = 0, word = "read")]
+#[exit_status(code = 101, word = "cargo refused")]
+pub struct CargoMetadata {
+    #[builder(init_required, into)]
+    #[arg(kv = "--manifest-path")]
+    pub manifest_path: OsString,
+    #[builder(into)]
+    #[arg(kv = "--format-version")]
+    pub format_version: Option<OsString>,
+    #[arg(flag = "--frozen")]
+    pub frozen: bool,
+    #[arg(flag = "--no-deps")]
+    pub no_deps: bool,
+}
+
+/// `cargo tree --manifest-path M (--workspace | -p P) --duplicates --locked --offline --prefix depth`: cargo's own answer to
+/// which packages the lock holds in more than one version, each with the packages that pull it in.
+#[allow(clippy::duplicated_attributes)]
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "tree")]
+#[exit_status(code = 0, word = "read")]
+#[exit_status(code = 101, word = "cargo refused")]
+pub struct CargoTree {
+    #[builder(init_required, into)]
+    #[arg(kv = "--manifest-path")]
+    pub manifest_path: OsString,
+    #[arg(flag = "--workspace")]
+    pub workspace: bool,
+    #[arg(flag = "--duplicates")]
+    pub duplicates: bool,
+    #[arg(flag = "--locked")]
+    pub locked: bool,
+    #[arg(flag = "--offline")]
+    pub offline: bool,
+    #[builder(into)]
+    #[arg(kv = "--prefix")]
+    pub prefix: Option<OsString>,
+    /// One package's tree instead of the workspace's.
+    #[builder(into)]
+    #[arg(kv = "-p")]
+    pub package: Option<OsString>,
+}
+
+/// rustc.
+#[derive(CompositeShell, Debug, Clone, Copy, Default)]
+#[shell(program = "rustc")]
+#[composite(command = "-vV", method = "version_verbose", ty = RustcVersion)]
+pub struct Rustc;
+
+/// `rustc -vV`: the toolchain that answers in a directory (its `release:` and `host:` lines).
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "-vV")]
+#[exit_status(code = 0, word = "read")]
+pub struct RustcVersion;
+
+/// rustup.
+#[derive(CompositeShell, Debug, Clone, Copy, Default)]
+#[shell(program = "rustup")]
+#[composite(command = "show", ty = RustupShow)]
+pub struct Rustup;
+
+/// `rustup show WORD...` (`active-toolchain`: the toolchain a directory gets, and why).
+#[allow(clippy::duplicated_attributes)]
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "show")]
+#[exit_status(code = 0, word = "read")]
+#[exit_status(code = 1, word = "not answered")]
+pub struct RustupShow {
+    #[arg(positional)]
+    pub words: Vec<OsString>,
+}
 
 /// `cargo generate-lockfile --manifest-path M --offline`: a crate's lockfile from the registry already on disk.
 #[derive(SimpleSubCommand, Debug, Clone, Default)]
@@ -366,15 +446,24 @@ pub struct Line {
     pub ok_codes: &'static [i32],
     /// Extra environment for this line.
     pub env: Vec<(String, String)>,
+    /// The directory it runs in (this process's when `None`): cargo and rustup pick the toolchain a directory
+    /// overrides or pins (`rust-toolchain.toml`) by it.
+    pub dir: Option<std::path::PathBuf>,
 }
 
 /// A declared command's rules checked, then its preview and policy.
 pub fn line(id: impl Into<String>, command: &(impl CompositeShellCommand + ValidatedCommand)) -> Result<Line> {
     command.validate().map_err(|why| ReadingRefusal::LineRefused.refuse(format!("{}: {why}", command.build_display())))?;
-    Ok(Line { id: id.into(), preview: command.preview(), policy: ExitStatusPolicy::of(command), ok_codes: command.ok_codes(), env: Vec::new() })
+    Ok(Line { id: id.into(), preview: command.preview(), policy: ExitStatusPolicy::of(command), ok_codes: command.ok_codes(), env: Vec::new(), dir: None })
 }
 
 impl Line {
+    /// The line, run in `dir`.
+    pub fn in_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Line {
+        self.dir = Some(dir.into());
+        self
+    }
+
     /// The line with every status going on to the next line, each still with
     /// its word as the reason (a test crate that fails does not stop the others).
     pub fn going_on(mut self) -> Line {
@@ -477,6 +566,9 @@ impl Plan {
             cmd.args(&op.argv);
             for (k, v) in &l.env {
                 cmd.env(k, v);
+            }
+            if let Some(d) = &l.dir {
+                cmd.current_dir(d);
             }
             cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
             let mut child = cmd.spawn().map_err(|e| ReadingRefusal::LineNotStarted.refuse(format!("{}: {e}", op.display)))?;

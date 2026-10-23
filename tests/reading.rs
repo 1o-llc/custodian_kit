@@ -236,6 +236,10 @@ fn the_vocabulary_table_in_the_readme_is_the_enum() {
     assert!(readme.contains(&ReadingKind::doc_table()), "README.md must carry ReadingKind::doc_table()");
     assert!(readme.contains(&api::DeclaredRole::doc_table()), "README.md must carry DeclaredRole::doc_table()");
     assert!(readme.contains(&api::Depth::doc_table()), "README.md must carry Depth::doc_table()");
+    use custodian_kit::reading::requirements::{Basis, Check, Face, ReadFrom, Severity, Status};
+    for (name, table) in [("Face", Face::doc_table()), ("Basis", Basis::doc_table()), ("Status", Status::doc_table()), ("Severity", Severity::doc_table()), ("ReadFrom", ReadFrom::doc_table()), ("Check", Check::doc_table())] {
+        assert!(readme.contains(&table), "README.md must carry {name}::doc_table()");
+    }
 }
 
 #[test]

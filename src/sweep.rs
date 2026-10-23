@@ -29,6 +29,36 @@ fn skipped(name: &str) -> bool {
     matches!(name, "target" | ".git" | "node_modules" | crate::store::FOLDER)
 }
 
+/// Every `Cargo.toml` under `root`, by the sweep's own walk (the same directories left out, never following links),
+/// minus the directories named in `skip` (`.claude`) and the paths `excluded` says (relative to `root`): the manifests
+/// the requirements reading reads.
+pub fn manifests(root: &Path, skip: &[&str], excluded: impl Fn(&str) -> bool) -> Vec<std::path::PathBuf> {
+    let rel = |p: &Path| p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+    let mut out: Vec<std::path::PathBuf> = WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !e.file_name().to_str().is_some_and(|n| skipped(n) || (e.depth() > 0 && skip.contains(&n))))
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file() && e.file_name() == "Cargo.toml" && !excluded(&rel(e.path())))
+        .map(|e| e.into_path())
+        .collect();
+    out.sort();
+    out
+}
+
+/// The files with extension `ext` under a crate's directory, by the sweep's walk: a nested directory holding a
+/// Cargo.toml of its own is another crate's and is left out.
+pub fn source_files(dir: &Path, ext: &str) -> Vec<std::path::PathBuf> {
+    WalkDir::new(dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !e.file_name().to_str().is_some_and(skipped) && !(e.depth() > 0 && e.file_type().is_dir() && e.path().join("Cargo.toml").is_file()))
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file() && e.path().extension().is_some_and(|x| x == ext))
+        .map(|e| e.into_path())
+        .collect()
+}
+
 /// Walks `dir` (relative to `root` or absolute), never following links.
 pub fn sweep(root: &Path, dir: &Path, table: Option<&PathsTable>) -> Result<Swept> {
     let base = if dir.is_absolute() { dir.to_path_buf() } else { root.join(dir) };

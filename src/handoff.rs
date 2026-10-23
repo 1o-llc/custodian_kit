@@ -193,6 +193,15 @@ pub struct Handoff {
     /// The step kinds the job paid one member at a time where a batch form exists.
     #[serde(default)]
     pub per_member: Vec<String>,
+    /// The newest requirements reading the job made or reused: its unresolved findings, one line each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requirements: Vec<String>,
+    /// That reading: `#<seq> <spec name> (<target>)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirements_from: Option<String>,
+    /// The line that reads them again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requirements_again: Option<String>,
 }
 
 /// `2026-10-19T21:19:31Z` → `2026-10-19 21:19Z`.
@@ -436,6 +445,12 @@ pub fn of_job(root: &Path, store: &Store, folder: &Path, receipts: &[Receipt], s
         }
         if let Some(f) = crate::receipts::reading_of(root, r, &folders).or_else(|| r.reused_seq.and_then(|n| receipts.iter().find(|x| x.seq == n)).and_then(|x| crate::receipts::reading_of(root, x, &folders))) {
             if let Ok(rep) = crate::reading::load(&root.join(&f.record)) {
+                // the newest requirements reading's unresolved findings travel with the job
+                if let Some(req) = &rep.requirements {
+                    h.requirements = req.unresolved_lines();
+                    h.requirements_from = Some(format!("#{} {} ({})", r.reused_seq.unwrap_or(r.seq), rep.name, rep.target));
+                    h.requirements_again = Some(format!("custodian requirements {}{} --again", rep.target, req.intent.as_ref().map(|i| format!(" --intent {:?}", i)).unwrap_or_default()));
+                }
                 if rep.target != "*" && !rep.target.is_empty() {
                     routes.insert(rep.target);
                 }
@@ -563,6 +578,20 @@ pub fn render(h: &Handoff, reader: Reader) -> String {
         out.push("Nothing is waiting on a person.".into());
     } else {
         out.extend(listed(&waiting, "items"));
+    }
+    // the requirements the change still has to meet, from its newest requirements reading
+    if let Some(from) = &h.requirements_from {
+        out.push(String::new());
+        out.push("## Unresolved requirements".into());
+        if h.requirements.is_empty() {
+            out.push(format!("The requirements reading {from} leaves nothing unresolved."));
+        } else {
+            out.push(format!("The requirements reading {from} leaves {}:", plural(h.requirements.len(), "finding unresolved", "findings unresolved")));
+            out.extend(listed(&h.requirements, "findings"));
+            if let (Reader::Agent, Some(line)) = (reader, &h.requirements_again) {
+                out.push(format!("Read them again after a change: {line}"));
+            }
+        }
     }
     // 2. what it was for
     out.push(String::new());
