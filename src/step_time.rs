@@ -58,6 +58,9 @@ pub struct StepTime {
     pub batch_members: usize,
     #[serde(default)]
     pub batch_millis: i64,
+    /// The median time of one run: what a run typically takes, a contended or cold outlier aside.
+    #[serde(default)]
+    pub median_millis: Option<i64>,
 }
 
 impl StepTime {
@@ -69,6 +72,11 @@ impl StepTime {
     /// The time per run, when any ran.
     pub fn per_run(&self) -> Option<i64> {
         (self.runs > 0).then(|| self.millis / self.runs as i64)
+    }
+
+    /// The typical time of one run: the median when known, else the mean.
+    pub fn typical(&self) -> Option<i64> {
+        self.median_millis.or_else(|| self.per_run())
     }
 
     /// The time per member of the batch form, when a batch ran.
@@ -119,12 +127,16 @@ pub fn kind_of(r: &Receipt) -> Option<(&'static str, usize)> {
 /// The time per step kind over `receipts`; the index parses are the readings whose index was parsed for them.
 pub fn times(receipts: &[Receipt]) -> Vec<StepTime> {
     let mut by: BTreeMap<&str, StepTime> = BTreeMap::new();
+    let mut samples: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
     for r in receipts {
         let Some((kind, members)) = kind_of(r) else { continue };
         let t = by.entry(kind).or_insert_with(|| StepTime { kind: kind.into(), ..Default::default() });
         t.runs += 1;
         t.members += members;
         t.millis += r.millis;
+        if r.command != crate::preflight::BATCH_COMMAND {
+            samples.entry(kind).or_default().push(r.millis);
+        }
         if members == 1 && matches!(kind, PREFLIGHT | TRANSFORM) {
             t.one_at_a_time += 1;
         }
@@ -139,6 +151,12 @@ pub fn times(receipts: &[Receipt]) -> Vec<StepTime> {
             p.members += 1;
             p.one_at_a_time += 1;
             p.millis += r.reason.split("index parsed (").nth(1).and_then(|x| x.split(' ').next()).and_then(|n| n.parse::<i64>().ok()).unwrap_or(0);
+        }
+    }
+    for (k, mut v) in samples {
+        if let Some(t) = by.get_mut(k) {
+            v.sort_unstable();
+            t.median_millis = (!v.is_empty()).then(|| if v.len() % 2 == 1 { v[v.len() / 2] } else { (v[v.len() / 2 - 1] + v[v.len() / 2]) / 2 });
         }
     }
     [PREFLIGHT, TRANSFORM, COMPILE, BATCH, TEST, TEST_RUN, READING, PATTERNS, PARSE, JOB].iter().filter_map(|k| by.remove(k)).collect()
@@ -272,13 +290,13 @@ pub fn estimate(times: &[StepTime], planned: &Planned) -> Estimate {
     let pre = of(PREFLIGHT);
     let single_preflight = pre.and_then(StepTime::per_single_run).or_else(|| pre.and_then(StepTime::per_member));
     let batch_preflight = pre.and_then(StepTime::per_batch_member).or(single_preflight);
-    let parse = of(PARSE).and_then(StepTime::per_run);
-    let proof = of(TRANSFORM).and_then(StepTime::per_run).or_else(|| of(COMPILE).and_then(StepTime::per_run));
+    let parse = of(PARSE).and_then(StepTime::typical);
+    let proof = of(TRANSFORM).and_then(StepTime::typical).or_else(|| of(COMPILE).and_then(StepTime::typical));
     // the batch line holds its preflight: its compile is the line less the preflight's time per batch
     let batch_preflight_run = pre.filter(|p| p.batch_runs > 0).map(|p| p.batch_millis / p.batch_runs as i64).unwrap_or(0);
-    let batch = of(BATCH).and_then(StepTime::per_run).map(|b| (b - batch_preflight_run).max(0)).or_else(|| of(COMPILE).and_then(StepTime::per_run));
-    let test = of(TEST_RUN).and_then(StepTime::per_run).or_else(|| of(TEST).and_then(StepTime::per_run));
-    let close = of(JOB).and_then(StepTime::per_run);
+    let batch = of(BATCH).and_then(StepTime::typical).map(|b| (b - batch_preflight_run).max(0)).or_else(|| of(COMPILE).and_then(StepTime::typical));
+    let test = of(TEST_RUN).and_then(StepTime::typical).or_else(|| of(TEST).and_then(StepTime::typical));
+    let close = of(JOB).and_then(StepTime::typical);
     let dependency = match (single_preflight, parse, proof) {
         (Some(a), Some(b), Some(c)) => Some(a + b + c),
         _ => None,
@@ -598,6 +616,15 @@ mod tests {
         let mut odd = at(85, "never", "test", "t", "", "passed", 1_000);
         odd.utc = "not a time".into();
         assert_eq!(spent(&[odd]), 1_000);
+    }
+
+    #[test]
+    fn a_contended_outlier_does_not_set_the_typical_run() {
+        // three proofs: two of 2.5 min, one of 9 min while other builds held the Mac
+        let rs = vec![r(1, "transform", "a", "done", 150_000), r(2, "transform", "b", "done", 9 * 60_000), r(3, "transform", "c", "done", 150_000)];
+        let t = times(&rs);
+        let p = t.iter().find(|x| x.kind == TRANSFORM).unwrap();
+        assert_eq!((p.per_run(), p.typical()), (Some(280_000), Some(150_000)));
     }
 
     #[test]
