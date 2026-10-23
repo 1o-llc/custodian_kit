@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.3.11 (2026-10-23)
+
+An agent swapped three of the kit's crates to simple_impl toolkit calls through custodian, and custodian's own
+numbers were wrong in ways that cost the run. Its cost line predicted each job before it ran, and measured each
+from job open to close:
+
+| crate | the cost line before running | measured |
+|---|---|---|
+| nodeplan_package | 2,391 preflights × 0.2 s, 2 compiles × 3.2 min, ≈ 13.7 min | 42 min, less than half the work done |
+| sidecar_core | 1,013 preflights × 0.4 s, 2 compiles × 3.2 min, ≈ 13.2 min | 40 min |
+| xccute_observations | 272 preflights × 0.4 s, 2 compiles × 3.4 min, ≈ 8.9 min | 27.5 min, 118 of 271 swapped |
+
+The line counted one compile per crate where James's rule pays two per shape (the proof and its batch), left out
+the patterns reading, the dependency step and the index parse each shape pays, and took the preflight's rate from
+single preflights. The budget beside it counted each command line and the code-passenger receipts inside it twice
+(57.3 min said at 38 min real), and then refused the job's own tests, so a job past it could never close. Spec
+names were cut at 48 characters, so 2,389 functions came out as 238 spec files; two `From` impls on one type had one
+target; whole trait impls were counted as exact matches with no spec; and two checkouts numbered their receipts the
+same. This release fixes each, with a test on a fixture for each. On a copy of the xccute_observations job's
+folder, the line made from the receipts held when its patterns reading finished now says 33.2 min for the work
+that job did, against the 27.5 min it took (8.9 min before); the rest is the test run, measured on larger crates. Nothing is removed from the API (the rustdoc JSON of 0.3.10 and 0.3.11 differ by 132 additions and no removal). Links are pinned to d8f9f7f; the lines they replace to a167869 (0.3.10).
+
+- **Spec names never collide.** A patterns spec is named by its whole route and the first 8 hex of the route's
+  digest (`route_name`, [spec.rs L421](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/reading/spec.rs#L421), used at [matcher.rs L873](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/toolkit/matcher.rs#L873));
+  it was the route cut at 48 characters ([spec.rs L410](https://github.com/1o-llc/custodian_kit/blob/a16786941cf7dcfff8d85b005a1c2cb3b9d13fab/src/reading/spec.rs#L410), [matcher.rs L873](https://github.com/1o-llc/custodian_kit/blob/a16786941cf7dcfff8d85b005a1c2cb3b9d13fab/src/toolkit/matcher.rs#L873)).
+  Test: `a_patterns_spec_is_named_by_its_whole_route_and_two_impls_on_one_path_get_two_targets` (tests/reading.rs,
+  on tests/fixtures/routes_ws).
+- **The cost line reads every spec, and only the job's.** `planned_from` ([step_time.rs L410](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/step_time.rs#L410))
+  reads the change spec folder and each patterns reading's `<stamp>.specs` (`spec_folders`, [L454](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/step_time.rs#L454)),
+  counting in a running job only the specs written since the job before it closed, so a spec an earlier job left
+  and never made is not counted; it read only `data/specs/changes` ([step_time.rs L303](https://github.com/1o-llc/custodian_kit/blob/a16786941cf7dcfff8d85b005a1c2cb3b9d13fab/src/step_time.rs#L303)). Test:
+  `the_plan_counts_the_patterns_readings_specs_and_never_an_old_unmade_one`.
+- **The cost line's model is the rule's.** `estimate` ([step_time.rs L288](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/step_time.rs#L288)) counts per shape
+  (`shape_of`, [L329](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/step_time.rs#L329)) an index parse, the proof's preflight and its compile, the members past
+  the proofs at the batch preflight's own measured rate, a batch compile per batched shape (the batch line less its
+  preflight), each dependency change, a test run per crate and the close; in a job it says the whole job with what
+  it has spent, each run at its kind's median (`StepTime::typical`, [step_time.rs L78](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/step_time.rs#L78)) so a build
+  that ran while others held the Mac does not set it. Before the reading it says "unknown until the reading". Was [step_time.rs L215](https://github.com/1o-llc/custodian_kit/blob/a16786941cf7dcfff8d85b005a1c2cb3b9d13fab/src/step_time.rs#L215).
+  Test: `the_receipts_predict_a_batch_and_name_the_steps_paid_one_member_at_a_time`.
+- **Each unit of work counted once.** `spent` ([step_time.rs L484](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/step_time.rs#L484)) is the length of the union
+  of the receipts' spans (each from its time less its `millis` to its time); it summed them ([L309](https://github.com/1o-llc/custodian_kit/blob/a16786941cf7dcfff8d85b005a1c2cb3b9d13fab/src/step_time.rs#L309)).
+  Test: `the_budget_counts_a_command_line_and_the_receipts_inside_it_once`, on receipts #4260–#4340 of the
+  xccute_observations job: 518.5 s summed, 282.5 s spent.
+- **The hours are information.** James's word: nothing is refused by hours; the battery rule is the one that
+  stops a step. `over_by` ([step_time.rs L516](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/step_time.rs#L516)) says how far past its hours a job is, and the
+  closing receipt carries it (`Closing::over_budget`); `is_change_step` ([L322](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/step_time.rs#L322)) names the steps that
+  change code. Tests: `the_hours_are_information_never_a_refusal`, `the_budget_never_refuses_the_jobs_own_verification`.
+- **Two impls on one path, two targets.** `route` ([route.rs L16](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/route.rs#L16)) names a function's impl from the
+  source's header when two share a path (`path[impl From<i64> for Level]`: klepto's model drops the trait's generic
+  arguments); `find_fn` ([L89](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/route.rs#L89)) finds one or refuses with CUST0044 and the routes that tell them
+  apart; `change::landing` lands such a route at that function ([change.rs L2217](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/change.rs#L2217)). Test:
+  `a_route_finds_one_function_or_is_refused_with_the_routes_that_tell_them_apart`.
+- **Whole trait impls apart.** A function a piece writes as a whole trait impl, with no replace_body spec, is
+  `impls (no swap)` ([patterns.rs L26](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/reading/patterns.rs#L26), [L88](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/reading/patterns.rs#L88)) and not in the
+  exact count. Test: the patterns test above.
+- **Receipts across checkouts.** `receipts::keep` ([receipts.rs L47](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/receipts.rs#L47)) numbers above every receipt
+  file on disk (receipt_history's `Journal::keep`), so a file another checkout brought is never written over; it
+  took the journal's next row alone ([receipts.rs L47](https://github.com/1o-llc/custodian_kit/blob/a16786941cf7dcfff8d85b005a1c2cb3b9d13fab/src/receipts.rs#L47)). `receipts::merge` ([L92](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/receipts.rs#L92))
+  makes two checkouts one history by union, a receipt's identity what it says, its number aside; `collisions`
+  names the numbers a plain copy would collide on (CUST0045). Test:
+  `two_checkouts_numbering_receipts_the_same_merge_by_union_and_never_write_over_a_file` (tests/close.rs).
+- **The close names what verified it.** `jobs::verifications` ([jobs.rs L1268](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/jobs.rs#L1268)) says each declared
+  verification of a running job and the receipt that decides it (`verified_with`, [L1229](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/jobs.rs#L1229), was
+  `verified`, [L1213](https://github.com/1o-llc/custodian_kit/blob/a16786941cf7dcfff8d85b005a1c2cb3b9d13fab/src/jobs.rs#L1213)); the closing receipt lists them (`Closing::verified_by`). Test:
+  `a_verification_satisfied_by_a_test_receipt_names_it_and_the_close_is_accepted`.
+- **Two operations.** `remove_dependency` and `rename_paths` ([change.rs L65-L66](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/change.rs#L65-L66)), with their
+  preflight checks; the writer is code_passenger 0.4.8.
+- **The governing root of a folder.** `manifest::governing_root_of` ([manifest.rs L406](https://github.com/1o-llc/custodian_kit/blob/d8f9f7fec8a101b0ddedd74868665714f8657b6a/src/reading/requirements/manifest.rs#L406)):
+  the requirements reading's rule for one crate folder, so a proof's copy carries the root cargo looks for. Test:
+  `a_crates_governing_root_is_the_workspace_above_it_by_cargos_rule`.
+
 ## 0.3.10 (2026-10-23)
 
 James had an agent integrate a multi-crate package, and cargo failed on a dependency six times in a row: one_db_kernel
