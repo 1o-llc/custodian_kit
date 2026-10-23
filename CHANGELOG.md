@@ -1,5 +1,92 @@
 # Changelog
 
+## 0.3.10 (2026-10-23)
+
+James had an agent integrate a multi-crate package, and cargo failed on a dependency six times in a row: one_db_kernel
+inherited `hex` through `workspace = true`, its governing root had no `[workspace.dependencies].hex`, cargo said so,
+the agent fixed that line, and the next build failed on the next thing. The person was the build-and-error loop. Each
+of those was in the manifests before the first build. The `requirements` reading reads them once, before anything is
+changed, and says what the intended change needs and whether each is there. It never compiles and never writes:
+the cargo lines it runs are `metadata --frozen` and `tree --duplicates --locked --offline`, and the toolchain's
+`rustc -vV` and `rustup show active-toolchain`. Where cargo metadata reads the workspace, cargo is the truth (klepto
+0.3.5 reads its JSON); the manifest scanner is for the state cargo cannot speak in yet. On a copy of the kit's
+manifests, lock and sources it reads 449 manifests and cargo's 1,549 packages in 9.9 s (311 MB), no compile. Nothing
+is removed from the API: the rustdoc JSON of 0.3.9 and 0.3.10 differ by 2,302 additions (512 without the derived
+and blanket trait impls) and no removal. Every link is pinned to 01c0192; the lines it replaces to 393518b (0.3.9).
+
+- **The reading kind.** `ReadingKind::Requirements`, answered with no scan of the sources
+  (`ReadingKind::needs_scan`, [spec.rs L161](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/spec.rs#L161); `reading::read`, [mod.rs L115](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/mod.rs#L115)),
+  so it answers over a manifest cargo refuses, where every other kind stops at klepto's scan. Its spec's
+  `[requirements]` holds the intent, the needs and the faces; the faces are one big-bad-bool word checked by
+  flaga_solver, `lock` conflicting with `no_cargo` (`FacesWord`, [mod.rs L91](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/mod.rs#L91)). The report
+  is the brief's contract, section by section (`RequirementsReport`, [mod.rs L411](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/mod.rs#L411)), every
+  finding observed, inferred or unknown, read from a manifest, cargo metadata, cargo tree, the toolchain, Cargo.lock,
+  the intent or a text search, and pointing at its manifest, line, section and field. Every check is declared once
+  with its face, severity and the step of the order it lands in (`Check::rule`, [mod.rs L507](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/mod.rs#L507));
+  the README's tables are the enums.
+- **The manifests, no cargo.** `manifest::Scan` ([manifest.rs L404-L411](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/manifest.rs#L404-L411)) reads every
+  Cargo.toml the target needs with toml_edit (the kit's span reader, read side only). A crate's governing root is
+  cargo's rule: itself with `[workspace]`, else `package.workspace`, else the nearest ancestor with `[workspace]`
+  that does not exclude it ([manifest.rs L602-L610](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/manifest.rs#L602-L610)), so a nested independent workspace is
+  its own root; members are the entries, globs expanded, and every path dependency under the root it does not
+  exclude ([manifest.rs L553](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/manifest.rs#L553)). Checks: `workspace = true` against that root's tables,
+  members that name no crate, a crate its root does not hold, path chains followed to their end (name and version at
+  the path), optional dev-dependencies, named registries no config declares, every `[features]` entry in its four
+  forms through klepto's `FeatureModel::from_declared` ([manifest.rs L863-L1128](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/manifest.rs#L863-L1128)).
+  The walk is the sweep's own (`sweep::manifests`, `sweep::source_files`, [sweep.rs L35-L51](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/sweep.rs#L35-L51)).
+- **Cargo's word, and where the scanner parts from it.** `cargo::metadata` ([cargo.rs L96](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/cargo.rs#L96))
+  runs `--frozen`, then `--no-deps` when that is refused; `cargo::agreement` ([cargo.rs L119](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/cargo.rs#L119))
+  says whether the scanner's errors in the workspace cargo read agree with cargo, and counts the ones in other
+  workspaces under the root apart. The lines are declared once in `exec` (`CargoMetadata`, `CargoTree`, `Rustc`,
+  `RustupShow`, [exec.rs L75](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/exec.rs#L75), [exec.rs L95](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/exec.rs#L95), [exec.rs L120](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/exec.rs#L120)), each run in the workspace's
+  directory (`Line::dir`, [exec.rs L451](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/exec.rs#L451)) so rustup picks the toolchain the directory pins.
+- **The requirement side.** `needs::of_intent` and `needs::of_change` ([needs.rs L30](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/needs.rs#L30),
+  [needs.rs L105](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/needs.rs#L105)) make the needs from the intent's words (only with a word that brings
+  something: `merge helper_a into helper_b` asks for no dependency) or a change spec's add_dependency,
+  change_dependency and declare_feature; `needs::check` ([needs.rs L152](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/needs.rs#L152)) checks each
+  against cargo's resolve: declared, the version the lock holds (`klepto::version_meets`), the feature there and what
+  turns it on, the source; the combinations nothing resolved are unknown ([needs.rs L329](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/needs.rs#L329));
+  impact is the crate's dependencies and dependents in the resolve with the `impact` and `affected_tests` lines
+  ([needs.rs L421](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/needs.rs#L421)).
+- **Rust versions.** `rust::read` ([rust.rs L48](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/rust.rs#L48)): per crate its rust-version and edition,
+  the highest rust-version its closure in the resolve demands, and the three disagreements; the editions' first Rust
+  written once (`EDITIONS`, [rust.rs L12](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/rust.rs#L12)).
+- **The lock's shape.** `lock::read` ([lock.rs L145](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/lock.rs#L145)) reads `cargo tree -d` as cargo
+  prints it: every root is a unit cargo builds (a version, a feature set, the host beside the target), its level-1
+  lines the packages whose requirement pulls it in, each requirement cargo metadata's and its line the manifest's (an
+  inherited one is the root's line). `collapse` ([lock.rs L101](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/lock.rs#L101)) names the one
+  requirement change that would leave one version when the requirements forcing the others are written in one place,
+  inferred. When cargo tree is refused, Cargo.lock's text gives the versions and who forces them is unknown.
+- **The order.** `order::steps` ([order.rs L23](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/order.rs#L23)): the fewest steps, required or recommended,
+  in cargo's order, each with how to see it done, never a version the reading did not read, then the compile and the
+  tests this reading never runs.
+- **Reuse and invalidation.** The same-search key's code half for this kind is `requirements::input_digest`
+  ([mod.rs L560](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/reading/requirements/mod.rs#L560)): the manifests, the locks, the toolchain files, the `.cargo/config.toml`s
+  and the spec's requirements; `api::SearchKey::of` takes it ([api.rs L151](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/api.rs#L151)), where 0.3.9 took klepto's
+  fingerprint of the sources for every kind ([api.rs L149](https://github.com/1o-llc/custodian_kit/blob/393518b/src/api.rs#L149)). `api::run_at` ([api.rs L205](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/api.rs#L205)) answers
+  a kind with no scan at a root, no workspace opened.
+- **Not a gate; carried along.** A preflight of add_dependency, change_dependency or declare_feature names the line
+  (`preflight::requirements_line`, [preflight.rs L165](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/preflight.rs#L165)) and decides nothing on it. `plan make` reads it for the
+  plan's intent ([plan.rs L133](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/plan.rs#L133), [plan.rs L485](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/plan.rs#L485)): a dependency to declare is an `add_dependency` step,
+  first; the other required steps are listed before step 1; what can be reused is reuse. A handoff carries the
+  newest one's unresolved findings ([handoff.rs L448](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/handoff.rs#L448), [handoff.rs L582](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/src/handoff.rs#L582)).
+
+Proof, tests/requirements.rs on tests/fixtures/requirements/ (the brief's acceptance cases that are the library's):
+`a_workspace_dependency_with_no_root_entry_names_the_manifest_and_its_governing_root` ([L71](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L71)) (case 1, the `hex` case);
+`a_nested_independent_workspace_is_its_own_root_and_no_declaration_goes_in_the_outer_one` ([L94](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L94)) (2);
+`a_path_dependency_chain_is_followed_to_the_directory_that_is_not_there` ([L112](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L112)) (3);
+`features_are_read_in_their_four_forms_and_untested_combinations_are_unknown` ([L124](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L124)) (4);
+`a_real_version_conflict_is_reported_without_a_guessed_repair` ([L152](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L152)) (5);
+`an_intent_to_add_a_crate_gives_its_prerequisites_impact_and_an_ordered_plan` ([L167](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L167)) (6);
+`the_reading_writes_nothing_and_its_key_moves_with_the_manifests_only` ([L194](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L194)) (7);
+`static_findings_and_cargos_word_are_kept_apart_and_no_compile_is_claimed` ([L222](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L222)) (9);
+the three Rust-version disagreements, `a_crate_that_promises_an_older_rust_than_its_lock_allows_is_named_with_the_package` ([L240](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L240)),
+`a_lock_newer_than_the_installed_toolchain_is_named` ([L252](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L252)), `an_edition_its_declared_minimum_cannot_compile_is_named_without_cargo` ([L262](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L262));
+`a_package_in_two_versions_names_who_forces_each_and_the_one_change_that_leaves_one` ([L274](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L274));
+`the_faces_are_one_word_and_the_lock_cannot_go_without_cargo` ([L292](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L292));
+`every_finding_says_how_it_is_known_and_where_it_was_read` ([L307](https://github.com/1o-llc/custodian_kit/blob/01c0192e9908ec646f307ee581cd7d293031c964/tests/requirements.rs#L307)). Case 10: every existing test passes unchanged,
+the 1o schema carries the new kind and `[requirements]` (tests/oneo.rs), and `cargo test --all-features` is 0 failed.
+
 ## 0.3.9 (2026-10-20)
 
 What the fleet_ops swaps cost, read from their receipts, and the kit's half of making each cost once. The 295
