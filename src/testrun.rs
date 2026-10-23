@@ -489,3 +489,106 @@ mod signature_tests {
         assert!(!a.contains_key("private"));
     }
 }
+
+/// The libtest words after `--` that make every test say its own time (`test m::t ... ok <0.012s>`):
+/// `-Z unstable-options --report-time`, which stable libtest takes under [`REPORT_TIME_ENV`] as the kit's expansion
+/// does.
+pub const REPORT_TIME: &[&str] = &["-Z", "unstable-options", "--report-time"];
+
+/// The variable that lets stable libtest take [`REPORT_TIME`].
+pub const REPORT_TIME_ENV: (&str, &str) = ("RUSTC_BOOTSTRAP", "1");
+
+/// A libtest line with its time (`test m::t ... ok <0.012s>`): the test, `ok`/`FAILED`/`ignored`, and its time in
+/// milliseconds when the line says one.
+pub fn timed_outcome(line: &str) -> Option<(String, String, Option<u64>)> {
+    let rest = line.strip_prefix("test ")?;
+    let (name, tail) = rest.rsplit_once(" ... ")?;
+    let mut words = tail.split_whitespace();
+    let outcome = words.next()?;
+    if !matches!(outcome, "ok" | "FAILED" | "ignored") {
+        return None;
+    }
+    let ms = words.next().and_then(|t| t.strip_prefix('<')).and_then(|t| t.strip_suffix("s>")).and_then(|s| s.parse::<f64>().ok()).map(|s| (s * 1000.0).round() as u64);
+    Some((name.trim().to_string(), outcome.to_string(), ms))
+}
+
+/// maintenance's classes, by the time a test took: `unit` within 500 ms, `integration` within 10 s, `slow` within
+/// 1 min; past that, `slow` at the time itself.
+pub fn timing_class(ms: u64) -> (&'static str, u64) {
+    [("unit", 500u64), ("integration", 10_000), ("slow", 60_000)].into_iter().find(|(_, max)| ms <= *max).unwrap_or(("slow", ms))
+}
+
+/// Where a test is written: the file (from `root`) and the line of its `#[test]` (else of its `fn`), found in the
+/// `.rs` files under `package_dir` by its name, the file whose path holds most of its module path chosen.
+pub fn test_place(root: &std::path::Path, package_dir: &std::path::Path, test: &str) -> Option<(String, u32)> {
+    let segs: Vec<&str> = test.split("::").collect();
+    let (name, modules) = segs.split_last()?;
+    let mut best: Option<(usize, String, u32)> = None;
+    for e in walkdir::WalkDir::new(package_dir).into_iter().filter_entry(|e| e.file_name() != "target").flatten() {
+        if e.path().extension().is_none_or(|x| x != "rs") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(e.path()) else { continue };
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, l) in lines.iter().enumerate() {
+            let t = l.trim_start();
+            let t = t.strip_prefix("pub ").unwrap_or(t);
+            let t = t.strip_prefix("async ").unwrap_or(t);
+            if !t.starts_with(&format!("fn {name}(")) {
+                continue;
+            }
+            let line = if i > 0 && lines[i - 1].trim_start().starts_with("#[test") { i } else { i + 1 };
+            let rel = e.path().strip_prefix(root).unwrap_or(e.path()).to_string_lossy().replace('\\', "/");
+            let score = modules.iter().filter(|m| rel.contains(*m)).count();
+            if best.as_ref().is_none_or(|(s, ..)| score > *s) {
+                best = Some((score, rel, line as u32));
+            }
+        }
+    }
+    best.map(|(_, f, l)| (f, l))
+}
+
+/// The tests' times as maintenance's timing records (`.maintenance/timings`, its `Record`): each test with a time,
+/// placed by [`test_place`], its class and threshold by [`timing_class`], `passed` or `panicked` by its outcome.
+pub fn timing_records(root: &std::path::Path, package_dir: &std::path::Path, results: &[(String, String, Option<u64>)], at_unix_ms: u64) -> Vec<maintenance::timed::Record> {
+    results
+        .iter()
+        .filter(|(_, o, _)| o != "ignored")
+        .filter_map(|(test, outcome, ms)| {
+            let ms = (*ms)?;
+            let (file, line) = test_place(root, package_dir, test)?;
+            let (class, max_ms) = timing_class(ms);
+            let outcome = if outcome == "ok" { maintenance::timed::Outcome::Passed } else { maintenance::timed::Outcome::Panicked };
+            Some(maintenance::timed::Record { test: test.clone(), file, line, ms, max_ms, class: Some(class.into()), threshold_from: "class".into(), outcome, at_unix_ms })
+        })
+        .collect()
+}
+
+/// The records written as one run of maintenance's timings (`.maintenance/timings/<run>.jsonl` under `root`), so
+/// `annotate` places a `#[timed_test]` for each.
+pub fn write_timings(root: &std::path::Path, run: &str, records: &[maintenance::timed::Record]) -> Result<Option<PathBuf>> {
+    if records.is_empty() {
+        return Ok(None);
+    }
+    let file = root.join(maintenance::registry::DIR).join(maintenance::timed::TIMINGS).join(format!("{run}.jsonl"));
+    let mut text = String::new();
+    for r in records {
+        text.push_str(&serde_json::to_string(r)?);
+        text.push('\n');
+    }
+    crate::store::write_whole(&file, text.as_bytes())?;
+    Ok(Some(file))
+}
+
+#[cfg(test)]
+mod timed_tests {
+    #[test]
+    fn a_report_time_line_gives_the_test_its_time_and_its_class() {
+        assert_eq!(super::timed_outcome("test tests::a ... ok <0.012s>"), Some(("tests::a".into(), "ok".into(), Some(12))));
+        assert_eq!(super::timed_outcome("test tests::b ... FAILED <1.500s>"), Some(("tests::b".into(), "FAILED".into(), Some(1500))));
+        assert_eq!(super::timed_outcome("test tests::c ... ok"), Some(("tests::c".into(), "ok".into(), None)));
+        assert_eq!(super::timing_class(12), ("unit", 500));
+        assert_eq!(super::timing_class(1500), ("integration", 10_000));
+        assert_eq!(super::timing_class(70_000), ("slow", 70_000));
+    }
+}
