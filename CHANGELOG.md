@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.3.12 (2026-10-23)
+
+core-1o 0.2 reads string escapes, comments, a record at the top level, and a schema that says which keys
+repeat, which are written once, what each enum value means and which keys a kind needs. The kit had worked
+around each of those: it refused a string holding a double quote (CUST0030) and fell back to a TOML twin, wrapped
+every document in an outer `{ }`, and checked in Rust that a key taking one value was written once. This
+release moves onto 0.2 and drops the workarounds. Nothing is removed from the API (the rustdoc JSON of 0.3.11 and
+0.3.12 differ by one addition, `oneo::quote`, and no removal). Links are pinned to 308291c; the lines they replace
+to 716e1b0 (0.3.11).
+
+- **A double quote is an escape, not a refusal.** `render` ([oneo.rs L115](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/oneo.rs#L115)) writes every
+  string through `quote` ([L128](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/oneo.rs#L128)), core-1o's escapes `\\ \" \n \t \r`, the set
+  task_history's writer uses. It refused the string ([oneo.rs L147](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/oneo.rs#L147)). CUST0030 now says only
+  a negative number, which core-1o still does not read ([refusal.rs L69](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/reading/refusal.rs#L69)). Test:
+  `a_double_quote_is_written_as_an_escape_and_reads_back` (tests/oneo.rs).
+- **No outer `{ }`.** A document is written as its record, `reading { ... }` ([oneo.rs L115](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/oneo.rs#L115));
+  it was `{ reading { ... } }` ([oneo.rs L112](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/oneo.rs#L112)). The wrapped form still reads the same.
+  Same test.
+- **The schema says the single keys; the Rust check is gone.** Every block of the five schemas is
+  `x-1o-single-keys`, and every key the Rust form takes as a list is `type: array` (e.g.
+  [paths v1.schema.json L40](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/schema/paths/v1.schema.json#L40)), so core-1o refuses a second value of any
+  other key, in the editor and on read. `Occurrences::one` ([oneo.rs L269](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/oneo.rs#L269)) takes the value;
+  it counted them ([oneo.rs L252](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/oneo.rs#L252)). Test: `the_schema_refuses_what_the_spec_refuses`.
+- **The schemas say the vocabularies and each operation's keys.** `enumDescriptions` for the reading kinds
+  ([reading v1.schema.json L54](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/schema/reading/v1.schema.json#L54)), the declared roles, the job modes, the
+  linkage kinds, the operations and the compatibilities, each the vocabulary's own `doc()`; the change spec's
+  `x-1o-required-when` ([change v1.schema.json L3016](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/schema/change/v1.schema.json#L3016)) from
+  `Operation::needs`, where one key says it (`functions`, `trait` and `dependency` each have another way to be
+  given, so they stay the Rust check's). The change schema lacked two operations, `remove_dependency` and
+  `rename_paths` ([L50](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/schema/change/v1.schema.json#L50)), and the key `same_expansion`
+  ([L3003](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/schema/change/v1.schema.json#L3003)): a patterns reading's spec could not have been read back in 1o.
+  Test: `the_schemas_carry_the_vocabularies_descriptions_and_each_operation_s_keys`, which checks every list
+  against the Rust.
+- **Written in 1o only; TOML still read for one more version.** The job's step specs
+  ([jobs.rs L472](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/jobs.rs#L472), was [L472](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/jobs.rs#L472)), the preflight's reading specs
+  ([preflight.rs L831](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/preflight.rs#L831), [L1123](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/preflight.rs#L1123); were
+  [L831](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/preflight.rs#L831), [L1123](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/preflight.rs#L1123)), the plan's reading spec and its
+  approved change spec ([plan.rs L141](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/plan.rs#L141), [L697](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/plan.rs#L697); were
+  [L141](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/plan.rs#L141), [L697](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/plan.rs#L697)), a patterns reading's change specs
+  ([patterns.rs L71](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/reading/patterns.rs#L71), was [L71](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/reading/patterns.rs#L71)), the exercise's
+  specs ([exercise.rs L1229](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/exercise.rs#L1229), was [L1229](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/exercise.rs#L1229)) and linkage
+  records ([linkage.rs L97](https://github.com/1o-llc/custodian_kit/blob/308291cc7b9f1a032f90ef515e7a1fbda1391d32/src/linkage.rs#L97), was [L97](https://github.com/1o-llc/custodian_kit/blob/716e1b0915b0dc03731aca7d240dc9430c171b97/src/linkage.rs#L97)). A TOML spec, job file,
+  paths table or linkage record already on disk reads as before, for this one more version. The
+  code-passenger that reads these specs must be built against 0.3.12: one built against 0.3.11 reads a 1o change
+  spec only in the wrapped form. Tests: the patterns tests in tests/reading.rs and
+  `the_picks_and_their_specs_come_from_the_index` (tests/exercise.rs) read the 1o files written.
+- **Every existing document reads the same.** Over a copy of the kit's `.custodian` (912 reading specs, 12 job
+  files, 1 paths table, 11,061 task-history records), core-1o 0.1.1 and 0.2 give the same nodes, spans included,
+  each document valid under its 0.3.11 schema with 0.1.1 and under its 0.3.12 schema with 0.2; and 0.3.12 reads
+  each, and each of the 3,697 TOML change specs, into its form, written in 1o and read back the same. Test:
+  `every_document_of_a_corpus_reads_and_its_1o_reads_back`, with `CUSTODIAN_GOLDEN_CORPUS` set.
+- core-1o 0.2; task_history 0.1.2 (its loader reads a record with core-1o).
+
+Proof: `cargo test --all-features` (176 unit tests and every integration test, the bounded and exercise tests
+with a code-passenger built against this tree).
+
 ## 0.3.11 (2026-10-23)
 
 An agent swapped three of the kit's crates to simple_impl toolkit calls through custodian, and custodian's own
