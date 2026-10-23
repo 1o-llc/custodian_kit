@@ -107,6 +107,12 @@ impl Answer {
     }
 }
 
+/// Whether a reading needs the syntax trees parsed: a kind that walks them, but a patterns reading whose code's shapes
+/// are kept already ([`patterns::mined_kept`]) reads its functions from the index and its sources.
+fn needs_trees(root: &Path, spec: &ReadingSpec) -> bool {
+    spec.kind.walks_trees() && !(spec.kind == ReadingKind::Patterns && patterns::mined_kept(root, spec))
+}
+
 /// Answers `spec` over the workspace at `root`; writes nothing.
 pub fn read(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, how: crate::paths::Resolving) -> Result<ReadingReport> {
     if spec.kind == ReadingKind::Sweep {
@@ -117,7 +123,7 @@ pub fn read(root: &Path, spec_path: &Path, spec: &ReadingSpec, stamp: &str, how:
     }
     // a kind that walks the syntax trees is answered over a parse: read straight from one (no index read back
     // from the cache only to be parsed again, none kept)
-    let facts = if spec.kind.walks_trees() { Facts::build_parsed(root, &spec.scope, how)? } else { Facts::build(root, &spec.scope, how)? };
+    let facts = if needs_trees(root, spec) { Facts::build_parsed(root, &spec.scope, how)? } else { Facts::build(root, &spec.scope, how)? };
     read_facts(&facts, spec_path, spec, stamp)
 }
 
@@ -137,7 +143,7 @@ pub fn read_facts_over(facts: &Facts, graph: Option<&crate::CodeGraph>, spec_pat
     }
     // a kind that walks the syntax trees, over an index read back from the cache (which holds none): parsed for it
     let parsed;
-    let reparsed = spec.kind.walks_trees() && !facts.trees;
+    let reparsed = !facts.trees && needs_trees(&facts.root, spec);
     let facts = if reparsed {
         parsed = Facts::build_parsed(&facts.root, &spec.scope, facts.how)?;
         &parsed

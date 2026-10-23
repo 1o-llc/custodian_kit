@@ -399,7 +399,9 @@ impl<'s> Source<'s> {
         let ts = match ts {
             [TokenTree::Group(g)] if g.delimiter() == Delimiter::Parenthesis => {
                 inner = g.stream().into_iter().collect();
-                if inner.is_empty() {
+                // a tuple's parentheses are the value (`(gate_note, gate_ok)`): only grouping ones are let go
+                let tuple = inner.iter().any(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == ','));
+                if inner.is_empty() || tuple {
                     ts
                 } else {
                     &inner[..]
@@ -862,6 +864,24 @@ pub fn call_text(m: &StepMatch, src: &Source) -> Result<String, String> {
     Ok(if m.tail { line.trim_end_matches(';').to_string() } else { line })
 }
 
+/// The longest swap spec name: its file (`v1.<name>.1o.change`, a member record `<name>.expansion.json`) stays under
+/// 200 characters, well inside the file system's 255.
+pub const SPEC_NAME_MAX: usize = 180;
+
+/// A swap spec's name: `to-toolkit-<route>` with the route's stable digest at its end
+/// ([`crate::reading::spec::route_name`]); a route too long for [`SPEC_NAME_MAX`] keeps its first words and the same
+/// digest, so the name stays unique and stable, and the full route is the spec's target and objective.
+pub fn spec_name_for(item: &str) -> String {
+    let full = format!("to-toolkit-{}", crate::reading::spec::route_name(item));
+    if full.len() <= SPEC_NAME_MAX {
+        return full;
+    }
+    let (head, digest) = full.rsplit_once('-').unwrap_or((full.as_str(), ""));
+    // route_name writes ASCII only: any byte is a boundary
+    let keep = SPEC_NAME_MAX - digest.len() - 1;
+    format!("{}-{digest}", head[..keep].trim_end_matches(['_', '-']))
+}
+
 /// The replace_body spec for a function: its exact matches swapped for the calls, the rest of the body as it is
 /// (`let` and `value` steps, `raw` for any other statement and for comments between statements); `None` when
 /// nothing matches exactly. `item` is the function's path (the spec's target).
@@ -870,7 +890,7 @@ pub fn spec_for(m: &FnMatch, src: &Source, item: &str, f: FnParts, near_too: boo
     let name = &sig.ident.to_string();
     let usable = |l: Level| l == Level::Exact || near_too;
     let base = ChangeSpec {
-        name: format!("to-toolkit-{}", crate::reading::spec::route_name(item)),
+        name: spec_name_for(item),
         objective: format!("{item}: its body as simple_impl toolkit calls"),
         operation: Some(Operation::ReplaceBody),
         target: item.to_string(),
@@ -878,7 +898,10 @@ pub fn spec_for(m: &FnMatch, src: &Source, item: &str, f: FnParts, near_too: boo
         same_expansion: !near_too,
         ..ChangeSpec::default()
     };
-    if let Some(w) = m.whole.as_ref().filter(|w| usable(w.level) && w.shape().position == Position::Function) {
+    // forward_trait_method writes a trait's method, with no visibility: a `pub fn` it would make private is left as
+    // it is written
+    let keeps_vis = |w: &&Matched| !(w.shape().piece == "forward_trait_method" && !matches!(vis, syn::Visibility::Inherited));
+    if let Some(w) = m.whole.as_ref().filter(|w| usable(w.level) && w.shape().position == Position::Function).filter(keeps_vis) {
         let g = piece_of(w, src);
         let text_of = |n: &dyn Spanned| src.range(n.span()).map(|(a, b)| src.text[a..b].to_string()).unwrap_or_default();
         let mut fattrs: Vec<String> = Vec::new();
@@ -1069,3 +1092,21 @@ pub fn function_at(text: &str, line: u32, column: u32, item: &str) -> Option<FnA
     });
     out
 }
+
+#[cfg(test)]
+mod spec_name_tests {
+    use super::*;
+
+    #[test]
+    fn a_long_route_names_its_spec_under_200_characters_with_its_digest() {
+        let short = "access_vocabulary::Capability::wire_name";
+        assert_eq!(spec_name_for(short), format!("to-toolkit-{}", crate::reading::spec::route_name(short)), "a short route's name is as before");
+        let long = format!("nodeplan_private_verification_protocol::{}::verify", "PrivateVerificationProtocolRecordWithAVeryLongName".repeat(6));
+        let name = spec_name_for(&long);
+        assert!(name.len() <= SPEC_NAME_MAX && crate::oneo::Doc::Change.file_name(&name).len() < 200, "{name}");
+        assert!(name.ends_with(&crate::reading::spec::route_name(&long)[crate::reading::spec::route_name(&long).len() - 8..]), "{name}");
+        assert_eq!(name, spec_name_for(&long), "stable");
+        assert_ne!(name, spec_name_for(&format!("{long}2")), "another route, another name");
+    }
+}
+

@@ -205,12 +205,49 @@ struct Repeated {
     example: (String, PathBuf, usize, String),
 }
 
+/// Where klepto's shapes of one code are kept: beside its parsed index (`index/<key>/`, the key the scan's and the
+/// code's, [`super::facts::index_cache_key`]), one file per mining's options. The index folder's pruning lets it go
+/// with its model.
+fn mined_file(root: &std::path::Path, spec: &ReadingSpec) -> Option<PathBuf> {
+    let store = crate::store::Store::find(root)?;
+    let key = super::facts::index_cache_key(root, &spec.scope.scan_options()).ok()?;
+    let model = store.path(&crate::store::named::INDEX_MODEL, &[("digest", &key)]).ok()?;
+    Some(model.with_file_name(format!("patterns-{}-2.cbor.zst", spec.patterns.min_tokens)))
+}
+
+/// Whether this code's shapes are kept already: a patterns reading over it then needs no parse of the syntax trees
+/// (the index from its cache and the shapes from their file), so the crates of one job read the code once.
+pub(crate) fn mined_kept(root: &std::path::Path, spec: &ReadingSpec) -> bool {
+    mined_file(root, spec).is_some_and(|p| p.is_file())
+}
+
+/// klepto's shapes of the whole workspace (a frame repeated across crates is counted across them): read back when
+/// this code's are kept, else mined from the parse and kept.
+fn mined(f: &Facts, spec: &ReadingSpec) -> klepto::PatternReport {
+    let file = mined_file(&f.root, spec);
+    if let Some(r) = file.as_ref().and_then(|p| std::fs::File::open(p).ok()).and_then(|h| zstd::stream::Decoder::new(h).ok()).and_then(|z| ciborium::from_reader::<klepto::PatternReport, _>(std::io::BufReader::new(z)).ok()) {
+        return r;
+    }
+    let r = klepto::patterns::mine(&f.k, &klepto::MiningOptions { min_tokens: spec.patterns.min_tokens, min_members: 2 });
+    if let Some(p) = file.filter(|_| f.trees) {
+        let tmp = p.with_extension("tmp");
+        let kept = p.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok())
+            && std::fs::File::create(&tmp).ok().and_then(|h| zstd::stream::Encoder::new(std::io::BufWriter::new(h), super::facts::INDEX_CACHE_ZSTD_LEVEL).ok()).is_some_and(|mut z| {
+                ciborium::into_writer(&r, &mut z).is_ok() && z.finish().is_ok_and(|mut w| std::io::Write::flush(&mut w).is_ok())
+            });
+        if !kept || std::fs::rename(&tmp, &p).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+    }
+    r
+}
+
 pub(crate) fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     let o = &spec.patterns;
     let only: Option<BTreeSet<String>> = (spec.target.trim() != "*").then(|| spec.target.split(',').map(|s| s.trim().replace('-', "_")).collect());
     let in_scope = |p: &str| only.as_ref().is_none_or(|o| o.contains(p));
     // (1) klepto's shapes, at the callees level
-    let mined = klepto::patterns::mine(&f.k, &klepto::MiningOptions { min_tokens: o.min_tokens, min_members: 2 });
+    let mined = mined(f, spec);
     let klepto_shape: HashMap<&str, (String, usize)> = mined
         .shapes
         .iter()

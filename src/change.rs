@@ -1146,6 +1146,11 @@ pub fn render_fn(f: &FnSpec, indent: &str) -> std::result::Result<String, String
                 let mut sig_only = f.clone();
                 sig_only.ret = None;
                 sig_only.doc = None;
+                // forward_trait_method writes no visibility (a trait's method): a function with one is refused, never
+                // written private
+                if d.name == "forward_trait_method" && f.vis.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+                    return Err(format!("forward_trait_method writes a trait's method, with no visibility: `{} fn {}` is kept as written", f.vis.as_deref().unwrap_or_default(), f.name));
+                }
                 let sig = if d.name == "forward_trait_method" { signature(&FnSpec { vis: None, ..sig_only }) } else { signature(&sig_only) };
                 // the docs go inside the call, as the attributes they stand for, onto the function the macro writes: a
                 // `///` above a macro call documents nothing (rustc's unused doc comment)

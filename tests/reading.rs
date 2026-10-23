@@ -471,3 +471,30 @@ fn a_crates_governing_root_is_the_workspace_above_it_by_cargos_rule() {
     assert_eq!(root, ws);
     assert_eq!(custodian_kit::reading::requirements::manifest::governing_root_of(&ws), Some(ws.clone()), "a root governs itself");
 }
+
+/// A patterns reading keeps the code's shapes beside its parsed index: the next patterns reading over the same code
+/// (another crate of the same job) reads the index from its cache and parses nothing, with the same answer.
+#[test]
+fn a_patterns_reading_over_the_same_code_reads_the_index_once() {
+    let dir = std::env::temp_dir().join(format!("custodian-kit-patterns-once-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let status = std::process::Command::new("cp").arg("-R").arg(fixture()).arg(dir.join("ws")).status().unwrap();
+    assert!(status.success());
+    let root = dir.join("ws");
+    let _ = std::fs::remove_dir_all(root.join("target"));
+    custodian_kit::store::Store::init(&root, custodian_kit::store::Mode::Agent).unwrap();
+    let path = root.join("t.toml");
+    let read_one = |target: &str, stamp: &str| {
+        let s = spec("patterns", target, "");
+        std::fs::write(&path, format!("name = \"t\"\nquestion = \"q\"\nkind = \"patterns\"\ntarget = \"{target}\"\n")).unwrap();
+        custodian_kit::reading::read(&root, &path, &s, stamp, Resolving::Free).unwrap()
+    };
+    let first = read_one("core_lib", "s1");
+    assert!(first.index.as_deref().is_some_and(|i| i.starts_with("parsed")), "{:?}", first.index);
+    let again = read_one("core_lib", "s2");
+    assert!(again.index.as_deref().is_some_and(|i| i.starts_with("from cache")), "{:?}", again.index);
+    let labels = |r: &custodian_kit::reading::ReadingReport| r.query.results.iter().map(|x| (x.kind.clone(), x.label.clone(), x.attributes.get("status").cloned())).collect::<Vec<_>>();
+    assert_eq!(labels(&again), labels(&first), "the same answer from the kept shapes");
+    let other = read_one("app", "s3");
+    assert!(other.index.as_deref().is_some_and(|i| i.starts_with("from cache")), "another crate, the same code: {:?}", other.index);
+}

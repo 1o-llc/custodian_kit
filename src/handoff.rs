@@ -274,7 +274,15 @@ pub fn of_job(root: &Path, store: &Store, folder: &Path, receipts: &[Receipt], s
     let id = jf.id.clone().or_else(|| closing.as_ref().map(|c| c.id.clone())).unwrap_or_else(|| folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
     let state = folder.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let after = |seq: i64| since.is_none_or(|s| seq > s);
-    let runs: Vec<&Receipt> = receipts.iter().filter(|r| r.job.as_deref() == Some(id.as_str())).collect();
+    // the job's receipts: those carrying its id, and those its close counted (a line that named it by its name,
+    // `jobs::runs_of`); before a close, those named by its name after it opened
+    let opened = receipts.iter().find(|r| r.job.as_deref() == Some(id.as_str())).map_or(i64::MAX, |r| r.seq);
+    let counted: BTreeSet<i64> = closing.as_ref().map(|c| c.runs.iter().copied().collect()).unwrap_or_default();
+    let name = jf.name.clone().or_else(|| closing.as_ref().map(|c| c.name.clone()));
+    let runs: Vec<&Receipt> = receipts
+        .iter()
+        .filter(|r| r.job.as_deref() == Some(id.as_str()) || counted.contains(&r.seq) || (closing.is_none() && r.seq > opened && r.job.is_some() && r.job == name))
+        .collect();
     let mut h = Handoff {
         id: id.clone(),
         name: jf.name.clone().or_else(|| closing.as_ref().map(|c| c.name.clone())).unwrap_or_default(),

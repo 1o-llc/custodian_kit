@@ -427,3 +427,25 @@ fn a_body_is_replaced_only_on_its_own_function() {
     let f = custodian_kit::change::FnSpec { name: "token".into(), body: vec![custodian_kit::change::Piece { piece: "value".into(), value: Some("None".into()), ..Default::default() }], ..Default::default() };
     assert_eq!(custodian_kit::change::render_body(&f, "    ").unwrap(), "{\n        None\n    }");
 }
+
+/// A batch of PARALLEL_FROM members or more is preflighted over threads, each reading the code once: every member's
+/// verdict is still its own preflight's, in the list's order.
+#[test]
+fn a_large_batch_preflight_runs_over_threads_and_keeps_each_verdict_in_order() {
+    let (store, ctx) = project("batch-threads");
+    let w = ws(&store.root);
+    let mut specs: Vec<PathBuf> = vec![spec(&store.root, "nowhere", "name = \"nowhere\"\nobjective = \"o\"\noperation = \"add_attribute\"\ntarget = \"core_lib::no_such_function\"\nattribute = \"#[must_use]\"\n")];
+    for i in 0..preflight::PARALLEL_FROM {
+        specs.push(spec(&store.root, &format!("field-{i}"), &ADD_DIGEST.replace("config-digest", &format!("field-{i}")).replace("name = \"digest\"", &format!("name = \"digest_{i}\""))));
+    }
+    specs.push(spec(&store.root, "no-default", &ADD_DIGEST.replace("default = \"String::new()\"\n", "").replace("config-digest", "no-default")));
+    let batch = preflight::run_preflight_batch(&ctx, "threads.list", &specs, None, &w).unwrap();
+    let names: Vec<&str> = batch.batch.members.iter().map(|m| m.name.as_str()).collect();
+    let want: Vec<String> = specs.iter().map(|p| custodian_kit::change::ChangeSpec::from_path(p).unwrap().name).collect();
+    assert_eq!(names, want.iter().map(String::as_str).collect::<Vec<_>>(), "the list's order");
+    for (i, (s, m)) in specs.iter().zip(&batch.batch.members).enumerate().filter(|(i, _)| *i == 0 || *i == 1 || *i == specs.len() - 1 || i % 17 == 0) {
+        let one = preflight::run_preflight(&ctx, s, None, Runner::InProcess(&w)).unwrap().preflight;
+        assert_eq!((m.authorized, m.reason.as_str()), (one.authorized, one.reason()), "member {i}: {}", m.name);
+    }
+    assert_eq!(batch.batch.authorized, preflight::PARALLEL_FROM);
+}

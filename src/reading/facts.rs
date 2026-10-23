@@ -214,9 +214,17 @@ impl Facts {
     pub fn build_parsed(root: &Path, scope: &Scope, how: Resolving) -> Result<Facts> {
         let root = root.canonicalize().map_err(|e| ReadingRefusal::NoWorkspace.refuse(format!("{}: {e}", root.display())))?;
         let started = std::time::Instant::now();
-        let k = klepto_scan(&root, &scope.scan_options()).map_err(|e| ReadingRefusal::Scan.refuse(e))?;
+        let opts = scope.scan_options();
+        let k = klepto_scan(&root, &opts).map_err(|e| ReadingRefusal::Scan.refuse(e))?;
+        // kept for the readings after it over the same code (the cache holds the model, never the trees)
+        let cached = crate::store::Store::find(&root).and_then(|s| index_cache_key(&root, &opts).ok().and_then(|key| s.path(&crate::store::named::INDEX_MODEL, &[("digest", &key)]).ok()));
+        let over = cached.as_ref().filter(|f| !f.is_file()).and_then(|file| keep_index(file, &k));
         let mut f = Self::from_klepto(root, k, how)?;
-        f.index = IndexSource::Parsed { millis: started.elapsed().as_millis() as u64 };
+        let millis = started.elapsed().as_millis() as u64;
+        f.index = match over {
+            Some(bytes) => IndexSource::ParsedNotKept { millis, bytes },
+            None => IndexSource::Parsed { millis },
+        };
         Ok(f)
     }
 

@@ -340,6 +340,42 @@ fn find(store: &Store, state: JobState, which: Option<&str>) -> Result<PathBuf> 
     found.ok_or_else(|| ReadingRefusal::NoJob.refuse(format!("{} in jobs/{}", which.unwrap_or("(the first)"), state.as_str())))
 }
 
+/// A job's receipts in order: those carrying its id, and those a line named it by its name (`--job NAME`, as custodian
+/// 0.3.11 and before kept it) after it opened, while it is the newest job of that name. A batch's member receipts and
+/// its test runs are the job's either way, so its close credits them as it credits a single transform's.
+pub fn runs_of(journal: &crate::store::Journal, id: &str, name: Option<&str>) -> Result<Vec<Receipt>> {
+    let mut runs = journal.runs_of_job(id)?;
+    if let Some(n) = name.filter(|n| *n != id && journal.job(n).ok().flatten().is_some_and(|row| row.id == id)) {
+        let opened = runs.first().map_or(i64::MAX, |r| r.seq);
+        runs.extend(journal.runs_of_job(n)?.into_iter().filter(|r| r.seq > opened));
+        runs.sort_by_key(|r| r.seq);
+    }
+    Ok(runs)
+}
+
+/// A done job whose close was not accepted, moved back to running so `job close` closes it again over the same
+/// receipts (the handoff's line for a refused close): `None` when no done job of that name was refused.
+pub fn reopen_rejected(store: &Store, which: &str) -> Option<Result<PathBuf>> {
+    let done = find(store, JobState::Done, Some(which)).ok()?;
+    match crate::decisions::job_running(store) {
+        Ok(d) if !d.go => return Some(Err(ReadingRefusal::JobRunning.refuse(d.reason))),
+        Err(e) => return Some(Err(e)),
+        Ok(_) => {}
+    }
+    let closing: Closing = serde_json::from_str(&std::fs::read_to_string(done.join("closing.json")).ok()?).ok()?;
+    if closing.result == "accepted" {
+        return None;
+    }
+    let folder_name = done.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    Some((|| {
+        let running = store.job_dir(JobState::Running, &folder_name)?;
+        move_job(store, &done, &running)?;
+        let rel = running.strip_prefix(&store.root).unwrap_or(&running).to_string_lossy().replace('\\', "/");
+        store.journal()?.put_job(&JobRow { id: closing.id.clone(), name: closing.name.clone(), kind: closing.kind.clone(), state: "running".into(), folder: rel, opened_utc: closing.opened_utc.clone(), closed_utc: None })?;
+        Ok(running)
+    })())
+}
+
 /// Moves a job folder, and rewrites every receipt whose outputs sit in it
 /// (the journal row and `receipts/<seq>.json`) and the folder's closing
 /// receipt to the new place: one rule, so a reading kept in a job resolves
@@ -567,6 +603,11 @@ pub fn start_with(ctx: &Ctx, which: Option<&str>, again: bool, ws: Option<&crate
     let queued = find(store, JobState::Queued, which)?;
     let folder_name = queued.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut jf = job_file(&queued);
+    // a verification that can never hold is refused before the job opens
+    for v in &jf.verify {
+        check_verify(v)?;
+    }
+    check_tests_match(ctx, &jf.verify, ws)?;
     let opened = now_utc();
     let name = jf.name.clone().unwrap_or_else(|| folder_name.clone());
     let id = jf.id.clone().unwrap_or_else(|| format!("job-{}", crate::digest::short(&crate::digest::of(format!("{name}\n{opened}")), 12)));
@@ -890,7 +931,10 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         None => Runner::Line,
     };
     let store = ctx.store()?;
-    let running = find(store, JobState::Running, Some(which))?;
+    let running = match find(store, JobState::Running, Some(which)) {
+        Ok(r) => r,
+        Err(e) => reopen_rejected(store, which).ok_or(e)??,
+    };
     let jf = job_file(&running);
     let id = jf.id.clone().ok_or_else(|| ReadingRefusal::JobState.refuse(format!("{} has no id: was it started?", running.display())))?;
     let journal = store.journal()?;
@@ -909,7 +953,7 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     if let Some(base) = &jf.base_commit {
         exact_lines(ctx, &running, base, &mut lines_touched);
     }
-    let runs = journal.runs_of_job(&id)?;
+    let runs = runs_of(&journal, &id, jf.name.as_deref())?;
     // every receipt and every job folder, for the readings of a spec (`receipts::readings_of`)
     let all_runs = journal.runs()?;
     let folders = crate::store::job_folders(store.jobs_dir(JobState::Done)?.parent().unwrap_or(&running));
@@ -1267,7 +1311,7 @@ pub fn verifications(ctx: &Ctx, which: &str) -> Result<Vec<Verification>> {
     let jf = job_file(&running);
     let id = jf.id.clone().ok_or_else(|| ReadingRefusal::JobState.refuse(format!("{} has no id: was it started?", running.display())))?;
     let journal = store.journal()?;
-    let runs = journal.runs_of_job(&id)?;
+    let runs = runs_of(&journal, &id, jf.name.as_deref())?;
     let all_runs = journal.runs()?;
     let folders = crate::store::job_folders(store.jobs_dir(JobState::Done)?.parent().unwrap_or(&running));
     let test_seqs: Vec<i64> = runs.iter().filter(|r| r.command == "test").map(|r| r.seq).collect();
@@ -1288,6 +1332,31 @@ pub fn test_named(test: &str, what: &str) -> bool {
         Some(module) => test.starts_with(&format!("{module}::")) || test.contains(&format!("::{module}::")),
         None => test == what || test.ends_with(&format!("::{what}")),
     }
+}
+
+/// Every `test:` verification names at least one test of the workspace (a test's path, `<module>::*`, or a package),
+/// as the close matches them ([`test_named`]); one that names none is refused when it is declared ("no test matches"),
+/// never left to be `not run` at the close.
+fn check_tests_match(ctx: &Ctx, lines: &[String], ws: Option<&crate::api::Workspace>) -> Result<()> {
+    let wanted: Vec<&str> = lines.iter().filter_map(|v| v.strip_prefix("test:")).map(str::trim).collect();
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    let owned;
+    let f = match ws.filter(|w| w.scope.tests) {
+        Some(w) => w.facts(),
+        None => {
+            owned = crate::reading::facts::Facts::build(&ctx.root, &crate::reading::spec::Scope { tests: true, ..Default::default() }, crate::paths::Resolving::Job)?;
+            &owned
+        }
+    };
+    let cases = crate::reading::kinds::tests_of_crates(f, &f.k.packages.keys().cloned().collect());
+    for w in wanted {
+        if !cases.iter().any(|c| test_named(&c.filter, w) || c.package == w) {
+            return Err(ReadingRefusal::SpecInvalid.refuse(format!("test:{w}: no test matches it among the workspace's {} tests (test:<name>, test:<module>::*, test:<package>)", cases.len())));
+        }
+    }
+    Ok(())
 }
 
 /// A closing finding naming the cargo test line that proves a fix: listed once, and only when a test fails.
@@ -1439,6 +1508,7 @@ fn uncovered_lines(ctx: &Ctx, folder: &Path, transforms: &[crate::transform::Tra
 /// like"): added to its job file, with a `verify` receipt, so the closing receipt says when the outcome became known.
 pub fn declare_verify(ctx: &Ctx, which: Option<&str>, line: &str) -> Result<(String, Receipt)> {
     check_verify(line)?;
+    check_tests_match(ctx, &[line.to_string()], None)?;
     let store = ctx.store()?;
     let running = find(store, JobState::Running, which)?;
     let mut jf = job_file(&running);

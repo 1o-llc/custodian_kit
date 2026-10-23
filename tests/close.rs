@@ -134,7 +134,7 @@ fn a_bounded_job_names_every_file_it_touched_and_a_file_no_operation_writes_need
     let w = Workspace::open_with(&store.root, &Default::default(), Resolving::Job).unwrap();
     // a test's expected output, written by hand
     let stderr = store.root.join("crates/core_lib/tests/ui/case.stderr");
-    job(&store, "x", "{ job { name \"x\" kind \"specs\" mode \"bounded\" target \"crate:core_lib\" verify \"test:x\" } }\n");
+    job(&store, "x", "{ job { name \"x\" kind \"specs\" mode \"bounded\" target \"crate:core_lib\" verify \"test:vault_key_is_42\" } }\n");
     let started = jobs::start_with(&ctx, Some("x"), false, Some(&w)).unwrap();
     assert_eq!(jobs::job_file(&started.folder).mode, Some(JobMode::Bounded));
     std::fs::create_dir_all(stderr.parent().unwrap()).unwrap();
@@ -144,7 +144,7 @@ fn a_bounded_job_names_every_file_it_touched_and_a_file_no_operation_writes_need
     assert_eq!(c.refusal.as_ref().unwrap().code, "CUST0041", "{:?}", c.refusal);
     assert!(c.touched_files.iter().any(|(p, how)| p == "crates/core_lib/tests/ui/case.stderr" && how.starts_with("hand")), "{:?}", c.touched_files);
     // allowed: named, not refused
-    job(&store, "y", "{ job { name \"y\" kind \"specs\" mode \"bounded\" target \"crate:core_lib\" verify \"test:x\" } }\n");
+    job(&store, "y", "{ job { name \"y\" kind \"specs\" mode \"bounded\" target \"crate:core_lib\" verify \"test:vault_key_is_42\" } }\n");
     let started = jobs::start_with(&ctx, Some("y"), false, Some(&w)).unwrap();
     jobs::declare_allow(&ctx, Some("y"), "crates/*/tests/ui/*.stderr").unwrap();
     std::fs::write(&stderr, "error: expected again\n").unwrap();
@@ -154,7 +154,7 @@ fn a_bounded_job_names_every_file_it_touched_and_a_file_no_operation_writes_need
     assert!(c.touched_files.iter().any(|(p, how)| p == "crates/core_lib/tests/ui/case.stderr" && how == "allow_file crates/*/tests/ui/*.stderr"), "{:?}", c.touched_files);
     // a TOML file that is no crate's manifest (a features document) is a file no operation writes: CUST0041, the
     // same code as the .stderr, never the hand-written code lines of CUST0031
-    job(&store, "z", "{ job { name \"z\" kind \"specs\" mode \"bounded\" target \"crate:core_lib\" verify \"test:x\" } }\n");
+    job(&store, "z", "{ job { name \"z\" kind \"specs\" mode \"bounded\" target \"crate:core_lib\" verify \"test:vault_key_is_42\" } }\n");
     let started = jobs::start_with(&ctx, Some("z"), false, Some(&w)).unwrap();
     std::fs::write(store.root.join("features.toml"), "default = []\n").unwrap();
     let (c, _, _) = jobs::close_with(&ctx, &started.id, Some(&w)).unwrap();
@@ -261,4 +261,104 @@ fn two_checkouts_numbering_receipts_the_same_merge_by_union_and_never_write_over
     assert_eq!(next.seq, top + 6);
     let still: custodian_kit::receipts::Receipt = serde_json::from_str(&std::fs::read_to_string(a_dir.join(format!("{}.json", top + 5))).unwrap()).unwrap();
     assert_eq!(still.name, "brought-in");
+}
+
+/// A batch's member records cover its lines as single transforms do, and the receipts a line kept under the job's
+/// NAME (`--job tb`, as custodian 0.3.11 kept them) are the job's: a bounded job with one batch over three files closes
+/// accepted with no line by hand, its verification satisfied by the test run kept under the name, and its handoff
+/// names the batch's specs and the test line.
+#[test]
+fn a_batch_over_three_files_closes_accepted_with_no_line_by_hand() {
+    use custodian_kit::store::{Receipt, RECEIPT_SCHEMA};
+    let dir = fake_writer();
+    // SAFETY: the variable is set once, before any thread of this test reads it
+    unsafe { std::env::set_var("PATH", format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default())) };
+    let (store, ctx) = project("batch");
+    let w = Workspace::open_with(&store.root, &Default::default(), Resolving::Job).unwrap();
+    job(&store, "tb", "{ job { name \"tb\" kind \"specs\" mode \"bounded\" target \"crate:core_lib\" verify \"test:vault_key_is_42\" } }\n");
+    let started = jobs::start_with(&ctx, Some("tb"), false, Some(&w)).unwrap();
+    assert_ne!(started.id, "tb");
+    let hex = |b: &[u8]| stable_digest::StableDigest::sha256(b).as_str().to_string();
+    // the files written before their records are kept: the close refuses them as lines by hand, and the job is done
+    let files = ["crates/core_lib/src/lib.rs", "crates/core_lib/tests/gate.rs", "crates/core_lib/tests/metrics.rs"];
+    let befores: Vec<Vec<u8>> = files.iter().map(|f| std::fs::read(store.root.join(f)).unwrap()).collect();
+    for (i, file) in files.iter().enumerate() {
+        let mut after = befores[i].clone();
+        after.extend_from_slice(format!("\n// member {i}\n").as_bytes());
+        std::fs::write(store.root.join(file), &after).unwrap();
+    }
+    let (c, refused, _) = jobs::close_with(&ctx, "tb", Some(&w)).unwrap();
+    assert_eq!(c.refusal.as_ref().map(|r| r.code.as_str()), Some("CUST0031"), "{:?}", c.refusal);
+    // its records kept after: `job close` closes the refused job again over the same receipts
+    let batch = refused.join("data/transforms/batch-T");
+    std::fs::create_dir_all(&batch).unwrap();
+    let rel = |p: &Path| p.strip_prefix(&store.root).unwrap().to_string_lossy().into_owned();
+    let receipt = |command: &str, name: &str, outputs: Vec<String>| Receipt {
+        schema: RECEIPT_SCHEMA.into(),
+        seq: 0,
+        utc: "2026-10-23T18:19:49Z".into(),
+        command: command.into(),
+        name: name.into(),
+        spec: None,
+        spec_hash: None,
+        code_digest: None,
+        index_key: None,
+        plan_id: "custodian.job.tb".into(),
+        plan_digest: "d".into(),
+        operation_digest: "d".into(),
+        receipt_digest: format!("d-{name}"),
+        line: "code-passenger transform --batch list --write".into(),
+        exit_code: Some(0),
+        accepted: true,
+        disposition: "Continue".into(),
+        reason: "done".into(),
+        outputs,
+        job: Some("tb".into()),
+        reused_seq: None,
+        millis: 0,
+        runner: "line".into(),
+    };
+    custodian_kit::receipts::keep(&store, receipt("code-passenger.transform-batch", "batch of 3", vec![rel(&batch.join("list"))])).unwrap();
+    // three members, three files, each written once by the batch
+    for (i, file) in files.into_iter().enumerate() {
+        let (before, after) = (&befores[i], std::fs::read(store.root.join(file)).unwrap());
+        let name = format!("member-{i}");
+        let record = serde_json::json!({
+            "schema": "custodian.transform.v1", "spec_name": name, "spec": format!("{name}.toml"), "spec_digest": "d",
+            "operation": "replace_body", "target": format!("core_lib::f{i}"),
+            "files": [{ "path": file, "before": hex(before), "after": hex(&after), "lines": [[1, 1]] }],
+            "checks": [], "postconditions": [], "written": true
+        });
+        let out = batch.join(format!("{name}.json"));
+        std::fs::write(&out, record.to_string()).unwrap();
+        custodian_kit::receipts::keep(&store, receipt("transform", &format!("{name} (batch of 3)"), vec![rel(&out)])).unwrap();
+    }
+    // the test run, kept under the job's name
+    let line = TestLine { package: "core_lib".into(), target: Some(Some("gate".into())), filters: vec!["vault_key_is_42".into()] };
+    testrun::run(&ctx, &[line], Observe::Failed, Some(&InJob { id: "tb".into(), readings: refused.join("readings") })).unwrap();
+    let (c, done, _) = jobs::close_with(&ctx, "tb", Some(&w)).unwrap();
+    assert!(c.refusal.is_none(), "{:?}", c.refusal);
+    assert_eq!(c.result, "accepted", "{:?}", c.result_reason);
+    assert!(!c.touched_files.iter().any(|(_, how)| how.starts_with("hand")), "{:?}", c.touched_files);
+    assert_eq!(c.touched_files.iter().filter(|(_, how)| how.starts_with("transform #")).count(), 3, "{:?}", c.touched_files);
+    assert_eq!(c.verify, [("test:vault_key_is_42".to_string(), "satisfied".to_string())]);
+    let receipts = store.journal().unwrap().runs().unwrap();
+    let h = custodian_kit::handoff::of_job(&store.root, &store, &done, &receipts, None).unwrap();
+    let said = custodian_kit::handoff::render(&h, custodian_kit::handoff::Reader::James);
+    assert!(said.contains("3 change specs were written through transforms") && said.contains("member-0") && said.contains("member-2"), "{said}");
+    assert!(!said.contains("No test line ran") && said.contains("core_lib"), "{said}");
+}
+
+/// A `test:` verification that names no test of the workspace is refused when the job starts and when it is declared.
+#[test]
+fn a_test_verification_that_matches_no_test_is_refused_at_start() {
+    let (store, ctx) = project("nomatch");
+    job(&store, "n", "{ job { name \"n\" kind \"specs\" target \"crate:core_lib\" verify \"test:chain::tests::*\" } }\n");
+    let e = jobs::start_with(&ctx, Some("n"), false, None).unwrap_err().to_string();
+    assert!(e.contains("no test matches"), "{e}");
+    assert!(store.job_dir(JobState::Queued, "n").unwrap().exists(), "the job stays queued");
+    job(&store, "m", "{ job { name \"m\" kind \"specs\" target \"crate:core_lib\" verify \"test:vault_key_is_42\" } }\n");
+    jobs::start_with(&ctx, Some("m"), false, None).unwrap();
+    assert!(jobs::declare_verify(&ctx, Some("m"), "test:chain::tests::*").unwrap_err().to_string().contains("no test matches"));
+    jobs::declare_verify(&ctx, Some("m"), "test:core_lib").unwrap();
 }

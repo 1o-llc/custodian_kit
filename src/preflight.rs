@@ -1068,6 +1068,16 @@ pub fn batch_record(root: &Path, r: &Receipt) -> Option<BatchPreflight> {
     serde_json::from_str(&std::fs::read_to_string(root.join(json)).ok()?).ok()
 }
 
+/// One member of a batch preflight, read: its line in the batch, its own preflight (none when its spec does not
+/// parse), what it said.
+type MemberRead = (BatchMember, Option<Preflight>, Vec<String>);
+
+/// A batch preflight of this many members or more splits over threads.
+pub const PARALLEL_FROM: usize = 64;
+
+/// The most threads a batch preflight uses (each holds its own reading of the code).
+pub const PREFLIGHT_THREADS: usize = 6;
+
 /// The preflights of the specs at `spec_paths`, as a batch: the code read once for all of them (one scan, the
 /// workspace `ws` holds open; one code digest; one code graph), each member's impact answered from that reading, and
 /// each member's preconditions, scope, names and decisions checked by [`assess`], the rules its own preflight checks
@@ -1100,16 +1110,14 @@ pub fn run_preflight_batch(ctx: &Ctx, list: &str, spec_paths: &[PathBuf], job: O
         _ => None,
     };
     let stamp = crate::runs::stamp();
-    let mut members = Vec::new();
-    let mut preflights = Vec::new();
-    for spec_path in spec_paths {
+    // each member alone over the one reading, in parallel (one thread per core, the members split in order); the
+    // task's records and the decisions asked after, in the list's order, one writer
+    let one = |facts: &Facts, graph: &_, spec_path: &PathBuf| -> Result<MemberRead> {
+        let mut said = Vec::new();
         let spec_rel = ctx.rel(&spec_path.canonicalize().unwrap_or_else(|_| spec_path.to_path_buf()));
         let spec = match ChangeSpec::from_path(spec_path) {
             Ok(s) => s,
-            Err(e) => {
-                members.push(BatchMember { name: spec_rel.clone(), spec: spec_rel, spec_digest: String::new(), authorized: false, reason: format!("refused: {e}"), why: None, record: None });
-                continue;
-            }
+            Err(e) => return Ok((BatchMember { name: spec_rel.clone(), spec: spec_rel, spec_digest: String::new(), authorized: false, reason: format!("refused: {e}"), why: None, record: None }, None, said)),
         };
         // the member's impact, answered from the batch's reading (its own preflight's search, its own spec file)
         let target = impact_target(&spec);
@@ -1121,7 +1129,7 @@ pub fn run_preflight_batch(ctx: &Ctx, list: &str, spec_paths: &[PathBuf], job: O
         };
         let ipath = dir.join(crate::oneo::Doc::Reading.file_name(&ispec.name));
         write_whole(&ipath, ispec.to_1o()?.as_bytes())?;
-        let impact = match crate::reading::read_facts_over(facts, Some(&graph), &ipath, &ispec, &stamp) {
+        let impact = match crate::reading::read_facts_over(facts, Some(graph), &ipath, &ispec, &stamp) {
             Ok(rep) => Some((ImpactRecord::of(&rep), None, rep.query.results.iter().chain(&rep.unresolved).cloned().collect())),
             Err(e) => {
                 said.push(format!("{}: impact not read: {e}", spec.name));
@@ -1139,7 +1147,43 @@ pub fn run_preflight_batch(ctx: &Ctx, list: &str, spec_paths: &[PathBuf], job: O
             }
             None => None,
         };
-        if let Some(t) = &task {
+        Ok((BatchMember { name: spec.name.clone(), spec: spec_rel, spec_digest: p.spec_digest.clone(), authorized: p.authorized, reason: p.reason().into(), why: p.headline_why(), record }, Some(p), said))
+    };
+    // the parsed code is not shared between threads (its spans are proc_macro2's): a batch of more than
+    // PARALLEL_FROM members splits over up to PREFLIGHT_THREADS threads, each but the first reading the code once
+    // itself; the first part runs here on the batch's reading
+    let threads = if spec_paths.len() >= PARALLEL_FROM { std::thread::available_parallelism().map_or(1, usize::from).min(PREFLIGHT_THREADS) } else { 1 };
+    let chunk = spec_paths.len().div_ceil(threads).max(1);
+    let parts: Vec<&[PathBuf]> = spec_paths.chunks(chunk).collect();
+    let done: Vec<Result<MemberRead>> = std::thread::scope(|sc| {
+        let (one, scope) = (&one, &scope);
+        let handles: Vec<_> = parts
+            .iter()
+            .skip(1)
+            .map(|part| {
+                sc.spawn(move || -> Vec<Result<MemberRead>> {
+                    match Facts::build(&ctx.root, scope, how) {
+                        Ok(f) => {
+                            let g = crate::graph_from_klepto(&f.root, &f.k);
+                            part.iter().map(|p| one(&f, &g, p)).collect()
+                        }
+                        Err(e) => vec![Err(e)],
+                    }
+                })
+            })
+            .collect();
+        let mut out: Vec<_> = parts.first().map(|part| part.iter().map(|p| one(facts, &graph, p)).collect()).unwrap_or_default();
+        for h in handles {
+            out.extend(h.join().unwrap_or_else(|_| vec![Err(ReadingRefusal::NoWorkspace.refuse("a preflight thread stopped"))]));
+        }
+        out
+    });
+    let mut members = Vec::new();
+    let mut preflights = Vec::new();
+    for r in done {
+        let (member, p, member_said) = r?;
+        said.extend(member_said);
+        if let (Some(t), Some(p)) = (&task, &p) {
             if let Some(i) = &p.impact {
                 t.write(i.to_record(None))?;
             }
@@ -1147,8 +1191,8 @@ pub fn run_preflight_batch(ctx: &Ctx, list: &str, spec_paths: &[PathBuf], job: O
                 crate::questions::ask(store.expect("a job's task is in a store"), t, q)?;
             }
         }
-        members.push(BatchMember { name: spec.name.clone(), spec: spec_rel, spec_digest: p.spec_digest.clone(), authorized: p.authorized, reason: p.reason().into(), why: p.headline_why(), record });
-        preflights.push(p);
+        members.push(member);
+        preflights.extend(p);
     }
     let authorized = members.iter().filter(|m| m.authorized).count();
     let batch = BatchPreflight { schema: PREFLIGHT_BATCH_SCHEMA.into(), list: list.to_string(), code_digest: code_digest.clone(), members, authorized, utc: crate::runs::now_utc(), millis: started.elapsed().as_millis() as i64 };

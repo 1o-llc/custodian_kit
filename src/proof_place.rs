@@ -27,6 +27,22 @@ pub const PROOF_ENV: &[(&str, &str)] = &[("CARGO_PROFILE_DEV_DEBUG", "0"), ("CAR
 /// The variable naming the place.
 pub const PROOF_DIR_ENV: &str = "CODE_PASSENGER_PROOF_DIR";
 
+/// The variable that sets the kept build's cap, in GB ([`PROOF_CAP_GB`] when unset).
+pub const PROOF_CAP_ENV: &str = "CUSTODIAN_PROOF_CAP_GB";
+
+/// The kept build's cap when none is set: over it, the build is pruned before the next compile.
+pub const PROOF_CAP_GB: u64 = 40;
+
+/// The kept build's cap in bytes: `$CUSTODIAN_PROOF_CAP_GB`, else [`PROOF_CAP_GB`].
+pub fn cap_bytes() -> u64 {
+    std::env::var(PROOF_CAP_ENV).ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(PROOF_CAP_GB) * 1_000_000_000
+}
+
+/// The bytes the files under `dir` take.
+pub fn size_of(dir: &Path) -> u64 {
+    WalkDir::new(dir).into_iter().flatten().filter(|e| e.file_type().is_file()).filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum()
+}
+
 /// The place for one workspace, held.
 pub struct ProofPlace {
     workspace: PathBuf,
@@ -90,8 +106,38 @@ impl ProofPlace {
         let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(base.join("lock")).map_err(io)?;
         lock.lock().map_err(|e| io(format!("{}: {e}", base.join("lock").display())))?;
         let me = ProofPlace { workspace, src: base.join("src"), target: base.join("target"), _lock: lock };
+        me.hold_to_cap(cap_bytes());
         me.sync()?;
         Ok(me)
+    }
+
+    /// cargo's incremental folders of the kept build let go (`target/<profile>/incremental`, and per target triple):
+    /// a proof compiles each change once, so they only grow. The bytes freed.
+    pub fn prune_incremental(&self) -> u64 {
+        let mut freed = 0;
+        for e in WalkDir::new(&self.target).min_depth(1).max_depth(3).into_iter().flatten().filter(|e| e.file_type().is_dir() && e.file_name() == "incremental") {
+            let n = size_of(e.path());
+            if std::fs::remove_dir_all(e.path()).is_ok() {
+                freed += n;
+            }
+        }
+        freed
+    }
+
+    /// The kept build held under `cap` bytes before the next compile: over it, its incremental folders go first, then,
+    /// still over, the whole build (the next compile builds from nothing). What was done, `None` when under the cap.
+    pub fn hold_to_cap(&self, cap: u64) -> Option<String> {
+        let size = size_of(&self.target);
+        if size <= cap {
+            return None;
+        }
+        let freed = self.prune_incremental();
+        let left = size.saturating_sub(freed);
+        if left <= cap {
+            return Some(format!("the kept build was {} MB, over its cap of {} MB: incremental let go ({} MB)", size / 1_000_000, cap / 1_000_000, freed / 1_000_000));
+        }
+        let _ = std::fs::remove_dir_all(&self.target);
+        Some(format!("the kept build was {} MB, over its cap of {} MB with incremental let go: the build let go, the next compile builds it again", size / 1_000_000, cap / 1_000_000))
     }
 
     /// The workspace the place copies.
@@ -159,5 +205,29 @@ impl ProofPlace {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod cap_tests {
+    use super::*;
+
+    #[test]
+    fn the_kept_build_is_held_under_its_cap_incremental_first() {
+        let dir = std::env::temp_dir().join(format!("custodian-proof-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("lock")).unwrap();
+        let p = ProofPlace { workspace: dir.join("ws"), src: dir.join("src"), target: dir.join("target"), _lock: lock };
+        let inc = p.target().join("debug/incremental/a");
+        std::fs::create_dir_all(&inc).unwrap();
+        std::fs::write(inc.join("x"), vec![0u8; 3000]).unwrap();
+        std::fs::create_dir_all(p.target().join("debug/deps")).unwrap();
+        std::fs::write(p.target().join("debug/deps/y"), vec![0u8; 1000]).unwrap();
+        assert_eq!(p.hold_to_cap(10_000), None, "under the cap: nothing let go");
+        assert!(p.hold_to_cap(2000).unwrap().contains("incremental let go"));
+        assert!(!p.target().join("debug/incremental").exists() && p.target().join("debug/deps/y").exists());
+        assert!(p.hold_to_cap(500).unwrap().contains("the build let go"));
+        assert!(!p.target().exists());
+        assert_eq!(cap_bytes(), PROOF_CAP_GB * 1_000_000_000);
     }
 }

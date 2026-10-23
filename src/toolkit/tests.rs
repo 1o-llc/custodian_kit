@@ -230,3 +230,19 @@ fn each_new_probe_expands_and_matches_its_own_shape() {
     assert_eq!(seen.len(), NEW.len(), "{seen:?}");
     assert_eq!(probes, 11, "the seven pieces' eleven probes");
 }
+
+/// A tuple written as one argument keeps its parentheses (`if_else!(c => (a, b), …)`), so the call has the arguments
+/// the body had; a `pub fn` that forwards to a function keeps its visibility (forward_trait_method writes none).
+#[test]
+fn a_tuple_argument_keeps_its_parentheses_and_a_pub_forward_is_not_made_private() {
+    let text = "fn pick(c: bool, a: u8, b: u8) -> (u8, u8) {\n    if c {\n        (a, b)\n    } else {\n        (b, a)\n    }\n}\n\npub struct W;\nimpl W {\n    pub fn len(&self) -> usize {\n        count(self)\n    }\n}\n";
+    let all = matched(text);
+    let (_, _, pick) = all.iter().find(|(n, _, _)| n == "pick").unwrap();
+    let spec = pick.as_ref().expect("if_else matches pick");
+    let body: String = spec.function.as_ref().unwrap().body.iter().map(|b| crate::change::render_step(b).unwrap()).collect();
+    assert!(body.contains("if_else!") && body.contains("(a, b)") && body.contains("(b, a)"), "{body}");
+    let (_, _, len) = all.iter().find(|(n, _, _)| n == "len").unwrap();
+    assert!(len.as_ref().and_then(|s| s.function.as_ref()).and_then(|f| f.generator.as_ref()).is_none_or(|g| g.piece != "forward_trait_method"), "{len:?}");
+    let f = crate::change::FnSpec { name: "len".into(), vis: Some("pub".into()), generator: Some(crate::change::Piece { piece: "forward_trait_method".into(), target: Some("count".into()), ..Default::default() }), ..Default::default() };
+    assert!(crate::change::render_fn(&f, "").unwrap_err().contains("no visibility"));
+}
