@@ -62,6 +62,8 @@ vocabulary! {
         Inline = "inline" : "a function's body put in place of every call to it (target: a free function, or an associated one without self): each call becomes a block that binds the parameters to the call's arguments with `let`, then the body; the function is removed when it is not `pub` and every use of it was a call",
         Wrap = "wrap" : "a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched",
         MakeLib = "make_lib" : "a crate's library root, src/lib.rs, made beside its binary (target: crate:<name>, a crate with no library; `module.doc`: the file's inner doc): cargo builds it as the crate's library, and the binary reaches it by the crate's name",
+        RemoveDependency = "remove_dependency" : "a dependency a crate names, dropped from its manifest (target: crate:<name>; `dependency`: its name): refused while a feature names it or a source file of the crate still names its paths (each place said), then proved by the compile",
+        RenamePaths = "rename_paths" : "every path through one crate in a crate's sources made a path through another (target: crate:<name>; `dependency.name`: the crate the paths name now, `new_name`: the crate they name after): `old::` becomes `new::`, `use old` and `extern crate old` with it, in every source file of the crate; proved by the compile",
         DeclareFeature = "declare_feature" : "a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given",
     }
 }
@@ -97,13 +99,15 @@ impl Operation {
             Anchor => &["linkage"],
             ReplaceBody | Wrap => &["function"],
             Inline | MakeLib => &[],
+            RemoveDependency => &["dependency"],
+            RenamePaths => &["dependency", "new_name"],
         }
     }
 
     /// Whether the operation's target is an existing item (else a place: a module route, a crate).
     pub fn targets_an_item(self) -> bool {
         use Operation::*;
-        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | ChangeDependency | DeclareFeature | MakeLib | Extract)
+        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | ChangeDependency | DeclareFeature | MakeLib | Extract | RemoveDependency | RenamePaths)
     }
 
     /// The name the operation makes, which must be free where it lands.
@@ -2191,9 +2195,9 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
                 at: At::Manifest,
             })
         }
-        MakeStruct | MakeEnum | MakeFn | AddModule | Extract | AddDependency | DeclareFeature => {
+        MakeStruct | MakeEnum | MakeFn | AddModule | Extract | AddDependency | DeclareFeature | RemoveDependency | RenamePaths => {
             let (package, file) = route_file(k, root, &spec.target).ok_or_else(|| format!("`{}` is not a crate:<name> or crate:<name>/<file>.rs route of the workspace", spec.target))?;
-            if matches!(op, AddDependency | DeclareFeature) {
+            if matches!(op, AddDependency | DeclareFeature | RemoveDependency | RenamePaths) {
                 let m = k.packages.get(&package).map(|p| rel(root, &p.manifest_path)).unwrap_or_default();
                 return Ok(Landing { file: m, module: package.clone(), package, item: None, at: At::Manifest });
             }

@@ -829,6 +829,10 @@ pub struct Closing {
     /// reading the job made that is the same as the one before it opened, `unchanged`.
     #[serde(default)]
     pub verify: Vec<(String, String)>,
+    /// How far past its budget's hours the job closed (`over the budget by 12.0 min (...)`): information, never a
+    /// refusal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub over_budget: Option<String>,
     /// For each verification satisfied or failed, the receipt that decided it (`test:t: receipt #4427`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verified_by: Vec<String>,
@@ -1110,6 +1114,7 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         outcome_known: jf.outcome_known,
         verify,
         verified_by,
+        over_budget: crate::step_time::budget_of(store, &jf).ok().flatten().and_then(|b| crate::step_time::over_by(&b, crate::step_time::spent(&runs))),
         transforms: transforms.iter().map(|(s, _)| *s).collect(),
         uncovered,
         result: result.0.clone(),
@@ -1558,6 +1563,9 @@ pub fn render_closing(c: &Closing) -> String {
             let by = c.verified_by.iter().find_map(|b| b.strip_prefix(&format!("{v}: "))).map(|b| format!(" ({b})")).unwrap_or_default();
             s.push_str(&format!("- {v}: {st}{by}\n"));
         }
+    }
+    if let Some(o) = &c.over_budget {
+        s.push_str(&format!("- time: {o}\n"));
     }
     if let Some(b) = &c.base_commit {
         s.push_str(&format!("- base: {b}\n"));

@@ -8,9 +8,9 @@
 //!   members; a batch transform's compile covers the batch);
 //! - [`estimate`]: a job's planned cost before it runs, each figure `measured` (from this workspace's receipts) or
 //!   `unknown` (no receipt of that kind yet), never a guess;
-//! - [`Budget`] and [`over_budget`]: a job's `hours` and `battery` words; a step whose measured cost would take the
-//!   job past its hours is refused before it starts ([`ReadingRefusal::OverBudget`]), and the battery is the floor
-//!   [`crate::power`] keeps;
+//! - [`Budget`] and [`over_by`]: a job's `hours` and `battery` words; the hours are information (the brief and the
+//!   closing receipt say how far past them a job is), never a refusal; the battery is the floor [`crate::power`]
+//!   keeps, the one rule that stops a step;
 //! - [`per_member`]: the step kinds a job paid one member at a time when a batch form exists (the shape of each of
 //!   the costs the fleet_ops swaps paid: the index parsed per reading, a proof per function, a preflight per function,
 //!   a test line per function), named so the closing receipt says them.
@@ -492,8 +492,17 @@ pub fn spent(receipts: &[Receipt]) -> i64 {
     total + cur.map(|(a, b)| b - a).unwrap_or(0) + loose
 }
 
+/// How far a job that has spent `spent_millis` is past its budget's hours, when it is: information for the brief and
+/// the closing receipt (`over the budget by 12.0 min`). Nothing is refused by hours; the battery rule
+/// ([`crate::power`]) is the only one that stops a step.
+pub fn over_by(budget: &Budget, spent_millis: i64) -> Option<String> {
+    let limit = (budget.hours? * 3_600_000.0) as i64;
+    (spent_millis > limit).then(|| format!("over the budget by {} ({} spent of {})", duration(spent_millis - limit), duration(spent_millis), duration(limit)))
+}
+
 /// The refusal for a step measured at `step_millis` (`None`: not measured, nothing to refuse on) when the job has
-/// spent `spent_millis` of a budget of `budget.hours`.
+/// spent `spent_millis` of a budget of `budget.hours`. Kept for its callers; custodian refuses nothing by hours
+/// (James, 2026-10-23): it says [`over_by`] instead.
 pub fn over_budget(budget: &Budget, spent_millis: i64, step: &str, step_millis: Option<i64>) -> Result<()> {
     let (Some(h), Some(s)) = (budget.hours, step_millis) else { return Ok(()) };
     let limit = (h * 3_600_000.0) as i64;
@@ -589,6 +598,14 @@ mod tests {
         let mut odd = at(85, "never", "test", "t", "", "passed", 1_000);
         odd.utc = "not a time".into();
         assert_eq!(spent(&[odd]), 1_000);
+    }
+
+    #[test]
+    fn the_hours_are_information_never_a_refusal() {
+        let b = Budget::parse("hours=0.5").unwrap();
+        assert_eq!(over_by(&b, 20 * 60_000), None);
+        assert_eq!(over_by(&b, 42 * 60_000).as_deref(), Some("over the budget by 12.0 min (42.0 min spent of 30.0 min)"));
+        assert_eq!(over_by(&Budget::default(), 10 * 3_600_000), None, "no hours: nothing to say");
     }
 
     #[test]

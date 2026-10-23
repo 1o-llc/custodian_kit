@@ -463,3 +463,11 @@ fn a_route_finds_one_function_or_is_refused_with_the_routes_that_tell_them_apart
     assert!(f.signature.contains("i32"), "{}", f.signature);
     assert!(custodian_kit::route::find_fn(&k.functions, "levels::<Wrapper as std::From>::from").is_ok(), "one function on its path: its path alone");
 }
+
+#[test]
+fn a_crates_governing_root_is_the_workspace_above_it_by_cargos_rule() {
+    let ws = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/routes_ws");
+    let root = custodian_kit::reading::requirements::manifest::governing_root_of(&ws.join("crates/levels/src")).expect("the workspace above");
+    assert_eq!(root, ws);
+    assert_eq!(custodian_kit::reading::requirements::manifest::governing_root_of(&ws), Some(ws.clone()), "a root governs itself");
+}

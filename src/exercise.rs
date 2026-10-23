@@ -120,6 +120,7 @@ pub fn units_of(op: Operation) -> &'static [Unit] {
         MakeStruct | MakeEnum | MakeFn | AddModule => &[Unit::File, Unit::Module, Unit::Crate],
         Extract => &[Unit::File, Unit::Module],
         AddDependency | ChangeDependency | DeclareFeature | MakeLib => &[Unit::Crate],
+        RemoveDependency | RenamePaths => &[Unit::Crate],
         MakeImpl | AddTraitImpl | AddField | AddVariant | AddDerive => &[Unit::Item],
         AddMethod | AddConstructor => &[Unit::Impl, Unit::Item],
         AddAttribute | Gate | Anchor | Rename | Move => &[Unit::Item, Unit::Function],
@@ -322,6 +323,10 @@ pub fn targets(k: &Klepto, root: &Path, op: Operation, unit: Unit, krate: Option
             for p in &pkgs {
                 let deps = k.features.get(p).map(|m| m.dependencies.len()).unwrap_or(0);
                 if op == ChangeDependency && deps == 0 {
+                    continue;
+                }
+                // never exercised: each needs a dependency the crate can lose, or a second crate its paths can move to
+                if matches!(op, RemoveDependency | RenamePaths) {
                     continue;
                 }
                 if crate::change::route_file(k, root, &format!("crate:{p}")).is_some() {
@@ -561,6 +566,7 @@ pub fn spec_for(k: &Klepto, root: &Path, op: Operation, t: &Target, n: u64, crat
         }
         AddDependency => s.dependency = Some(new_dependency(k, root, &t.package)?),
         ChangeDependency => s.dependency = Some(changed_dependency(k, root, &t.package)?),
+        RemoveDependency | RenamePaths => {}
         MakeImpl => s.functions = vec![u32fn(format!("exercise_impl_fn_{n}"), Some("&self"))],
         AddTraitImpl => {
             s.trait_name = Some("std::fmt::Display".into());

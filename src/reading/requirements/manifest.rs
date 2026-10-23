@@ -399,6 +399,18 @@ pub struct Scan {
 /// Directories never walked for manifests besides the sweep's own (`.claude` holds worktrees: copies of the tree).
 const SKIP: &[&str] = &[".claude"];
 
+/// The governing root of the crate whose manifest is at `dir` or the nearest above it, by cargo's rule as this
+/// reading reads it (the crate itself when its manifest has `[workspace]`, else its `package.workspace`, else the
+/// nearest manifest above with a `[workspace]` that does not exclude it): the folder a copy of the crate must carry
+/// for cargo to find its workspace. `None`: no crate there, or no workspace above it.
+pub fn governing_root_of(dir: &Path) -> Option<PathBuf> {
+    let manifest = dir.ancestors().map(|a| a.join("Cargo.toml")).find(|m| read_manifest(m).is_some_and(|x| x.package.is_some() || x.is_root()))?;
+    let crate_dir = manifest.parent()?.to_path_buf();
+    let mut s = Scan::discover(&crate_dir, &crate::reading::spec::Scope::default(), "*").ok()?;
+    s.manifests.insert(manifest.clone(), read_manifest(&manifest)?);
+    s.governing_root(&manifest).and_then(|r| r.parent().map(Path::to_path_buf))
+}
+
 impl Scan {
     /// The manifests the target needs, read and checked.
     pub fn read(root: &Path, scope: &Scope, target: &str) -> Result<Scan> {

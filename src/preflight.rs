@@ -435,6 +435,19 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                     listed.push(format!("{dep} is optional: cargo gives it the feature {dep} until a feature names it dep:{dep} (declare_feature)"));
                 }
             }
+            Operation::RemoveDependency => {
+                let dep = spec.dependency.as_ref().map(|d| d.name.replace('-', "_")).unwrap_or_default();
+                let has = f.k.features.get(&l.package).is_some_and(|m| m.dependencies.iter().any(|d| d.name.replace('-', "_") == dep));
+                pre.push(Check { what: format!("{} depends on {dep}", l.package), holds: has, detail: if has { "a line to drop".into() } else { "it does not: nothing to remove".into() } });
+                in_place_checks.push(format!("{} depends on {dep}", l.package));
+                listed.push(format!("the writer refuses while a source file of {} still names {dep}'s paths", l.package));
+            }
+            Operation::RenamePaths => {
+                let old = spec.dependency.as_ref().map(|d| d.name.replace('-', "_")).unwrap_or_default();
+                let new = spec.new_name.clone().unwrap_or_default().replace('-', "_");
+                let deps = f.k.features.get(&l.package).map(|m| m.dependencies.iter().map(|d| d.name.replace('-', "_")).collect::<Vec<_>>()).unwrap_or_default();
+                pre.push(Check { what: format!("{} depends on {new}", l.package), holds: deps.contains(&new), detail: format!("the paths through {old} become paths through {new}: the crate must name {new}") });
+            }
             Operation::DeclareFeature => match crate::change::feature_declaration(&f.k, &f.root, spec) {
                 Ok(d) => {
                     let was = match &d.was {
