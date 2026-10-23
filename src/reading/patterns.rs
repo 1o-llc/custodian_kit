@@ -21,6 +21,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use syn::spanned::Spanned;
 
+/// A function's status when it is a whole trait impl a toolkit piece writes: no replace_body spec swaps it, so it is
+/// reported under its own heading and never counted as an exact match.
+pub const IMPL_NO_SWAP: &str = "impl (no swap)";
+
 /// One function, read.
 #[derive(Debug, Clone)]
 struct FnRow {
@@ -29,7 +33,7 @@ struct FnRow {
     file: PathBuf,
     line: u32,
     column: u32,
-    /// `exact`, `near`, `catch-all` (only `simple_method`), `none`.
+    /// `exact`, `near`, `catch-all` (only `simple_method`), [`IMPL_NO_SWAP`], `none`.
     status: &'static str,
     /// Each piece matched, with how near (`ensure`, `require_some (near)`).
     pieces: Vec<(String, Level)>,
@@ -79,7 +83,10 @@ fn row(src: &Source, job: &FileJob, at: proc_macro2::Span, parts: FnParts, ctx: 
         s.scope.write = vec![format!("crate:{}", job.package)];
         s
     };
-    let spec = matcher::spec_for(&m, src, id, parts, false).or_else(|| matcher::spec_for(&m, src, id, parts, true)).map(scoped);
+    let exact_spec = matcher::spec_for(&m, src, id, parts, false);
+    // a whole trait impl a piece writes has no replace_body spec: it is reported apart, never as an exact swap
+    let whole_impl = exact_spec.is_none() && m.whole.as_ref().is_some_and(|w| w.level == Level::Exact && w.shape().position == crate::toolkit::Position::ImplFn);
+    let spec = exact_spec.or_else(|| matcher::spec_for(&m, src, id, parts, true)).map(scoped);
     let mut pieces: Vec<(String, Level)> = Vec::new();
     let mut calls: Vec<(String, String)> = Vec::new();
     if let Some(w) = &m.whole {
@@ -99,7 +106,9 @@ fn row(src: &Source, job: &FileJob, at: proc_macro2::Span, parts: FnParts, ctx: 
             }
         }
     }
-    let status = if m.exact() {
+    let status = if whole_impl {
+        IMPL_NO_SWAP
+    } else if m.exact() {
         "exact"
     } else if m.near() {
         "near"
@@ -209,9 +218,15 @@ pub(crate) fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
         .collect();
     // klepto's functions, by file and place
     let mut by_file: HashMap<PathBuf, HashMap<(u32, u32), String>> = HashMap::new();
+    let mut shared: HashMap<&str, usize> = HashMap::new();
+    for c in f.k.functions.iter().filter(|c| c.generated.is_none()) {
+        *shared.entry(c.fq_name.as_str()).or_default() += 1;
+    }
     for c in f.k.functions.iter().filter(|c| c.generated.is_none()) {
         let (Some(l), Some(col)) = (c.location.line, c.location.column) else { continue };
-        by_file.entry(c.location.path.clone()).or_default().insert((l, col), c.fq_name.clone());
+        // two impls on one path (two `From` impls on a type) each get the route that names its impl
+        let route = if shared.get(c.fq_name.as_str()).is_some_and(|n| *n > 1) { crate::route::impl_route(c) } else { c.fq_name.clone() };
+        by_file.entry(c.location.path.clone()).or_default().insert((l, col), route);
     }
     let jobs: Vec<FileJob> = f
         .k
@@ -281,6 +296,7 @@ pub(crate) fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
         exact: usize,
         near: usize,
         catch_all: usize,
+        impls: usize,
         uses_toolkit: usize,
         candidate_statements: usize,
     }
@@ -292,6 +308,7 @@ pub(crate) fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
             "exact" => c.exact += 1,
             "near" => c.near += 1,
             "catch-all" => c.catch_all += 1,
+            IMPL_NO_SWAP => c.impls += 1,
             _ => {}
         }
         if r.uses_toolkit {
@@ -306,6 +323,7 @@ pub(crate) fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     ans.count("functions shaped", rows.len());
     ans.count("functions with an exact toolkit match (the swap is the same tokens after expansion)", n_exact);
     ans.count("functions with only near matches (the difference named)", n_near);
+    ans.count("impls (no swap): whole trait impls a piece writes, with no replace_body spec (not in the exact count)", rows.iter().filter(|r| r.status == IMPL_NO_SWAP).count());
     ans.count("functions only the catch-all simple_method writes (one expression)", rows.iter().filter(|r| r.status == "catch-all").count());
     ans.count("functions already calling the toolkit", rows.iter().filter(|r| r.uses_toolkit).count());
     ans.count("toolkit pieces matched somewhere", by_piece.len());
@@ -377,6 +395,7 @@ pub(crate) fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
                 ("exact", c.exact.to_string()),
                 ("near", c.near.to_string()),
                 ("catch_all", c.catch_all.to_string()),
+                ("impls_no_swap", c.impls.to_string()),
                 ("calls_the_toolkit", c.uses_toolkit.to_string()),
                 ("candidate_statements", c.candidate_statements.to_string()),
             ],
@@ -385,7 +404,7 @@ pub(crate) fn answer(f: &Facts, spec: &ReadingSpec) -> Result<Answer> {
     for r in &rows {
         let pieces: Vec<String> = r.pieces.iter().map(|(p, l)| if *l == Level::Near { format!("{p} (near)") } else { p.clone() }).collect();
         let mut attrs = vec![("status", r.status.to_string())];
-        if let Some((h, t)) = klepto_shape.get(r.id.as_str()) {
+        if let Some((h, t)) = klepto_shape.get(crate::route::split(&r.id).0) {
             attrs.push(("shape", format!("{h} ({t} tokens)")));
         }
         if !pieces.is_empty() {

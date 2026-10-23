@@ -94,6 +94,10 @@ pub enum ReadingRefusal {
     LowBattery,
     #[liaise(code = 43, msg = "the step would run past the job's budget: refused before it starts (the job stays open)")]
     OverBudget,
+    #[liaise(code = 44, msg = "the target names more than one function (two impls on one path): name the impl in its route, `path[impl Trait for Type]`")]
+    AmbiguousTarget,
+    #[liaise(code = 45, msg = "two receipt folders number receipts the same: merge them with `custodian receipts merge <other>`, which renumbers by union")]
+    ReceiptCollision,
     #[liaise(code = 101, msg = "the bundle filters break the word's own rules")]
     FiltersRefused,
     #[liaise(code = 102, msg = "the route holds no file the filters keep")]

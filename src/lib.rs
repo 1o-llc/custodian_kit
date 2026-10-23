@@ -67,6 +67,7 @@ pub mod why;
 pub mod power;
 pub mod proof_place;
 pub mod step_time;
+pub mod route;
 pub mod handoff;
 
 #[cfg(test)]

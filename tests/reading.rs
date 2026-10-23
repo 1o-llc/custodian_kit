@@ -419,3 +419,47 @@ fn copy_tree(from: &Path, to: &Path) {
         }
     }
 }
+
+fn read_routes(kind: &str, target: &str, extra: &str) -> api::Reading {
+    let s = spec(kind, target, extra);
+    let ws = Workspace::open_for(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/routes_ws"), &s, Resolving::Free).expect("workspace");
+    api::run(&ws, &s).unwrap_or_else(|e| panic!("{kind} {target}: {e}"))
+}
+
+#[test]
+fn a_patterns_spec_is_named_by_its_whole_route_and_two_impls_on_one_path_get_two_targets() {
+    let r = read_routes("patterns", "*", "");
+    let fns = rows(&r, "function");
+    let labels: Vec<&str> = fns.iter().map(|f| f.label.as_str()).collect();
+    // (7) two `From` impls on Level: each its own route, the impl named in it
+    assert!(labels.contains(&"levels::<Level as std::From>::from[impl From<i64> for Level]") && labels.contains(&"levels::<Level as std::From>::from[impl From<i32> for Level]"), "{labels:?}");
+    // (1) every exact match its own spec file: the routes that agree past 48 characters do not collide
+    let files = custodian_kit::reading::patterns::spec_files(&r.report);
+    let names: std::collections::BTreeSet<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names.len(), files.len(), "{names:?}");
+    let exact = fns.iter().filter(|f| f.attributes["status"] == "exact").count();
+    assert_eq!(exact, 4, "two `From` bodies and the two long functions: {:?}", fns.iter().map(|f| (&f.label, &f.attributes["status"])).collect::<Vec<_>>());
+    assert_eq!(files.len(), exact);
+    let one = files.iter().find(|(n, _)| n.contains("characters_one")).expect("the long route's spec").0.clone();
+    assert!(one.starts_with("to-toolkit-levels_a_function_whose_route_runs_well_past_forty_eight_characters_one-") && one.len() == "to-toolkit-levels_a_function_whose_route_runs_well_past_forty_eight_characters_one-".len() + 8 + ".toml".len(), "{one}");
+    // each spec targets its own impl
+    let targets: std::collections::BTreeSet<String> = files.iter().map(|(_, t)| custodian_kit::change::ChangeSpec::from_toml(t).unwrap().target).collect();
+    assert_eq!(targets.len(), 4, "{targets:?}");
+    // (9) the whole `From<String>` impl a piece writes is reported apart and is not an exact match
+    let w = fns.iter().find(|f| f.label == "levels::<Wrapper as std::From>::from").expect("Wrapper::from");
+    assert_eq!(w.attributes["status"], custodian_kit::reading::patterns::IMPL_NO_SWAP);
+    assert_eq!(count(&r, "impls (no swap)"), 1);
+    assert_eq!(count(&r, "functions with an exact toolkit match"), 4);
+}
+
+#[test]
+fn a_route_finds_one_function_or_is_refused_with_the_routes_that_tell_them_apart() {
+    let s = spec("patterns", "*", "");
+    let ws = Workspace::open_for(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/routes_ws"), &s, Resolving::Free).expect("workspace");
+    let k = ws.klepto();
+    let e = custodian_kit::route::find_fn(&k.functions, "levels::<Level as std::From>::from").unwrap_err().to_string();
+    assert!(e.starts_with("[CUST0044]") && e.contains("levels::<Level as std::From>::from[impl From<i64> for Level]"), "{e}");
+    let f = custodian_kit::route::find_fn(&k.functions, "levels::<Level as std::From>::from[impl From<i32> for Level]").unwrap();
+    assert!(f.signature.contains("i32"), "{}", f.signature);
+    assert!(custodian_kit::route::find_fn(&k.functions, "levels::<Wrapper as std::From>::from").is_ok(), "one function on its path: its path alone");
+}

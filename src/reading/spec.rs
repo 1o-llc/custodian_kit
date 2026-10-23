@@ -415,6 +415,18 @@ pub fn name_slug(s: &str) -> String {
     }
 }
 
+/// A route as one name that never collides: every character of the route kept ([`name_slug`]'s spelling, never cut),
+/// then `-` and the first 8 hex of the route's digest, so two routes that spell the same (`a::b_c` and `a::b::c`)
+/// still differ and the same route always names the same.
+pub fn route_name(route: &str) -> String {
+    let mut out: String = route.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    while out.contains("__") {
+        out = out.replace("__", "_");
+    }
+    let out = out.trim_matches('_');
+    format!("{}-{}", if out.is_empty() { "all" } else { out }, crate::digest::short(&crate::digest::of(route.trim()), 8))
+}
+
 impl ReadingSpec {
     /// A search on one target, as every line that starts one writes it: [`search_name`], [`SEARCH_QUESTION`], the
     /// kind and the target, the scope the kind's own.

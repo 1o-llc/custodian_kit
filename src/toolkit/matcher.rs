@@ -870,7 +870,7 @@ pub fn spec_for(m: &FnMatch, src: &Source, item: &str, f: FnParts, near_too: boo
     let name = &sig.ident.to_string();
     let usable = |l: Level| l == Level::Exact || near_too;
     let base = ChangeSpec {
-        name: format!("to-toolkit-{}", crate::reading::spec::name_slug(item)),
+        name: format!("to-toolkit-{}", crate::reading::spec::route_name(item)),
         objective: format!("{item}: its body as simple_impl toolkit calls"),
         operation: Some(Operation::ReplaceBody),
         target: item.to_string(),

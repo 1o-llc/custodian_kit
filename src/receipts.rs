@@ -46,11 +46,89 @@ pub fn receipt_of(plan: &Plan, w: &Walked, command: &str, name: &str, spec: Opti
 /// Journals a receipt and writes `receipts/<seq>.json`; the inventory follows.
 pub fn keep(store: &Store, r: Receipt) -> Result<(Receipt, PathBuf)> {
     let journal = store.journal()?;
-    let r = journal.record(r)?;
-    let file = store.path(&named::RECEIPT, &[("seq", &r.seq.to_string())])?;
-    write_whole(&file, (serde_json::to_string_pretty(&r)? + "\n").as_bytes())?;
+    let mut r = r;
+    // the number is above every row and every receipt file in the folder: a file another checkout's receipts
+    // brought in is never written over
+    let (_, file) = journal.keep(&mut r, |n| store.path(&named::RECEIPT, &[("seq", &n.to_string())]).map_err(|e| receipt_history::Refusal::Write.refuse(e)))?;
     inventory(store)?;
     Ok((r, file))
+}
+
+/// A receipt as one identity across checkouts: what it says, its number aside (the same run kept in two checkouts'
+/// history before they parted reads the same; two runs given one number do not).
+pub fn identity(r: &Receipt) -> String {
+    let mut v = serde_json::to_value(r).unwrap_or_default();
+    if let Some(o) = v.as_object_mut() {
+        o.remove("seq");
+    }
+    crate::digest::of_value(&v)
+}
+
+/// What [`merge`] did: the receipts of the other folder already here, the ones kept here under new numbers (their
+/// number there, their number here), and the file that maps them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Merged {
+    /// The other folder, as given.
+    pub other: String,
+    /// The other folder's identity: the digest of its receipts' identities in number order.
+    pub other_digest: String,
+    pub same: usize,
+    pub kept: Vec<(i64, i64)>,
+    /// Numbers both folders give to different receipts (each renumbered here).
+    pub collided: Vec<i64>,
+    pub map: Option<String>,
+}
+
+/// The receipt files of `dir` (`<seq>.json`), read.
+pub fn receipts_in(dir: &Path) -> Vec<Receipt> {
+    receipt_history::journal::receipt_files(dir).into_iter().filter_map(|(_, p)| std::fs::read_to_string(p).ok()).filter_map(|t| serde_json::from_str(&t).ok()).collect()
+}
+
+/// Two checkouts' receipts made one history by union: a receipt's identity is (the folder it came from, its number),
+/// so every receipt of `other` (a `.custodian` folder or its `data/receipts`) that this store does not hold (by
+/// [`identity`]) is kept here under the next free number, in its own order, and the map from its number there to
+/// its number here is written beside the receipts (`merged-<digest>.json`). Nothing here is renumbered or removed;
+/// merging the same folder twice keeps nothing the second time.
+pub fn merge(store: &Store, other: &Path) -> Result<Merged> {
+    let dir = [other.join("data/receipts"), other.join(".custodian/data/receipts"), other.to_path_buf()].into_iter().find(|d| !receipt_history::journal::receipt_files(d).is_empty()).ok_or_else(|| crate::reading::refusal::ReadingRefusal::MissingInput.refuse(format!("{}: no receipt files (`<seq>.json`) in it, its data/receipts or its .custodian/data/receipts", other.display())))?;
+    let mut theirs = receipts_in(&dir);
+    theirs.sort_by_key(|r| r.seq);
+    let journal = store.journal()?;
+    let ours = journal.runs()?;
+    let here: std::collections::BTreeMap<String, i64> = ours.iter().map(|r| (identity(r), r.seq)).collect();
+    let by_seq: std::collections::BTreeSet<i64> = ours.iter().map(|r| r.seq).collect();
+    let other_digest = crate::digest::of_value(&theirs.iter().map(identity).collect::<Vec<_>>());
+    let mut m = Merged { other: other.display().to_string(), other_digest: other_digest.clone(), ..Default::default() };
+    for t in theirs {
+        if here.contains_key(&identity(&t)) {
+            m.same += 1;
+            continue;
+        }
+        if by_seq.contains(&t.seq) {
+            m.collided.push(t.seq);
+        }
+        let was = t.seq;
+        let (r, _) = keep(store, t)?;
+        m.kept.push((was, r.seq));
+    }
+    if !m.kept.is_empty() {
+        let file = dir_of_receipts(store)?.join(format!("merged-{}.json", crate::digest::short(&other_digest, 12)));
+        write_whole(&file, (serde_json::to_string_pretty(&m)? + "\n").as_bytes())?;
+        m.map = Some(file.display().to_string());
+    }
+    Ok(m)
+}
+
+/// The store's receipt folder.
+fn dir_of_receipts(store: &Store) -> Result<PathBuf> {
+    Ok(store.path(&named::RECEIPT, &[("seq", "1")])?.parent().map(Path::to_path_buf).unwrap_or_default())
+}
+
+/// The numbers a receipt folder `other` gives to receipts this store numbers otherwise: each a collision a plain
+/// copy (or a git merge) of the two folders would make; [`merge`] is the fix.
+pub fn collisions(store: &Store, other: &Path) -> Result<Vec<i64>> {
+    let ours: std::collections::BTreeMap<i64, String> = store.journal()?.runs()?.iter().map(|r| (r.seq, identity(r))).collect();
+    Ok(receipts_in(other).iter().filter(|t| ours.get(&t.seq).is_some_and(|id| id != &identity(t))).map(|t| t.seq).collect())
 }
 
 

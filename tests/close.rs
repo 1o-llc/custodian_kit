@@ -201,3 +201,64 @@ fn a_closes_findings_are_each_said_once_and_the_lines_that_prove_a_fix_only_with
     let unique: std::collections::BTreeSet<&&String> = prove.iter().collect();
     assert_eq!(unique.len(), prove.len(), "each once: {prove:?}");
 }
+
+#[test]
+fn a_verification_satisfied_by_a_test_receipt_names_it_and_the_close_is_accepted() {
+    let (store, ctx) = project("verified-by");
+    let w = Workspace::open_with(&store.root, &Default::default(), Resolving::Job).unwrap();
+    job(&store, "v", "{ job { name \"v\" kind \"specs\" target \"crate:core_lib\" verify \"test:vault_key_is_42\" } }\n");
+    let started = jobs::start_with(&ctx, Some("v"), false, Some(&w)).unwrap();
+    // before any test ran: the close would have to run it (`not run`, no receipt)
+    let v = jobs::verifications(&ctx, &started.id).unwrap();
+    assert_eq!((v[0].state.as_str(), v[0].receipt), ("not run", None), "{v:?}");
+    let in_job = InJob { id: started.id.clone(), readings: started.folder.join(jobs::READINGS_DIR) };
+    let line = TestLine { package: "core_lib".into(), target: Some(Some("gate".into())), filters: vec!["vault_key_is_42".into()] };
+    let run = testrun::run(&ctx, &[line], Observe::Failed, Some(&in_job)).unwrap();
+    let v = jobs::verifications(&ctx, &started.id).unwrap();
+    assert_eq!(v[0].state, "satisfied", "{v:?} {run:?}");
+    let seq = v[0].receipt.expect("the test receipt that satisfied it");
+    let (c, _, _) = jobs::close_with(&ctx, &started.id, Some(&w)).unwrap();
+    assert_eq!(c.result, "accepted", "{:?}", c.result_reason);
+    assert_eq!(c.verified_by, vec![format!("test:vault_key_is_42: receipt #{seq}")]);
+    assert!(jobs::render_closing(&c).contains(&format!("- test:vault_key_is_42: satisfied (receipt #{seq})")));
+}
+
+fn receipt(name: &str, millis: i64) -> custodian_kit::receipts::Receipt {
+    serde_json::from_value(serde_json::json!({"schema": "custodian.receipt.v1", "seq": 0, "utc": "2026-10-23T09:00:00Z", "command": "reading", "name": name, "spec": null, "spec_hash": null, "code_digest": null, "index_key": null, "plan_id": "p", "plan_digest": "d", "operation_digest": "d", "receipt_digest": "d", "line": "", "exit_code": 0, "accepted": true, "disposition": "Continue", "reason": "read", "outputs": [], "millis": millis})).unwrap()
+}
+
+#[test]
+fn two_checkouts_numbering_receipts_the_same_merge_by_union_and_never_write_over_a_file() {
+    let (a, _) = project("merge-a");
+    let (b, _) = project("merge-b");
+    // the history both carried before they parted, then each checkout's own receipts under the same numbers
+    let shared = receipt("shared", 1);
+    let (sa, _) = custodian_kit::receipts::keep(&a, shared.clone()).unwrap();
+    let (sb, _) = custodian_kit::receipts::keep(&b, shared).unwrap();
+    assert_eq!(sa.seq, sb.seq);
+    let (ra, _) = custodian_kit::receipts::keep(&a, receipt("only-a", 2)).unwrap();
+    let (rb, fb) = custodian_kit::receipts::keep(&b, receipt("only-b", 3)).unwrap();
+    assert_eq!(ra.seq, rb.seq, "the same number for two different runs: the collision");
+    let b_dir = fb.parent().unwrap().to_path_buf();
+    assert_eq!(custodian_kit::receipts::collisions(&a, &b_dir).unwrap(), vec![rb.seq]);
+    let m = custodian_kit::receipts::merge(&a, &b.root.join(".custodian")).unwrap();
+    assert_eq!(m.same, 1, "the shared receipt is one receipt");
+    assert_eq!(m.collided, vec![rb.seq]);
+    assert_eq!(m.kept.len(), 1);
+    let (was, now) = m.kept[0];
+    assert_eq!(was, rb.seq);
+    assert!(now > ra.seq, "kept under the next free number");
+    assert!(m.map.as_deref().is_some_and(|p| Path::new(p).is_file()));
+    // a second merge of the same folder keeps nothing
+    assert!(custodian_kit::receipts::merge(&a, &b.root.join(".custodian")).unwrap().kept.is_empty());
+    // a receipt file another checkout brought in is never written over: the next number is above it
+    let a_dir = a.root.join(".custodian/data/receipts");
+    let top = custodian_kit::receipts::receipts_in(&a_dir).iter().map(|r| r.seq).max().unwrap();
+    let mut foreign = receipt("brought-in", 4);
+    foreign.seq = top + 5;
+    std::fs::write(a_dir.join(format!("{}.json", top + 5)), serde_json::to_string_pretty(&foreign).unwrap()).unwrap();
+    let (next, _) = custodian_kit::receipts::keep(&a, receipt("after", 5)).unwrap();
+    assert_eq!(next.seq, top + 6);
+    let still: custodian_kit::receipts::Receipt = serde_json::from_str(&std::fs::read_to_string(a_dir.join(format!("{}.json", top + 5))).unwrap()).unwrap();
+    assert_eq!(still.name, "brought-in");
+}

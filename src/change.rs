@@ -2210,6 +2210,16 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
         _ => {
             // a function a dependency's macro writes (a toolkit generator) is seen only when the scan read that
             // macro: say why it could not
+            // a route that names its impl (`path[impl From<i64> for Level]`, two impls on one path): the declaration
+            // at that function's place, and the route kept as the item, so the writer finds the same one
+            if crate::route::split(&spec.target).1.is_some() {
+                let f = crate::route::find_fn(&k.functions, &spec.target).map_err(|e| e.to_string())?;
+                let (path, _) = crate::route::split(&spec.target);
+                let d = k.items.iter().find(|d| d.id == path && d.location.line == f.location.line && d.location.path == f.location.path).ok_or_else(|| format!("`{}` names no item of the scan", spec.target))?;
+                let mut l = at_item(d, |l| At::At { line: l });
+                l.item = Some(spec.target.trim().to_string());
+                return Ok(l);
+            }
             let d = item_named(k, &spec.target).ok_or_else(|| match &k.dep_macro_note {
                 Some(note) => format!("`{}` names no item of the scan ({note}: a function a dependency's macro writes is not seen until the lock file names the dependency; cargo writes it, and a transform that changes a manifest writes it too)", spec.target),
                 None => format!("`{}` names no item of the scan", spec.target),

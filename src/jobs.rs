@@ -829,6 +829,9 @@ pub struct Closing {
     /// reading the job made that is the same as the one before it opened, `unchanged`.
     #[serde(default)]
     pub verify: Vec<(String, String)>,
+    /// For each verification satisfied or failed, the receipt that decided it (`test:t: receipt #4427`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verified_by: Vec<String>,
     /// The transform receipts of the job.
     #[serde(default)]
     pub transforms: Vec<i64>,
@@ -998,7 +1001,12 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     let judged = crate::baseline::judge(ctx, &running, &test_in_job, jf.base_commit.as_deref(), &tests)?;
     let opened = runs.first().map_or(i64::MAX, |r| r.seq);
     let reading = |spec: &str| reading_verified(&ctx.root, &all_runs, &folders, &id, opened, spec);
-    let verify: Vec<(String, String)> = jf.verify.iter().map(|v| (v.clone(), verified(v, &runs, &tests, &reading).to_string())).collect();
+    let decided: Vec<(String, &'static str, Option<i64>)> = jf.verify.iter().map(|v| {
+        let (state, by) = verified_with(v, &runs, &tests, &reading);
+        (v.clone(), state, by)
+    }).collect();
+    let verify: Vec<(String, String)> = decided.iter().map(|(v, st, _)| (v.clone(), st.to_string())).collect();
+    let verified_by: Vec<String> = decided.iter().filter_map(|(v, _, by)| by.map(|n| format!("{v}: receipt #{n}"))).collect();
     let known_at = |at_open: Option<bool>, commands: &[&str]| -> Option<String> {
         if at_open == Some(true) {
             return Some("open".into());
@@ -1101,6 +1109,7 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
         target_known: jf.target_known,
         outcome_known: jf.outcome_known,
         verify,
+        verified_by,
         transforms: transforms.iter().map(|(s, _)| *s).collect(),
         uncovered,
         result: result.0.clone(),
@@ -1210,28 +1219,64 @@ fn reading_verified(root: &Path, all: &[Receipt], folders: &[(String, PathBuf)],
 }
 
 /// Whether the job's own runs satisfy one verification; a `reading:` line is answered by `reading`.
-fn verified(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], reading: &dyn Fn(&str) -> &'static str) -> &'static str {
-    let Some((form, what)) = line.split_once(':') else { return "not run" };
+/// A verification's state and the receipt that decided it: a `test:` line by the newest test receipt that ran a test it
+/// names (a failure in any of them fails it), a `check:` by its newest check receipt.
+fn verified_with(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], reading: &dyn Fn(&str) -> &'static str) -> (&'static str, Option<i64>) {
+    let Some((form, what)) = line.split_once(':') else { return ("not run", None) };
     let what = what.trim();
     match form {
         "test" => {
             let hits: Vec<&crate::store::TestRow> = tests.iter().filter(|t| test_named(&t.test, what) || t.package == what).collect();
-            if hits.iter().any(|t| matches!(t.outcome.as_str(), "FAILED" | "failed" | "fail")) {
-                "failed"
-            } else if hits.iter().any(|t| matches!(t.outcome.as_str(), "ok" | "passed" | "pass")) {
-                "satisfied"
+            let failed = |t: &&&crate::store::TestRow| matches!(t.outcome.as_str(), "FAILED" | "failed" | "fail");
+            let passed = |t: &&&crate::store::TestRow| matches!(t.outcome.as_str(), "ok" | "passed" | "pass");
+            if let Some(t) = hits.iter().filter(failed).max_by_key(|t| t.seq) {
+                ("failed", Some(t.seq))
+            } else if let Some(t) = hits.iter().filter(passed).max_by_key(|t| t.seq) {
+                ("satisfied", Some(t.seq))
             } else {
-                "not run"
+                ("not run", None)
             }
         }
-        "reading" => reading(what),
+        "reading" => (reading(what), None),
         "check" => match runs.iter().rev().find(|r| r.command == "check" && r.name == what) {
-            Some(r) if r.accepted => "satisfied",
-            Some(_) => "failed",
-            None => "not run",
+            Some(r) if r.accepted => ("satisfied", Some(r.seq)),
+            Some(r) => ("failed", Some(r.seq)),
+            None => ("not run", None),
         },
-        _ => "not run",
+        _ => ("not run", None),
     }
+}
+
+/// One declared verification of a running job as it stands now ([`verifications`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Verification {
+    /// The line declared (`test:tests::*`, `check:golden`, `reading:<spec>`).
+    pub line: String,
+    /// `satisfied`, `failed`, `not run`, `unchanged`.
+    pub state: String,
+    /// The receipt that decided it.
+    pub receipt: Option<i64>,
+}
+
+/// The running job's declared verifications as its receipts leave them now, as its close would read them: what the
+/// close still has to run itself before it decides (a `test:` line `not run`).
+pub fn verifications(ctx: &Ctx, which: &str) -> Result<Vec<Verification>> {
+    let store = ctx.store()?;
+    let running = find(store, JobState::Running, Some(which))?;
+    let jf = job_file(&running);
+    let id = jf.id.clone().ok_or_else(|| ReadingRefusal::JobState.refuse(format!("{} has no id: was it started?", running.display())))?;
+    let journal = store.journal()?;
+    let runs = journal.runs_of_job(&id)?;
+    let all_runs = journal.runs()?;
+    let folders = crate::store::job_folders(store.jobs_dir(JobState::Done)?.parent().unwrap_or(&running));
+    let test_seqs: Vec<i64> = runs.iter().filter(|r| r.command == "test").map(|r| r.seq).collect();
+    let tests = journal.tests_of_runs(&test_seqs)?;
+    let opened = runs.first().map_or(i64::MAX, |r| r.seq);
+    let reading = |spec: &str| reading_verified(&ctx.root, &all_runs, &folders, &id, opened, spec);
+    Ok(jf.verify.iter().map(|v| {
+        let (state, receipt) = verified_with(v, &runs, &tests, &reading);
+        Verification { line: v.clone(), state: state.into(), receipt }
+    }).collect())
 }
 
 /// Whether a test's path (`kitchen::tests::can_cook`) is the one a `test:` verification names: the test by its name
@@ -1510,7 +1555,8 @@ pub fn render_closing(c: &Closing) -> String {
     if !c.verify.is_empty() {
         s.push_str("\n## verification\n\n");
         for (v, st) in &c.verify {
-            s.push_str(&format!("- {v}: {st}\n"));
+            let by = c.verified_by.iter().find_map(|b| b.strip_prefix(&format!("{v}: "))).map(|b| format!(" ({b})")).unwrap_or_default();
+            s.push_str(&format!("- {v}: {st}{by}\n"));
         }
     }
     if let Some(b) = &c.base_commit {

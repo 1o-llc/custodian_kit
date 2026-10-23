@@ -763,7 +763,7 @@ pub fn render(h: &Handoff, reader: Reader) -> String {
     } else {
         out.extend(listed_up_to(&next, "steps", NEXT_SHOWN));
     }
-    if let Some(p) = h.planned.as_ref().filter(|p| !p.starts_with("nothing planned")) {
+    if let Some(p) = h.planned.as_ref().filter(|p| !p.starts_with("unknown until the reading")) {
         out.push(format!("What waits costs, from this workspace's receipts: {p}."));
     }
     for f in &h.per_member {
