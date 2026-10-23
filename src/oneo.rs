@@ -5,10 +5,13 @@
 //! the TOML documents read into. One internal form: a spec's digest is over
 //! that form, never over the text.
 //!
-//! A 1o document is `{ <modifier> { key value ... } }`; a block is a table and
-//! a key written several times is a list (core-1o keeps repeated keys in
-//! order). Which keys are lists is the Rust form's to say: a `Vec` field takes
-//! every occurrence, a single field refuses a second one.
+//! A 1o document is `<modifier> { key value ... }` (core-1o 0.2 reads a record
+//! at the top level; the older `{ <modifier> { ... } }` reads the same); a block
+//! is a table and a key written several times is a list (core-1o keeps repeated
+//! keys in order). Which keys are lists is the schema's to say: a repeating key
+//! is `type: array`, and every block is `x-1o-single-keys`, so core-1o's
+//! validator refuses a second value of any other key before the Rust form reads
+//! it. A string is written with core-1o's escapes (`\\ \" \n \t \r`).
 //!
 //! A file is named the 1o way, `v1.<name>.1o.<modifier>`, so the language
 //! server finds its schema: `custodian init` copies the schemas to
@@ -107,18 +110,36 @@ pub fn parse<T: DeserializeOwned>(doc: Doc, what: &str, text: &str) -> Result<T>
     T::deserialize(BlockDe(body)).map_err(|e| refuse(what, text, top.span.start, e))
 }
 
-/// `value` as a 1o document. A string holding a double quote is refused:
-/// core-1o's strings have no escapes, so it could not be read back.
+/// `value` as a 1o document: its record at the top level, every string
+/// escaped ([`quote`]). A negative number is refused: core-1o reads none.
 pub fn render<T: Serialize>(doc: Doc, value: &T) -> Result<String> {
     let v = serde_json::to_value(value).map_err(|e| ReadingRefusal::Write.refuse(e))?;
-    let mut out = String::from("{\n");
-    out.push_str(&format!("  {} {{\n", doc.modifier()));
+    let mut out = format!("{} {{\n", doc.modifier());
     let serde_json::Value::Object(map) = v else {
         return Err(ReadingRefusal::Write.refuse("a 1o document is a block"));
     };
-    body(&map, 2, &mut out)?;
-    out.push_str("  }\n}\n");
+    body(&map, 1, &mut out)?;
+    out.push_str("}\n");
     Ok(out)
+}
+
+/// A string as a 1o string literal, with core-1o's escapes: `\\ \" \n \t \r`
+/// (task_history's diff writer's set), every other character as it is.
+pub fn quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn body(map: &serde_json::Map<String, serde_json::Value>, depth: usize, out: &mut String) -> Result<()> {
@@ -143,12 +164,7 @@ fn entry(key: &str, v: &serde_json::Value, depth: usize, out: &mut String) -> Re
             body(m, depth + 1, out)?;
             out.push_str(&format!("{pad}}}\n"));
         }
-        J::String(s) => {
-            if s.contains('"') {
-                return Err(ReadingRefusal::OneoUnwritable.refuse(format!("{key}: {s}")));
-            }
-            out.push_str(&format!("{pad}{key} \"{s}\"\n"));
-        }
+        J::String(s) => out.push_str(&format!("{pad}{key} {}\n", quote(s))),
         J::Bool(b) => out.push_str(&format!("{pad}{key} {b}\n")),
         J::Number(n) => {
             if n.as_i64().is_some_and(|i| i < 0) {
@@ -249,11 +265,9 @@ impl<'de, 'a> de::Deserializer<'de> for BlockDe<'a> {
 }
 
 impl<'a> Occurrences<'a> {
+    /// The key's value: the schema's `x-1o-single-keys` has refused a second one.
     fn one(&self) -> std::result::Result<ValueDe<'a>, DeError> {
-        match self.values.as_slice() {
-            [v] => Ok(ValueDe(v)),
-            many => Err(de::Error::custom(format!("`{}` is written {} times; it takes one value", self.key, many.len()))),
-        }
+        Ok(ValueDe(self.values[0]))
     }
 }
 

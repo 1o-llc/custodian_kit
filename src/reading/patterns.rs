@@ -68,7 +68,7 @@ pub fn spec_files(report: &super::ReadingReport) -> Vec<(String, String)> {
         .filter_map(|r| r.attributes.get("spec"))
         .filter_map(|s| serde_json::from_str::<crate::change::ChangeSpec>(s).ok())
         .filter(|s| s.same_expansion)
-        .filter_map(|s| s.to_toml().ok().map(|t| (format!("{}.toml", s.name), t)))
+        .filter_map(|s| s.to_1o().ok().map(|t| (crate::oneo::Doc::Change.file_name(&s.name), t)))
         .collect()
 }
 

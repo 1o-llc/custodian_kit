@@ -50,7 +50,30 @@
             "patterns",
             "requirements"
           ],
-          "description": "What the reading reads (the kinds table in custodian_kit's README)."
+          "description": "What the reading reads (the kinds table in custodian_kit's README).",
+          "enumDescriptions": [
+            "every place a path, fn, type, const or macro is used, as klepto resolves it, with its definitions",
+            "every read of an env key (a literal or a constant holding it) by a reader fn or macro, the places that only name it, and the declarations of it",
+            "function bodies repeated across crates (klepto's repeated code), grouped by the crate pairs that share them",
+            "what depends on a crate (the workspace's dependency graph) or on an item (klepto's item graph), direct then transitive",
+            "which declaration files (TOML matching a glob) name the target at a key path",
+            "a binary's declared sockets, and who dials them: env reads of the socket keys, literals of the path, other declarations naming it",
+            "what a change at a crate, a file or an item touches: the items that reach it, their files, crates and binaries, and the declarations naming those binaries",
+            "every place a type is built: a struct literal, a tuple-struct or variant constructor, or a call of its own associated fn returning Self or the type",
+            "every match with an arm naming one of an enum's variants: the arms that name them, the variants never named there, whether a catch-all arm takes the rest",
+            "a crate's public items and, for each, the uses from other crates",
+            "the test functions whose calls reach an item (klepto's item graph), by crate, with the cargo test line that runs exactly them",
+            "from a change (files, a git ref's diff, or a job's touched items): the tests whose closure reaches what changed, and the cargo test lines that run exactly them",
+            "items by their #[sensitivity] level, with owners, and every use of a more sensitive item from a less sensitive one",
+            "every liaise code table (liaise_codes! and #[derive(LiaiseCodes)]): each code's meaning and declaration, and the sites that raise it; a code or a log's text as the target narrows it",
+            "how much there is in a route (the workspace, a crate, a declared set, a module): files, lines, code, comments, blanks per language and per crate by tokei, and the share that is tests by klepto",
+            "a crate, a declared set or a file as one annotated bundles file beside the reading, items at secret or above redacted",
+            "a read-only walk of an undeclared tree (the one walk custodian makes): files by extension, crates, TOML directories, the routes to declare; never in a job",
+            "everything a change to a crate, a file or an item entails, in one reading: its definitions, use sites, constructions, matches, impls, dependents, reach, the tests that cover it, the features and feature configurations that build it, the linkage records naming it, and the cost of the change by dimension, each measured, heuristic or unknown",
+            "the architectural linkage records (why declarations are bound together) naming the target, `*` for all: each bound declaration resolved through klepto, stale when it no longer resolves, to review when its file changed since the record was made; comment anchors with no record behind them",
+            "every function body in scope (`*`, or crates by name) against the simple_impl toolkit: its shape, the toolkit pieces whose expansion it holds (exact: the call expands to the same tokens; near: the difference named) with the replace_body spec that swaps them, the shapes that repeat across crates and no piece writes (ranked by count times size, each with a body and a proposed macro), and the counts by crate",
+            "what an intended change needs from the workspace as it is, without compiling: the manifests read with no cargo (each crate's governing workspace root by cargo's rule, `workspace = true` against it, paths, renames, features in their four forms), then the intent's or the change spec's needs against cargo metadata; each crate's rust-version and edition against the lock's demands and the installed toolchain; the packages the lock holds in more than one version (cargo tree -d); every finding observed, inferred or unknown, with an order of steps, required or recommended"
+          ]
         },
         "target": {
           "type": "string",
@@ -62,8 +85,11 @@
           "description": "Which part of the workspace is read.",
           "properties": {
             "exclude": {
-              "type": "string",
-              "description": "A path glob, relative to the root, whose .rs files are not read. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A path glob, relative to the root, whose .rs files are not read. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "tests": {
               "type": "boolean",
@@ -73,40 +99,55 @@
               "type": "boolean",
               "description": "Expand the #[macro_export] macros of dependencies."
             }
-          }
+          },
+          "x-1o-single-keys": true
         },
         "declared_in": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "files",
-            "key"
-          ],
+          "type": "array",
           "description": "One family of declaration files: TOML matching files, read at key. Repeats: one value per line, in order.",
-          "properties": {
-            "files": {
-              "type": "string",
-              "description": "A glob relative to the root, or a declared route (decl:<name>). Repeats: one value per line, in order."
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "files",
+              "key"
+            ],
+            "properties": {
+              "files": {
+                "type": "array",
+                "description": "A glob relative to the root, or a declared route (decl:<name>). Repeats: one value per line, in order.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "key": {
+                "type": "string",
+                "description": "The key path whose values are the declared names: binary, binds[], env.*, nodes[].answers.*"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "name",
+                  "binary",
+                  "env",
+                  "socket",
+                  "socket_env"
+                ],
+                "description": "What the value is, so kinds can join on it.",
+                "enumDescriptions": [
+                  "a name, matched against the target as it is",
+                  "a binary an entry runs; `reach` and `sockets` find entries by it",
+                  "an env key an entry sets; `readers_of_env` joins reads to it",
+                  "a socket path an entry binds or names; `sockets` reads it",
+                  "the env key that carries a socket path; `sockets` follows its readers"
+                ]
+              },
+              "entry": {
+                "type": "string",
+                "description": "The key path of the entry's own name (id); the file stem when unset."
+              }
             },
-            "key": {
-              "type": "string",
-              "description": "The key path whose values are the declared names: binary, binds[], env.*, nodes[].answers.*"
-            },
-            "role": {
-              "type": "string",
-              "enum": [
-                "name",
-                "binary",
-                "env",
-                "socket",
-                "socket_env"
-              ],
-              "description": "What the value is, so kinds can join on it."
-            },
-            "entry": {
-              "type": "string",
-              "description": "The key path of the entry's own name (id); the file stem when unset."
-            }
+            "x-1o-single-keys": true
           }
         },
         "readers": {
@@ -115,18 +156,25 @@
           "description": "What counts as reading an env key.",
           "properties": {
             "fns": {
-              "type": "string",
-              "description": "A function that reads the environment. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A function that reads the environment. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "macros": {
-              "type": "string",
-              "description": "A macro that reads it at compile time. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A macro that reads it at compile time. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "follow": {
               "type": "boolean",
               "description": "Also every function reaching one of fns."
             }
-          }
+          },
+          "x-1o-single-keys": true
         },
         "duplicates": {
           "type": "object",
@@ -148,7 +196,8 @@
               "type": "integer",
               "description": "Bodies with fewer significant tokens are not compared."
             }
-          }
+          },
+          "x-1o-single-keys": true
         },
         "patterns": {
           "type": "object",
@@ -175,7 +224,8 @@
               "type": "integer",
               "description": "klepto's shaping: bodies with fewer significant tokens get no klepto shape."
             }
-          }
+          },
+          "x-1o-single-keys": true
         },
         "change": {
           "type": "object",
@@ -183,22 +233,32 @@
           "description": "affected_tests: what changed.",
           "properties": {
             "files": {
-              "type": "string",
-              "description": "A changed file, relative to the root. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A changed file, relative to the root. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "git_ref": {
               "type": "string",
               "description": "A git ref diffed by a declared line before the reading."
             },
             "items": {
-              "type": "string",
-              "description": "A changed item path. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A changed item path. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "signatures": {
-              "type": "string",
-              "description": "A public item whose signature the change alters or removes, as <file>#<path in the file>: the tests of its readers run too. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A public item whose signature the change alters or removes, as <file>#<path in the file>: the tests of its readers run too. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             }
-          }
+          },
+          "x-1o-single-keys": true
         },
         "bundle": {
           "type": "object",
@@ -206,20 +266,27 @@
           "description": "bundle: what the bundle leaves out.",
           "properties": {
             "filters": {
-              "type": "string",
-              "enum": [
-                "no_tests",
-                "no_benches",
-                "no_examples",
-                "only_src"
-              ],
-              "description": "A filter of the filters word. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A filter of the filters word. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "no_tests",
+                  "no_benches",
+                  "no_examples",
+                  "only_src"
+                ]
+              }
             },
             "no_features": {
-              "type": "string",
-              "description": "A feature whose gated files and items are left out. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A feature whose gated files and items are left out. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             }
-          }
+          },
+          "x-1o-single-keys": true
         },
         "requirements": {
           "type": "object",
@@ -231,42 +298,49 @@
               "description": "What the change is for, in the asker's words: the crate it lands in and the packages it brings are read from it."
             },
             "needs": {
-              "type": "object",
-              "additionalProperties": false,
+              "type": "array",
               "description": "One thing the change needs: a dependency in a crate, or a new crate. Repeats: one value per line, in order.",
-              "properties": {
-                "member": {
-                  "type": "string",
-                  "description": "The crate the dependency lands in (a member's package name), or the new crate's name."
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "member": {
+                    "type": "string",
+                    "description": "The crate the dependency lands in (a member's package name), or the new crate's name."
+                  },
+                  "dependency": {
+                    "type": "string",
+                    "description": "The dependency, by its package name."
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "The version requirement asked for, as cargo writes one."
+                  },
+                  "features": {
+                    "type": "array",
+                    "description": "A feature of the dependency the change needs on. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "A path source, relative to the member's directory."
+                  },
+                  "optional": {
+                    "type": "boolean",
+                    "description": "Whether the dependency is optional."
+                  },
+                  "new_crate": {
+                    "type": "string",
+                    "description": "A new crate's directory, relative to the root."
+                  },
+                  "said": {
+                    "type": "string",
+                    "description": "Where the need came from."
+                  }
                 },
-                "dependency": {
-                  "type": "string",
-                  "description": "The dependency, by its package name."
-                },
-                "version": {
-                  "type": "string",
-                  "description": "The version requirement asked for, as cargo writes one."
-                },
-                "features": {
-                  "type": "string",
-                  "description": "A feature of the dependency the change needs on. Repeats: one value per line, in order."
-                },
-                "path": {
-                  "type": "string",
-                  "description": "A path source, relative to the member's directory."
-                },
-                "optional": {
-                  "type": "boolean",
-                  "description": "Whether the dependency is optional."
-                },
-                "new_crate": {
-                  "type": "string",
-                  "description": "A new crate's directory, relative to the root."
-                },
-                "said": {
-                  "type": "string",
-                  "description": "Where the need came from."
-                }
+                "x-1o-single-keys": true
               }
             },
             "change_spec": {
@@ -274,18 +348,24 @@
               "description": "The change spec the needs were made from, as it was named."
             },
             "faces": {
-              "type": "string",
-              "enum": [
-                "prerequisites",
-                "rust",
-                "lock",
-                "no_cargo"
-              ],
-              "description": "A face read: prerequisites, rust, lock; no_cargo reads the manifests only. None is every face. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A face read: prerequisites, rust, lock; no_cargo reads the manifests only. None is every face. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "prerequisites",
+                  "rust",
+                  "lock",
+                  "no_cargo"
+                ]
+              }
             }
-          }
+          },
+          "x-1o-single-keys": true
         }
-      }
+      },
+      "x-1o-single-keys": true
     }
-  }
+  },
+  "x-1o-single-keys": true
 }

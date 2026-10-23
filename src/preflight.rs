@@ -828,7 +828,7 @@ pub fn run_preflight(ctx: &Ctx, spec_path: &Path, job: Option<&InJob>, runner: R
         (None, None) => std::env::temp_dir().join(format!("custodian-preflight-{}", std::process::id())),
     };
     let ipath = dir.join(crate::oneo::Doc::Reading.file_name(&iname));
-    write_whole(&ipath, ispec.to_1o().or_else(|_| toml::to_string(&ispec).map_err(|e| ReadingRefusal::Write.refuse(e)))?.as_bytes())?;
+    write_whole(&ipath, ispec.to_1o()?.as_bytes())?;
     let store = ctx.store.as_ref();
     let how = if job.is_some() { crate::paths::Resolving::Job } else { crate::paths::Resolving::Free };
     let facts_owned;
@@ -1120,7 +1120,7 @@ pub fn run_preflight_batch(ctx: &Ctx, list: &str, spec_paths: &[PathBuf], job: O
             (None, None) => std::env::temp_dir().join(format!("custodian-preflight-{}", std::process::id())),
         };
         let ipath = dir.join(crate::oneo::Doc::Reading.file_name(&ispec.name));
-        write_whole(&ipath, ispec.to_1o().or_else(|_| toml::to_string(&ispec).map_err(|e| ReadingRefusal::Write.refuse(e)))?.as_bytes())?;
+        write_whole(&ipath, ispec.to_1o()?.as_bytes())?;
         let impact = match crate::reading::read_facts_over(facts, Some(&graph), &ipath, &ispec, &stamp) {
             Ok(rep) => Some((ImpactRecord::of(&rep), None, rep.query.results.iter().chain(&rep.unresolved).cloned().collect())),
             Err(e) => {

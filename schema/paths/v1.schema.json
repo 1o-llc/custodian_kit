@@ -13,18 +13,32 @@
       "properties": {
         "decl": {
           "type": "object",
-          "additionalProperties": true,
+          "additionalProperties": {
+            "type": "array",
+            "description": "One declaration set: a glob, one directory and a file pattern in it, written once per glob.",
+            "items": {
+              "type": "string"
+            }
+          },
           "description": "Declaration sets by name: each key a set's name (decl:<name>), each value a glob, one directory and a file pattern in it. A name repeats once per glob."
         },
         "path": {
-          "type": "string",
-          "description": "A raw path, relative to the root, a job may name as path:<raw>. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "A raw path, relative to the root, a job may name as path:<raw>. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "ignore": {
-          "type": "string",
-          "description": "A path no count walks into, in tokei's (gitignore) syntax, on top of target, .git, .custodian and .claude. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "A path no count walks into, in tokei's (gitignore) syntax, on top of target, .git, .custodian and .claude. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         }
-      }
+      },
+      "x-1o-single-keys": true
     }
-  }
+  },
+  "x-1o-single-keys": true
 }

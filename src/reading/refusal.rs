@@ -66,7 +66,7 @@ pub enum ReadingRefusal {
     BadReply,
     #[liaise(code = 29, msg = "a 1o document does not parse, does not match its schema, or does not read into its form")]
     OneoInvalid,
-    #[liaise(code = 30, msg = "a value cannot be written in 1o (core-1o strings have no escapes, so a double quote cannot be carried; no negative numbers)")]
+    #[liaise(code = 30, msg = "a value cannot be written in 1o (core-1o reads no negative numbers)")]
     OneoUnwritable,
     #[liaise(code = 31, msg = "a bounded job's touched lines are not all covered by its transform receipts: the agent wrote code by hand")]
     BoundedUncovered,

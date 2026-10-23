@@ -48,25 +48,29 @@ declared once as a 1o schema shipped in this crate:
 | paths table | `v1.paths.1o.paths` | `schema/paths/v1.schema.json` |
 
 ```text
-{
-  reading {
-    name "serve-metrics-use-sites"
-    question "Who calls serve_metrics?"
-    kind "use_sites"
-    target "serve_metrics"
-    scope {
-      exclude "attempts/**"
-      exclude "crates/old/**"
-    }
+reading {
+  name "serve-metrics-use-sites"
+  question "Who calls serve_metrics?"
+  kind "use_sites"
+  target "serve_metrics"
+  scope {
+    exclude "attempts/**"
+    exclude "crates/old/**"
   }
 }
 ```
 
-core-1o parses the text and checks it against the schema; the result reads
-into the same `ReadingSpec` a TOML spec reads into, so a spec and its TOML
-twin are one spec with one digest (the digest is over that form, never the
-text). A key written several times is a list. TOML and JSON specs are still
-read.
+core-1o (0.2) parses the text and checks it against the schema; the result
+reads into the same `ReadingSpec` a TOML spec reads into, so a spec and its
+TOML twin are one spec with one digest (the digest is over that form, never the
+text). The record is written at the top level; the older `{ reading { ... } }`
+reads the same. A string is written with core-1o's escapes (`\\ \" \n \t \r`),
+so any text is carried. The schema says which keys repeat (`type: array`: a key
+written once per value) and that every other key is written once
+(`x-1o-single-keys`), what each vocabulary word means (`enumDescriptions`, shown
+by the language server), and, for a change spec, which keys each operation needs
+(`x-1o-required-when`). Every spec, change spec, job file and linkage record is
+written in 1o; TOML and JSON specs are still read, for one more version.
 
 `custodian init` copies the schemas to `.custodian/config/schema/` and lists
 that folder in the project's `oneo.project.json`, which is where core-1o's
@@ -410,7 +414,7 @@ workspace: parsed in 35.9 s at 5.7 GB, read back in 3.3 s at 1.8 GB. Every diges
 
 ## Change specs and the preflight
 
-A change spec (1o modifier `change`, `v1.<name>.1o.change`, or its TOML twin,
+A change spec (1o modifier `change`, `v1.<name>.1o.change`; a TOML spec is still read,
 in `data/specs/changes/`) asks for one operation on one target, with its
 objective, boundaries (the files it may write), the call sites a signature
 change passes, the questions it leaves, and whether existing uses must keep

@@ -531,7 +531,7 @@ impl ChangeSpec {
         }
     }
 
-    /// The spec as a 1o document (refused when a value holds a double quote: core-1o has no escapes).
+    /// The spec as a 1o document, the form every writer of a change spec writes.
     pub fn to_1o(&self) -> Result<String> {
         crate::oneo::render(crate::oneo::Doc::Change, self)
     }

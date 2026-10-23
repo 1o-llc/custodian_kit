@@ -36,8 +36,11 @@
           "description": "Count the job's routes at open, after each step that changes code, and at close."
         },
         "routes": {
-          "type": "string",
-          "description": "A route counted (crate:<name>, decl:<name>, *); the template's count_route, else the workspace. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "A route counted (crate:<name>, decl:<name>, *); the template's count_route, else the workspace. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "task_id": {
           "type": "string",
@@ -53,11 +56,18 @@
             "bounded",
             "unbounded"
           ],
-          "description": "bounded (the agent writes no code: change specs only, every touched line covered by a transform receipt) or unbounded (help, nothing refused); the workspace's job_mode when unset."
+          "description": "bounded (the agent writes no code: change specs only, every touched line covered by a transform receipt) or unbounded (help, nothing refused); the workspace's job_mode when unset.",
+          "enumDescriptions": [
+            "strict: the agent writes no code; it submits change specs, custodian generates and places the code through code_passenger and simple_impl, and every line the job touches must be covered by a transform receipt of the job",
+            "help: readings, plans, impact and cost, the decisions list and reuse by digest are there; the agent writes code itself and nothing is refused; the closing receipt records what ran and the lines touched"
+          ]
         },
         "verify": {
-          "type": "string",
-          "description": "What done looks like, declared up front: test:<name>, reading:<spec> (a reading that must change), check:<which>. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "What done looks like, declared up front: test:<name>, reading:<spec> (a reading that must change), check:<which>. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "target_known": {
           "type": "boolean",
@@ -76,14 +86,19 @@
           "description": "Run the tests the target reaches at open, and keep their outcomes as the job's baseline."
         },
         "allow_file": {
-          "type": "string",
-          "description": "A file the job may touch that no operation writes (a test's expected output, a fixture), as a glob from the root. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "A file the job may touch that no operation writes (a test's expected output, a fixture), as a glob from the root. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "budget": {
           "type": "string",
           "description": "The job's budget, hours=<n>,battery=<percent>: a step whose measured time would take the job past its hours is refused before it starts; under the battery floor no cargo line starts."
         }
-      }
+      },
+      "x-1o-single-keys": true
     }
-  }
+  },
+  "x-1o-single-keys": true
 }

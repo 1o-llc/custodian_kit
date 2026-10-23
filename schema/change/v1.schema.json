@@ -47,9 +47,41 @@
             "inline",
             "wrap",
             "make_lib",
+            "remove_dependency",
+            "rename_paths",
             "declare_feature"
           ],
-          "description": "What the writer does (the operations table in custodian_kit's README)."
+          "description": "What the writer does (the operations table in custodian_kit's README).",
+          "enumDescriptions": [
+            "a new struct in a module (target: crate:<name> or crate:<name>/src/<file>.rs): name, fields with types and visibility, derives, attributes, docs",
+            "a new enum in a module: name, variants (unit, tuple or named fields, discriminants), derives, attributes, docs",
+            "a new inherent impl block for a type (target: the type), with its functions",
+            "a function added to a type's impl (target: the type): its signature and body, or a toolkit method generator",
+            "a free function in a module: its signature and body",
+            "a field added to a struct (target: the struct); with a default, every struct literal gets it too",
+            "a variant added to an enum (target: the enum); the matches without a catch-all arm are listed, never edited",
+            "derives added to a type (target: the type), merged into its #[derive(..)]",
+            "one attribute line placed on an item (target: the item)",
+            "a new module: its own file and its `mod` line in the parent (target: the parent route)",
+            "a dependency line in a crate's Cargo.toml (target: crate:<name>); `optional = true` makes it optional, and the lock file cargo writes is written with it",
+            "a test function (target: the function it proves): in the file's tests module (`to`: another inline test module of the file, by name; one the file does not have is made, `#[cfg(test)]`), its body from toolkit pieces",
+            "a constructor for a type (target: the type): `Self { field: param, .. }`, or a toolkit constructor generator",
+            "`impl Trait for Type` (target: the type): a toolkit impl generator, or the trait's functions",
+            "a function's signature changed (target: the function): a new parameter with the expression its call sites pass (inside a macro's arguments too; refused while a call site is unresolved, unless `call_sites.allow_unresolved`), a new name, a new return type; with `function.body`, its body written in the same step (a body that compiles only against the new signature)",
+            "an item renamed (target: the item) at its declaration and every use klepto resolves to it",
+            "an item moved to another module (target: the item, `to`: the module route), re-exported where it was so its paths still resolve",
+            "items moved out of a file into a new module of their own (`items`, `module`), re-exported where they were",
+            "an item put behind a crate feature the crate declares (target: the item, `feature`); an item already gated by it is refused. Code that compiles only with the feature on gets its gate as it is made, in the same step: `#[cfg(feature = \"..\")]` in the function's `attrs` (add_method, make_fn, add_test)",
+            "a linkage record's comment anchor placed above an item (target: the item, `linkage`: the record's name)",
+            "a function's body replaced (target: the function, `function`: its name and the new body as toolkit pieces); its signature, docs and attributes kept, so its callers are untouched; with a toolkit method generator (`function.generator`) the whole function is written as the call, its signature, docs and attributes inside it",
+            "a dependency a crate already names, changed (target: crate:<name>, or `*`: every crate of the workspace naming it; `dependency`, or several in `dependencies` so a family moves together): its source becomes what the spec names (a version alone is the registry's, the path dropped; a path, with or without a version), features given replace its features; `optional` true or false, alone (its source kept) or with the rest",
+            "a function's body put in place of every call to it (target: a free function, or an associated one without self): each call becomes a block that binds the parameters to the call's arguments with `let`, then the body; the function is removed when it is not `pub` and every use of it was a call",
+            "a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched",
+            "a crate's library root, src/lib.rs, made beside its binary (target: crate:<name>, a crate with no library; `module.doc`: the file's inner doc): cargo builds it as the crate's library, and the binary reaches it by the crate's name",
+            "a dependency a crate names, dropped from its manifest (target: crate:<name>; `dependency`: its name): refused while a feature names it or a source file of the crate still names its paths (each place said), then proved by the compile",
+            "every path through one crate in a crate's sources made a path through another (target: crate:<name>; `dependency.name`: the crate the paths name now, `new_name`: the crate they name after): `old::` becomes `new::`, `use old` and `extern crate old` with it, in every source file of the crate; proved by the compile",
+            "a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given"
+          ]
         },
         "target": {
           "type": "string",
@@ -76,116 +108,149 @@
               "description": "<T>."
             },
             "derives": {
-              "type": "string",
-              "description": "A derive. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A derive. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "attrs": {
-              "type": "string",
-              "description": "An attribute line. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "An attribute line. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "fields": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "description": "The field's name."
-                },
-                "ty": {
-                  "type": "string",
-                  "description": "Its type."
-                },
-                "vis": {
-                  "type": "string",
-                  "description": "pub, pub(crate)."
-                },
-                "doc": {
-                  "type": "string",
-                  "description": "Its doc line."
-                },
-                "attrs": {
-                  "type": "string",
-                  "description": "An attribute line. Repeats: one value per line, in order."
-                },
-                "default": {
-                  "type": "string",
-                  "description": "The expression every existing struct literal gets for it."
-                }
-              },
-              "required": [
-                "name",
-                "ty"
-              ],
-              "description": "A struct field. Repeats: one block per value, in order."
-            },
-            "tuple": {
-              "type": "string",
-              "description": "A tuple struct's field type. Repeats: one value per line, in order."
-            },
-            "variants": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "description": "The variant's name."
-                },
-                "doc": {
-                  "type": "string",
-                  "description": "Its doc line."
-                },
-                "attrs": {
-                  "type": "string",
-                  "description": "An attribute line. Repeats: one value per line, in order."
-                },
-                "tuple": {
-                  "type": "string",
-                  "description": "A tuple field's type. Repeats: one value per line, in order."
-                },
-                "fields": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "name": {
-                      "type": "string",
-                      "description": "The field's name."
-                    },
-                    "ty": {
-                      "type": "string",
-                      "description": "Its type."
-                    },
-                    "vis": {
-                      "type": "string",
-                      "description": "pub, pub(crate)."
-                    },
-                    "doc": {
-                      "type": "string",
-                      "description": "Its doc line."
-                    },
-                    "attrs": {
-                      "type": "string",
-                      "description": "An attribute line. Repeats: one value per line, in order."
-                    },
-                    "default": {
-                      "type": "string",
-                      "description": "The expression every existing struct literal gets for it."
+              "type": "array",
+              "description": "A struct field. Repeats: one block per value, in order.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The field's name."
+                  },
+                  "ty": {
+                    "type": "string",
+                    "description": "Its type."
+                  },
+                  "vis": {
+                    "type": "string",
+                    "description": "pub, pub(crate)."
+                  },
+                  "doc": {
+                    "type": "string",
+                    "description": "Its doc line."
+                  },
+                  "attrs": {
+                    "type": "array",
+                    "description": "An attribute line. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
                     }
                   },
-                  "required": [
-                    "name",
-                    "ty"
-                  ],
-                  "description": "A named field. Repeats: one block per value, in order."
+                  "default": {
+                    "type": "string",
+                    "description": "The expression every existing struct literal gets for it."
+                  }
                 },
-                "discriminant": {
-                  "type": "string",
-                  "description": "= N, as written."
-                }
-              },
-              "required": [
-                "name"
-              ],
-              "description": "An enum variant. Repeats: one block per value, in order."
+                "required": [
+                  "name",
+                  "ty"
+                ],
+                "x-1o-single-keys": true
+              }
+            },
+            "tuple": {
+              "type": "array",
+              "description": "A tuple struct's field type. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "variants": {
+              "type": "array",
+              "description": "An enum variant. Repeats: one block per value, in order.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The variant's name."
+                  },
+                  "doc": {
+                    "type": "string",
+                    "description": "Its doc line."
+                  },
+                  "attrs": {
+                    "type": "array",
+                    "description": "An attribute line. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "tuple": {
+                    "type": "array",
+                    "description": "A tuple field's type. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "fields": {
+                    "type": "array",
+                    "description": "A named field. Repeats: one block per value, in order.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "The field's name."
+                        },
+                        "ty": {
+                          "type": "string",
+                          "description": "Its type."
+                        },
+                        "vis": {
+                          "type": "string",
+                          "description": "pub, pub(crate)."
+                        },
+                        "doc": {
+                          "type": "string",
+                          "description": "Its doc line."
+                        },
+                        "attrs": {
+                          "type": "array",
+                          "description": "An attribute line. Repeats: one value per line, in order.",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "default": {
+                          "type": "string",
+                          "description": "The expression every existing struct literal gets for it."
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "ty"
+                      ],
+                      "x-1o-single-keys": true
+                    }
+                  },
+                  "discriminant": {
+                    "type": "string",
+                    "description": "= N, as written."
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "x-1o-single-keys": true
+              }
             },
             "generator": {
               "type": "object",
@@ -339,16 +404,22 @@
                   "description": "The piece's `condition` argument, as its macro takes it."
                 },
                 "conditions": {
-                  "type": "string",
-                  "description": "The piece's `conditions` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `conditions` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "error": {
                   "type": "string",
                   "description": "The piece's `error` argument, as its macro takes it."
                 },
                 "errors": {
-                  "type": "string",
-                  "description": "The piece's `errors` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `errors` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "value": {
                   "type": "string",
@@ -415,8 +486,11 @@
                   "description": "The piece's `cleanup` argument, as its macro takes it."
                 },
                 "candidates": {
-                  "type": "string",
-                  "description": "The piece's `candidates` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `candidates` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "parts": {
                   "type": "string",
@@ -427,16 +501,25 @@
                   "description": "The piece's `this` argument, as its macro takes it."
                 },
                 "fields": {
-                  "type": "string",
-                  "description": "The piece's `fields` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `fields` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "flags": {
-                  "type": "string",
-                  "description": "The piece's `flags` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `flags` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "args": {
-                  "type": "string",
-                  "description": "The piece's `args` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `args` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "opt": {
                   "type": "string",
@@ -534,13 +617,15 @@
               "required": [
                 "piece"
               ],
-              "description": "A toolkit item generator in place of a declaration."
+              "description": "A toolkit item generator in place of a declaration.",
+              "x-1o-single-keys": true
             }
           },
           "required": [
             "name"
           ],
-          "description": "make_struct, make_enum: the declaration."
+          "description": "make_struct, make_enum: the declaration.",
+          "x-1o-single-keys": true
         },
         "function": {
           "type": "object",
@@ -559,22 +644,26 @@
               "description": "&self, &mut self, self, mut self."
             },
             "params": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "description": "The parameter's name."
+              "type": "array",
+              "description": "A parameter. Repeats: one block per value, in order.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The parameter's name."
+                  },
+                  "ty": {
+                    "type": "string",
+                    "description": "Its type."
+                  }
                 },
-                "ty": {
-                  "type": "string",
-                  "description": "Its type."
-                }
-              },
-              "required": [
-                "name"
-              ],
-              "description": "A parameter. Repeats: one block per value, in order."
+                "required": [
+                  "name"
+                ],
+                "x-1o-single-keys": true
+              }
             },
             "returns": {
               "type": "string",
@@ -601,361 +690,386 @@
               "description": "An unsafe fn."
             },
             "attrs": {
-              "type": "string",
-              "description": "An attribute line, #[...]. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "An attribute line, #[...]. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "doc": {
               "type": "string",
               "description": "The doc line, without ///."
             },
             "body": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "piece": {
-                  "type": "string",
-                  "enum": [
-                    "count_true",
-                    "all",
-                    "any",
-                    "exactly_one",
-                    "at_most_one",
-                    "implies",
-                    "excludes",
-                    "in_range",
-                    "nonempty",
-                    "is_one_of",
-                    "guard",
-                    "ensure",
-                    "bail",
-                    "guard_with",
-                    "ensure_with",
-                    "bail_with",
-                    "ensure_eq",
-                    "ensure_ne",
-                    "ensure_nonempty",
-                    "ensure_empty",
-                    "ensure_len",
-                    "ensure_min_len",
-                    "ensure_max_len",
-                    "ensure_range",
-                    "ensure_all",
-                    "ensure_any",
-                    "ensure_exactly_one",
-                    "ensure_at_most_one",
-                    "ensure_implies",
-                    "ensure_excludes",
-                    "ensure_valid",
-                    "require_some",
-                    "require_ok",
-                    "some_or_return",
-                    "ok_or_return",
-                    "return_if",
-                    "return_unless",
-                    "none_if",
-                    "break_if",
-                    "continue_if",
-                    "some_or_continue",
-                    "some_or_break",
-                    "require_ok_into",
-                    "require_some_into",
-                    "ok_or_else_return",
-                    "return_if_err",
-                    "if_else",
-                    "table",
-                    "push_if",
-                    "push_some",
-                    "extend_if",
-                    "extend_some",
-                    "insert_if",
-                    "insert_some",
-                    "assign_if",
-                    "assign_if_some",
-                    "push_unique",
-                    "extend_unique",
-                    "sc_cmd",
-                    "sc_flags",
-                    "sc_flags_into",
-                    "sc_opt_kv",
-                    "sc_args",
-                    "sc_if_some",
-                    "sc_if_some_display",
-                    "sc_if_some_into",
-                    "sc_if_some_clone",
-                    "sc_if_some_prefix",
-                    "sc_each",
-                    "sc_each_display",
-                    "sc_if_some_flag",
-                    "simple_method",
-                    "checked_method",
-                    "checked_constructor",
-                    "getter",
-                    "getter_ref",
-                    "getter_mut",
-                    "getter_option_ref",
-                    "getter_option_deref",
-                    "getter_slice",
-                    "len_field",
-                    "is_empty_field",
-                    "bool_field",
-                    "contains_field",
-                    "find_by",
-                    "delegate",
-                    "delegate_mut",
-                    "newtype_value",
-                    "newtype_ref",
-                    "setter",
-                    "setter_into",
-                    "setter_some",
-                    "setter_some_into",
-                    "clear_collection",
-                    "take_field",
-                    "enable_field",
-                    "disable_field",
-                    "toggle_field",
-                    "with_field",
-                    "with_into",
-                    "with_some",
-                    "with_some_into",
-                    "with_push",
-                    "with_push_into",
-                    "with_extend",
-                    "with_flag",
-                    "without_flag",
-                    "with_unique_push",
-                    "newtype_constructor",
-                    "forward_trait_method",
-                    "builder_new_default",
-                    "builder_opt",
-                    "builder_opt_into",
-                    "builder_set",
-                    "builder_vec_into",
-                    "builder_vec_iter",
-                    "builder_push",
-                    "builder_flag",
-                    "impl_default_via_new",
-                    "impl_from_newtype",
-                    "impl_as_ref_newtype",
-                    "impl_deref_newtype",
-                    "impl_deref_mut_newtype",
-                    "impl_display_via",
-                    "impl_debug_redacted",
-                    "impl_std_error",
-                    "impl_partial_ord_via_ord",
-                    "impl_from_variant",
-                    "shell_command_builder",
-                    "define_shell_builder",
-                    "let",
-                    "value",
-                    "raw"
-                  ],
-                  "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
+              "type": "array",
+              "description": "One step of the body. Repeats: one block per value, in order.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "piece": {
+                    "type": "string",
+                    "enum": [
+                      "count_true",
+                      "all",
+                      "any",
+                      "exactly_one",
+                      "at_most_one",
+                      "implies",
+                      "excludes",
+                      "in_range",
+                      "nonempty",
+                      "is_one_of",
+                      "guard",
+                      "ensure",
+                      "bail",
+                      "guard_with",
+                      "ensure_with",
+                      "bail_with",
+                      "ensure_eq",
+                      "ensure_ne",
+                      "ensure_nonempty",
+                      "ensure_empty",
+                      "ensure_len",
+                      "ensure_min_len",
+                      "ensure_max_len",
+                      "ensure_range",
+                      "ensure_all",
+                      "ensure_any",
+                      "ensure_exactly_one",
+                      "ensure_at_most_one",
+                      "ensure_implies",
+                      "ensure_excludes",
+                      "ensure_valid",
+                      "require_some",
+                      "require_ok",
+                      "some_or_return",
+                      "ok_or_return",
+                      "return_if",
+                      "return_unless",
+                      "none_if",
+                      "break_if",
+                      "continue_if",
+                      "some_or_continue",
+                      "some_or_break",
+                      "require_ok_into",
+                      "require_some_into",
+                      "ok_or_else_return",
+                      "return_if_err",
+                      "if_else",
+                      "table",
+                      "push_if",
+                      "push_some",
+                      "extend_if",
+                      "extend_some",
+                      "insert_if",
+                      "insert_some",
+                      "assign_if",
+                      "assign_if_some",
+                      "push_unique",
+                      "extend_unique",
+                      "sc_cmd",
+                      "sc_flags",
+                      "sc_flags_into",
+                      "sc_opt_kv",
+                      "sc_args",
+                      "sc_if_some",
+                      "sc_if_some_display",
+                      "sc_if_some_into",
+                      "sc_if_some_clone",
+                      "sc_if_some_prefix",
+                      "sc_each",
+                      "sc_each_display",
+                      "sc_if_some_flag",
+                      "simple_method",
+                      "checked_method",
+                      "checked_constructor",
+                      "getter",
+                      "getter_ref",
+                      "getter_mut",
+                      "getter_option_ref",
+                      "getter_option_deref",
+                      "getter_slice",
+                      "len_field",
+                      "is_empty_field",
+                      "bool_field",
+                      "contains_field",
+                      "find_by",
+                      "delegate",
+                      "delegate_mut",
+                      "newtype_value",
+                      "newtype_ref",
+                      "setter",
+                      "setter_into",
+                      "setter_some",
+                      "setter_some_into",
+                      "clear_collection",
+                      "take_field",
+                      "enable_field",
+                      "disable_field",
+                      "toggle_field",
+                      "with_field",
+                      "with_into",
+                      "with_some",
+                      "with_some_into",
+                      "with_push",
+                      "with_push_into",
+                      "with_extend",
+                      "with_flag",
+                      "without_flag",
+                      "with_unique_push",
+                      "newtype_constructor",
+                      "forward_trait_method",
+                      "builder_new_default",
+                      "builder_opt",
+                      "builder_opt_into",
+                      "builder_set",
+                      "builder_vec_into",
+                      "builder_vec_iter",
+                      "builder_push",
+                      "builder_flag",
+                      "impl_default_via_new",
+                      "impl_from_newtype",
+                      "impl_as_ref_newtype",
+                      "impl_deref_newtype",
+                      "impl_deref_mut_newtype",
+                      "impl_display_via",
+                      "impl_debug_redacted",
+                      "impl_std_error",
+                      "impl_partial_ord_via_ord",
+                      "impl_from_variant",
+                      "shell_command_builder",
+                      "define_shell_builder",
+                      "let",
+                      "value",
+                      "raw"
+                    ],
+                    "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
+                  },
+                  "bind": {
+                    "type": "string",
+                    "description": "The piece's `bind` argument, as its macro takes it."
+                  },
+                  "condition": {
+                    "type": "string",
+                    "description": "The piece's `condition` argument, as its macro takes it."
+                  },
+                  "conditions": {
+                    "type": "array",
+                    "description": "The piece's `conditions` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "error": {
+                    "type": "string",
+                    "description": "The piece's `error` argument, as its macro takes it."
+                  },
+                  "errors": {
+                    "type": "array",
+                    "description": "The piece's `errors` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "The piece's `value` argument, as its macro takes it."
+                  },
+                  "values": {
+                    "type": "string",
+                    "description": "The piece's `values` argument, as its macro takes it."
+                  },
+                  "option": {
+                    "type": "string",
+                    "description": "The piece's `option` argument, as its macro takes it."
+                  },
+                  "result": {
+                    "type": "string",
+                    "description": "The piece's `result` argument, as its macro takes it."
+                  },
+                  "map_error": {
+                    "type": "string",
+                    "description": "The piece's `map_error` argument, as its macro takes it."
+                  },
+                  "return_value": {
+                    "type": "string",
+                    "description": "The piece's `return_value` argument, as its macro takes it."
+                  },
+                  "left": {
+                    "type": "string",
+                    "description": "The piece's `left` argument, as its macro takes it."
+                  },
+                  "right": {
+                    "type": "string",
+                    "description": "The piece's `right` argument, as its macro takes it."
+                  },
+                  "expected": {
+                    "type": "string",
+                    "description": "The piece's `expected` argument, as its macro takes it."
+                  },
+                  "minimum": {
+                    "type": "string",
+                    "description": "The piece's `minimum` argument, as its macro takes it."
+                  },
+                  "maximum": {
+                    "type": "string",
+                    "description": "The piece's `maximum` argument, as its macro takes it."
+                  },
+                  "collection": {
+                    "type": "string",
+                    "description": "The piece's `collection` argument, as its macro takes it."
+                  },
+                  "map": {
+                    "type": "string",
+                    "description": "The piece's `map` argument, as its macro takes it."
+                  },
+                  "key": {
+                    "type": "string",
+                    "description": "The piece's `key` argument, as its macro takes it."
+                  },
+                  "place": {
+                    "type": "string",
+                    "description": "The piece's `place` argument, as its macro takes it."
+                  },
+                  "cleanup": {
+                    "type": "string",
+                    "description": "The piece's `cleanup` argument, as its macro takes it."
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "description": "The piece's `candidates` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "parts": {
+                    "type": "string",
+                    "description": "The piece's `parts` argument, as its macro takes it."
+                  },
+                  "this": {
+                    "type": "string",
+                    "description": "The piece's `this` argument, as its macro takes it."
+                  },
+                  "fields": {
+                    "type": "array",
+                    "description": "The piece's `fields` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "flags": {
+                    "type": "array",
+                    "description": "The piece's `flags` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "args": {
+                    "type": "array",
+                    "description": "The piece's `args` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "opt": {
+                    "type": "string",
+                    "description": "The piece's `opt` argument, as its macro takes it."
+                  },
+                  "prefix": {
+                    "type": "string",
+                    "description": "The piece's `prefix` argument, as its macro takes it."
+                  },
+                  "iter": {
+                    "type": "string",
+                    "description": "The piece's `iter` argument, as its macro takes it."
+                  },
+                  "vec": {
+                    "type": "string",
+                    "description": "The piece's `vec` argument, as its macro takes it."
+                  },
+                  "flag": {
+                    "type": "string",
+                    "description": "The piece's `flag` argument, as its macro takes it."
+                  },
+                  "field": {
+                    "type": "string",
+                    "description": "The piece's `field` argument, as its macro takes it."
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "The piece's `method` argument, as its macro takes it."
+                  },
+                  "pass": {
+                    "type": "string",
+                    "description": "The piece's `pass` argument, as its macro takes it."
+                  },
+                  "item": {
+                    "type": "string",
+                    "description": "The piece's `item` argument, as its macro takes it."
+                  },
+                  "target": {
+                    "type": "string",
+                    "description": "The piece's `target` argument, as its macro takes it."
+                  },
+                  "elem": {
+                    "type": "string",
+                    "description": "The piece's `elem` argument, as its macro takes it."
+                  },
+                  "error_ty": {
+                    "type": "string",
+                    "description": "The piece's `error_ty` argument, as its macro takes it."
+                  },
+                  "ty": {
+                    "type": "string",
+                    "description": "The piece's `ty` argument, as its macro takes it."
+                  },
+                  "wrapper": {
+                    "type": "string",
+                    "description": "The piece's `wrapper` argument, as its macro takes it."
+                  },
+                  "inner": {
+                    "type": "string",
+                    "description": "The piece's `inner` argument, as its macro takes it."
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "The piece's `text` argument, as its macro takes it."
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "The piece's `source` argument, as its macro takes it."
+                  },
+                  "variant": {
+                    "type": "string",
+                    "description": "The piece's `variant` argument, as its macro takes it."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "The piece's `name` argument, as its macro takes it."
+                  },
+                  "command": {
+                    "type": "string",
+                    "description": "The piece's `command` argument, as its macro takes it."
+                  },
+                  "block": {
+                    "type": "string",
+                    "description": "The piece's `block` argument, as its macro takes it."
+                  },
+                  "code": {
+                    "type": "string",
+                    "description": "The piece's `code` argument, as its macro takes it."
+                  },
+                  "vis": {
+                    "type": "string",
+                    "description": "The piece's `vis` argument, as its macro takes it."
+                  }
                 },
-                "bind": {
-                  "type": "string",
-                  "description": "The piece's `bind` argument, as its macro takes it."
-                },
-                "condition": {
-                  "type": "string",
-                  "description": "The piece's `condition` argument, as its macro takes it."
-                },
-                "conditions": {
-                  "type": "string",
-                  "description": "The piece's `conditions` arguments. Repeats: one value per line, in order."
-                },
-                "error": {
-                  "type": "string",
-                  "description": "The piece's `error` argument, as its macro takes it."
-                },
-                "errors": {
-                  "type": "string",
-                  "description": "The piece's `errors` arguments. Repeats: one value per line, in order."
-                },
-                "value": {
-                  "type": "string",
-                  "description": "The piece's `value` argument, as its macro takes it."
-                },
-                "values": {
-                  "type": "string",
-                  "description": "The piece's `values` argument, as its macro takes it."
-                },
-                "option": {
-                  "type": "string",
-                  "description": "The piece's `option` argument, as its macro takes it."
-                },
-                "result": {
-                  "type": "string",
-                  "description": "The piece's `result` argument, as its macro takes it."
-                },
-                "map_error": {
-                  "type": "string",
-                  "description": "The piece's `map_error` argument, as its macro takes it."
-                },
-                "return_value": {
-                  "type": "string",
-                  "description": "The piece's `return_value` argument, as its macro takes it."
-                },
-                "left": {
-                  "type": "string",
-                  "description": "The piece's `left` argument, as its macro takes it."
-                },
-                "right": {
-                  "type": "string",
-                  "description": "The piece's `right` argument, as its macro takes it."
-                },
-                "expected": {
-                  "type": "string",
-                  "description": "The piece's `expected` argument, as its macro takes it."
-                },
-                "minimum": {
-                  "type": "string",
-                  "description": "The piece's `minimum` argument, as its macro takes it."
-                },
-                "maximum": {
-                  "type": "string",
-                  "description": "The piece's `maximum` argument, as its macro takes it."
-                },
-                "collection": {
-                  "type": "string",
-                  "description": "The piece's `collection` argument, as its macro takes it."
-                },
-                "map": {
-                  "type": "string",
-                  "description": "The piece's `map` argument, as its macro takes it."
-                },
-                "key": {
-                  "type": "string",
-                  "description": "The piece's `key` argument, as its macro takes it."
-                },
-                "place": {
-                  "type": "string",
-                  "description": "The piece's `place` argument, as its macro takes it."
-                },
-                "cleanup": {
-                  "type": "string",
-                  "description": "The piece's `cleanup` argument, as its macro takes it."
-                },
-                "candidates": {
-                  "type": "string",
-                  "description": "The piece's `candidates` arguments. Repeats: one value per line, in order."
-                },
-                "parts": {
-                  "type": "string",
-                  "description": "The piece's `parts` argument, as its macro takes it."
-                },
-                "this": {
-                  "type": "string",
-                  "description": "The piece's `this` argument, as its macro takes it."
-                },
-                "fields": {
-                  "type": "string",
-                  "description": "The piece's `fields` arguments. Repeats: one value per line, in order."
-                },
-                "flags": {
-                  "type": "string",
-                  "description": "The piece's `flags` arguments. Repeats: one value per line, in order."
-                },
-                "args": {
-                  "type": "string",
-                  "description": "The piece's `args` arguments. Repeats: one value per line, in order."
-                },
-                "opt": {
-                  "type": "string",
-                  "description": "The piece's `opt` argument, as its macro takes it."
-                },
-                "prefix": {
-                  "type": "string",
-                  "description": "The piece's `prefix` argument, as its macro takes it."
-                },
-                "iter": {
-                  "type": "string",
-                  "description": "The piece's `iter` argument, as its macro takes it."
-                },
-                "vec": {
-                  "type": "string",
-                  "description": "The piece's `vec` argument, as its macro takes it."
-                },
-                "flag": {
-                  "type": "string",
-                  "description": "The piece's `flag` argument, as its macro takes it."
-                },
-                "field": {
-                  "type": "string",
-                  "description": "The piece's `field` argument, as its macro takes it."
-                },
-                "method": {
-                  "type": "string",
-                  "description": "The piece's `method` argument, as its macro takes it."
-                },
-                "pass": {
-                  "type": "string",
-                  "description": "The piece's `pass` argument, as its macro takes it."
-                },
-                "item": {
-                  "type": "string",
-                  "description": "The piece's `item` argument, as its macro takes it."
-                },
-                "target": {
-                  "type": "string",
-                  "description": "The piece's `target` argument, as its macro takes it."
-                },
-                "elem": {
-                  "type": "string",
-                  "description": "The piece's `elem` argument, as its macro takes it."
-                },
-                "error_ty": {
-                  "type": "string",
-                  "description": "The piece's `error_ty` argument, as its macro takes it."
-                },
-                "ty": {
-                  "type": "string",
-                  "description": "The piece's `ty` argument, as its macro takes it."
-                },
-                "wrapper": {
-                  "type": "string",
-                  "description": "The piece's `wrapper` argument, as its macro takes it."
-                },
-                "inner": {
-                  "type": "string",
-                  "description": "The piece's `inner` argument, as its macro takes it."
-                },
-                "text": {
-                  "type": "string",
-                  "description": "The piece's `text` argument, as its macro takes it."
-                },
-                "source": {
-                  "type": "string",
-                  "description": "The piece's `source` argument, as its macro takes it."
-                },
-                "variant": {
-                  "type": "string",
-                  "description": "The piece's `variant` argument, as its macro takes it."
-                },
-                "name": {
-                  "type": "string",
-                  "description": "The piece's `name` argument, as its macro takes it."
-                },
-                "command": {
-                  "type": "string",
-                  "description": "The piece's `command` argument, as its macro takes it."
-                },
-                "block": {
-                  "type": "string",
-                  "description": "The piece's `block` argument, as its macro takes it."
-                },
-                "code": {
-                  "type": "string",
-                  "description": "The piece's `code` argument, as its macro takes it."
-                },
-                "vis": {
-                  "type": "string",
-                  "description": "The piece's `vis` argument, as its macro takes it."
-                }
-              },
-              "required": [
-                "piece"
-              ],
-              "description": "One step of the body. Repeats: one block per value, in order."
+                "required": [
+                  "piece"
+                ],
+                "x-1o-single-keys": true
+              }
             },
             "generator": {
               "type": "object",
@@ -1109,16 +1223,22 @@
                   "description": "The piece's `condition` argument, as its macro takes it."
                 },
                 "conditions": {
-                  "type": "string",
-                  "description": "The piece's `conditions` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `conditions` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "error": {
                   "type": "string",
                   "description": "The piece's `error` argument, as its macro takes it."
                 },
                 "errors": {
-                  "type": "string",
-                  "description": "The piece's `errors` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `errors` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "value": {
                   "type": "string",
@@ -1185,8 +1305,11 @@
                   "description": "The piece's `cleanup` argument, as its macro takes it."
                 },
                 "candidates": {
-                  "type": "string",
-                  "description": "The piece's `candidates` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `candidates` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "parts": {
                   "type": "string",
@@ -1197,16 +1320,25 @@
                   "description": "The piece's `this` argument, as its macro takes it."
                 },
                 "fields": {
-                  "type": "string",
-                  "description": "The piece's `fields` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `fields` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "flags": {
-                  "type": "string",
-                  "description": "The piece's `flags` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `flags` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "args": {
-                  "type": "string",
-                  "description": "The piece's `args` arguments. Repeats: one value per line, in order."
+                  "type": "array",
+                  "description": "The piece's `args` arguments. Repeats: one value per line, in order.",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "opt": {
                   "type": "string",
@@ -1304,783 +1436,837 @@
               "required": [
                 "piece"
               ],
-              "description": "A toolkit method generator that makes the whole function."
+              "description": "A toolkit method generator that makes the whole function.",
+              "x-1o-single-keys": true
             }
           },
           "required": [
             "name"
           ],
-          "description": "add_method, make_fn, add_test, add_constructor, change_signature: the function."
+          "description": "add_method, make_fn, add_test, add_constructor, change_signature: the function.",
+          "x-1o-single-keys": true
         },
         "functions": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "name": {
-              "type": "string",
-              "description": "The function's name."
-            },
-            "vis": {
-              "type": "string",
-              "description": "pub, pub(crate); private when unset."
-            },
-            "receiver": {
-              "type": "string",
-              "description": "&self, &mut self, self, mut self."
-            },
-            "params": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "description": "The parameter's name."
-                },
-                "ty": {
-                  "type": "string",
-                  "description": "Its type."
-                }
+          "type": "array",
+          "description": "make_impl, add_trait_impl: a function of the impl. Repeats: one block per value, in order.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The function's name."
               },
-              "required": [
-                "name"
-              ],
-              "description": "A parameter. Repeats: one block per value, in order."
-            },
-            "returns": {
-              "type": "string",
-              "description": "The return type."
-            },
-            "generics": {
-              "type": "string",
-              "description": "<T: Clone>."
-            },
-            "where": {
-              "type": "string",
-              "description": "The where clause, without `where`."
-            },
-            "async": {
-              "type": "boolean",
-              "description": "An async fn."
-            },
-            "const": {
-              "type": "boolean",
-              "description": "A const fn."
-            },
-            "unsafe": {
-              "type": "boolean",
-              "description": "An unsafe fn."
-            },
-            "attrs": {
-              "type": "string",
-              "description": "An attribute line, #[...]. Repeats: one value per line, in order."
-            },
-            "doc": {
-              "type": "string",
-              "description": "The doc line, without ///."
-            },
-            "body": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "piece": {
-                  "type": "string",
-                  "enum": [
-                    "count_true",
-                    "all",
-                    "any",
-                    "exactly_one",
-                    "at_most_one",
-                    "implies",
-                    "excludes",
-                    "in_range",
-                    "nonempty",
-                    "is_one_of",
-                    "guard",
-                    "ensure",
-                    "bail",
-                    "guard_with",
-                    "ensure_with",
-                    "bail_with",
-                    "ensure_eq",
-                    "ensure_ne",
-                    "ensure_nonempty",
-                    "ensure_empty",
-                    "ensure_len",
-                    "ensure_min_len",
-                    "ensure_max_len",
-                    "ensure_range",
-                    "ensure_all",
-                    "ensure_any",
-                    "ensure_exactly_one",
-                    "ensure_at_most_one",
-                    "ensure_implies",
-                    "ensure_excludes",
-                    "ensure_valid",
-                    "require_some",
-                    "require_ok",
-                    "some_or_return",
-                    "ok_or_return",
-                    "return_if",
-                    "return_unless",
-                    "none_if",
-                    "break_if",
-                    "continue_if",
-                    "some_or_continue",
-                    "some_or_break",
-                    "require_ok_into",
-                    "require_some_into",
-                    "ok_or_else_return",
-                    "return_if_err",
-                    "if_else",
-                    "table",
-                    "push_if",
-                    "push_some",
-                    "extend_if",
-                    "extend_some",
-                    "insert_if",
-                    "insert_some",
-                    "assign_if",
-                    "assign_if_some",
-                    "push_unique",
-                    "extend_unique",
-                    "sc_cmd",
-                    "sc_flags",
-                    "sc_flags_into",
-                    "sc_opt_kv",
-                    "sc_args",
-                    "sc_if_some",
-                    "sc_if_some_display",
-                    "sc_if_some_into",
-                    "sc_if_some_clone",
-                    "sc_if_some_prefix",
-                    "sc_each",
-                    "sc_each_display",
-                    "sc_if_some_flag",
-                    "simple_method",
-                    "checked_method",
-                    "checked_constructor",
-                    "getter",
-                    "getter_ref",
-                    "getter_mut",
-                    "getter_option_ref",
-                    "getter_option_deref",
-                    "getter_slice",
-                    "len_field",
-                    "is_empty_field",
-                    "bool_field",
-                    "contains_field",
-                    "find_by",
-                    "delegate",
-                    "delegate_mut",
-                    "newtype_value",
-                    "newtype_ref",
-                    "setter",
-                    "setter_into",
-                    "setter_some",
-                    "setter_some_into",
-                    "clear_collection",
-                    "take_field",
-                    "enable_field",
-                    "disable_field",
-                    "toggle_field",
-                    "with_field",
-                    "with_into",
-                    "with_some",
-                    "with_some_into",
-                    "with_push",
-                    "with_push_into",
-                    "with_extend",
-                    "with_flag",
-                    "without_flag",
-                    "with_unique_push",
-                    "newtype_constructor",
-                    "forward_trait_method",
-                    "builder_new_default",
-                    "builder_opt",
-                    "builder_opt_into",
-                    "builder_set",
-                    "builder_vec_into",
-                    "builder_vec_iter",
-                    "builder_push",
-                    "builder_flag",
-                    "impl_default_via_new",
-                    "impl_from_newtype",
-                    "impl_as_ref_newtype",
-                    "impl_deref_newtype",
-                    "impl_deref_mut_newtype",
-                    "impl_display_via",
-                    "impl_debug_redacted",
-                    "impl_std_error",
-                    "impl_partial_ord_via_ord",
-                    "impl_from_variant",
-                    "shell_command_builder",
-                    "define_shell_builder",
-                    "let",
-                    "value",
-                    "raw"
+              "vis": {
+                "type": "string",
+                "description": "pub, pub(crate); private when unset."
+              },
+              "receiver": {
+                "type": "string",
+                "description": "&self, &mut self, self, mut self."
+              },
+              "params": {
+                "type": "array",
+                "description": "A parameter. Repeats: one block per value, in order.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "description": "The parameter's name."
+                    },
+                    "ty": {
+                      "type": "string",
+                      "description": "Its type."
+                    }
+                  },
+                  "required": [
+                    "name"
                   ],
-                  "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
-                },
-                "bind": {
-                  "type": "string",
-                  "description": "The piece's `bind` argument, as its macro takes it."
-                },
-                "condition": {
-                  "type": "string",
-                  "description": "The piece's `condition` argument, as its macro takes it."
-                },
-                "conditions": {
-                  "type": "string",
-                  "description": "The piece's `conditions` arguments. Repeats: one value per line, in order."
-                },
-                "error": {
-                  "type": "string",
-                  "description": "The piece's `error` argument, as its macro takes it."
-                },
-                "errors": {
-                  "type": "string",
-                  "description": "The piece's `errors` arguments. Repeats: one value per line, in order."
-                },
-                "value": {
-                  "type": "string",
-                  "description": "The piece's `value` argument, as its macro takes it."
-                },
-                "values": {
-                  "type": "string",
-                  "description": "The piece's `values` argument, as its macro takes it."
-                },
-                "option": {
-                  "type": "string",
-                  "description": "The piece's `option` argument, as its macro takes it."
-                },
-                "result": {
-                  "type": "string",
-                  "description": "The piece's `result` argument, as its macro takes it."
-                },
-                "map_error": {
-                  "type": "string",
-                  "description": "The piece's `map_error` argument, as its macro takes it."
-                },
-                "return_value": {
-                  "type": "string",
-                  "description": "The piece's `return_value` argument, as its macro takes it."
-                },
-                "left": {
-                  "type": "string",
-                  "description": "The piece's `left` argument, as its macro takes it."
-                },
-                "right": {
-                  "type": "string",
-                  "description": "The piece's `right` argument, as its macro takes it."
-                },
-                "expected": {
-                  "type": "string",
-                  "description": "The piece's `expected` argument, as its macro takes it."
-                },
-                "minimum": {
-                  "type": "string",
-                  "description": "The piece's `minimum` argument, as its macro takes it."
-                },
-                "maximum": {
-                  "type": "string",
-                  "description": "The piece's `maximum` argument, as its macro takes it."
-                },
-                "collection": {
-                  "type": "string",
-                  "description": "The piece's `collection` argument, as its macro takes it."
-                },
-                "map": {
-                  "type": "string",
-                  "description": "The piece's `map` argument, as its macro takes it."
-                },
-                "key": {
-                  "type": "string",
-                  "description": "The piece's `key` argument, as its macro takes it."
-                },
-                "place": {
-                  "type": "string",
-                  "description": "The piece's `place` argument, as its macro takes it."
-                },
-                "cleanup": {
-                  "type": "string",
-                  "description": "The piece's `cleanup` argument, as its macro takes it."
-                },
-                "candidates": {
-                  "type": "string",
-                  "description": "The piece's `candidates` arguments. Repeats: one value per line, in order."
-                },
-                "parts": {
-                  "type": "string",
-                  "description": "The piece's `parts` argument, as its macro takes it."
-                },
-                "this": {
-                  "type": "string",
-                  "description": "The piece's `this` argument, as its macro takes it."
-                },
-                "fields": {
-                  "type": "string",
-                  "description": "The piece's `fields` arguments. Repeats: one value per line, in order."
-                },
-                "flags": {
-                  "type": "string",
-                  "description": "The piece's `flags` arguments. Repeats: one value per line, in order."
-                },
-                "args": {
-                  "type": "string",
-                  "description": "The piece's `args` arguments. Repeats: one value per line, in order."
-                },
-                "opt": {
-                  "type": "string",
-                  "description": "The piece's `opt` argument, as its macro takes it."
-                },
-                "prefix": {
-                  "type": "string",
-                  "description": "The piece's `prefix` argument, as its macro takes it."
-                },
-                "iter": {
-                  "type": "string",
-                  "description": "The piece's `iter` argument, as its macro takes it."
-                },
-                "vec": {
-                  "type": "string",
-                  "description": "The piece's `vec` argument, as its macro takes it."
-                },
-                "flag": {
-                  "type": "string",
-                  "description": "The piece's `flag` argument, as its macro takes it."
-                },
-                "field": {
-                  "type": "string",
-                  "description": "The piece's `field` argument, as its macro takes it."
-                },
-                "method": {
-                  "type": "string",
-                  "description": "The piece's `method` argument, as its macro takes it."
-                },
-                "pass": {
-                  "type": "string",
-                  "description": "The piece's `pass` argument, as its macro takes it."
-                },
-                "item": {
-                  "type": "string",
-                  "description": "The piece's `item` argument, as its macro takes it."
-                },
-                "target": {
-                  "type": "string",
-                  "description": "The piece's `target` argument, as its macro takes it."
-                },
-                "elem": {
-                  "type": "string",
-                  "description": "The piece's `elem` argument, as its macro takes it."
-                },
-                "error_ty": {
-                  "type": "string",
-                  "description": "The piece's `error_ty` argument, as its macro takes it."
-                },
-                "ty": {
-                  "type": "string",
-                  "description": "The piece's `ty` argument, as its macro takes it."
-                },
-                "wrapper": {
-                  "type": "string",
-                  "description": "The piece's `wrapper` argument, as its macro takes it."
-                },
-                "inner": {
-                  "type": "string",
-                  "description": "The piece's `inner` argument, as its macro takes it."
-                },
-                "text": {
-                  "type": "string",
-                  "description": "The piece's `text` argument, as its macro takes it."
-                },
-                "source": {
-                  "type": "string",
-                  "description": "The piece's `source` argument, as its macro takes it."
-                },
-                "variant": {
-                  "type": "string",
-                  "description": "The piece's `variant` argument, as its macro takes it."
-                },
-                "name": {
-                  "type": "string",
-                  "description": "The piece's `name` argument, as its macro takes it."
-                },
-                "command": {
-                  "type": "string",
-                  "description": "The piece's `command` argument, as its macro takes it."
-                },
-                "block": {
-                  "type": "string",
-                  "description": "The piece's `block` argument, as its macro takes it."
-                },
-                "code": {
-                  "type": "string",
-                  "description": "The piece's `code` argument, as its macro takes it."
-                },
-                "vis": {
-                  "type": "string",
-                  "description": "The piece's `vis` argument, as its macro takes it."
+                  "x-1o-single-keys": true
                 }
               },
-              "required": [
-                "piece"
-              ],
-              "description": "One step of the body. Repeats: one block per value, in order."
-            },
-            "generator": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "piece": {
-                  "type": "string",
-                  "enum": [
-                    "count_true",
-                    "all",
-                    "any",
-                    "exactly_one",
-                    "at_most_one",
-                    "implies",
-                    "excludes",
-                    "in_range",
-                    "nonempty",
-                    "is_one_of",
-                    "guard",
-                    "ensure",
-                    "bail",
-                    "guard_with",
-                    "ensure_with",
-                    "bail_with",
-                    "ensure_eq",
-                    "ensure_ne",
-                    "ensure_nonempty",
-                    "ensure_empty",
-                    "ensure_len",
-                    "ensure_min_len",
-                    "ensure_max_len",
-                    "ensure_range",
-                    "ensure_all",
-                    "ensure_any",
-                    "ensure_exactly_one",
-                    "ensure_at_most_one",
-                    "ensure_implies",
-                    "ensure_excludes",
-                    "ensure_valid",
-                    "require_some",
-                    "require_ok",
-                    "some_or_return",
-                    "ok_or_return",
-                    "return_if",
-                    "return_unless",
-                    "none_if",
-                    "break_if",
-                    "continue_if",
-                    "some_or_continue",
-                    "some_or_break",
-                    "require_ok_into",
-                    "require_some_into",
-                    "ok_or_else_return",
-                    "return_if_err",
-                    "if_else",
-                    "table",
-                    "push_if",
-                    "push_some",
-                    "extend_if",
-                    "extend_some",
-                    "insert_if",
-                    "insert_some",
-                    "assign_if",
-                    "assign_if_some",
-                    "push_unique",
-                    "extend_unique",
-                    "sc_cmd",
-                    "sc_flags",
-                    "sc_flags_into",
-                    "sc_opt_kv",
-                    "sc_args",
-                    "sc_if_some",
-                    "sc_if_some_display",
-                    "sc_if_some_into",
-                    "sc_if_some_clone",
-                    "sc_if_some_prefix",
-                    "sc_each",
-                    "sc_each_display",
-                    "sc_if_some_flag",
-                    "simple_method",
-                    "checked_method",
-                    "checked_constructor",
-                    "getter",
-                    "getter_ref",
-                    "getter_mut",
-                    "getter_option_ref",
-                    "getter_option_deref",
-                    "getter_slice",
-                    "len_field",
-                    "is_empty_field",
-                    "bool_field",
-                    "contains_field",
-                    "find_by",
-                    "delegate",
-                    "delegate_mut",
-                    "newtype_value",
-                    "newtype_ref",
-                    "setter",
-                    "setter_into",
-                    "setter_some",
-                    "setter_some_into",
-                    "clear_collection",
-                    "take_field",
-                    "enable_field",
-                    "disable_field",
-                    "toggle_field",
-                    "with_field",
-                    "with_into",
-                    "with_some",
-                    "with_some_into",
-                    "with_push",
-                    "with_push_into",
-                    "with_extend",
-                    "with_flag",
-                    "without_flag",
-                    "with_unique_push",
-                    "newtype_constructor",
-                    "forward_trait_method",
-                    "builder_new_default",
-                    "builder_opt",
-                    "builder_opt_into",
-                    "builder_set",
-                    "builder_vec_into",
-                    "builder_vec_iter",
-                    "builder_push",
-                    "builder_flag",
-                    "impl_default_via_new",
-                    "impl_from_newtype",
-                    "impl_as_ref_newtype",
-                    "impl_deref_newtype",
-                    "impl_deref_mut_newtype",
-                    "impl_display_via",
-                    "impl_debug_redacted",
-                    "impl_std_error",
-                    "impl_partial_ord_via_ord",
-                    "impl_from_variant",
-                    "shell_command_builder",
-                    "define_shell_builder",
-                    "let",
-                    "value",
-                    "raw"
+              "returns": {
+                "type": "string",
+                "description": "The return type."
+              },
+              "generics": {
+                "type": "string",
+                "description": "<T: Clone>."
+              },
+              "where": {
+                "type": "string",
+                "description": "The where clause, without `where`."
+              },
+              "async": {
+                "type": "boolean",
+                "description": "An async fn."
+              },
+              "const": {
+                "type": "boolean",
+                "description": "A const fn."
+              },
+              "unsafe": {
+                "type": "boolean",
+                "description": "An unsafe fn."
+              },
+              "attrs": {
+                "type": "array",
+                "description": "An attribute line, #[...]. Repeats: one value per line, in order.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "doc": {
+                "type": "string",
+                "description": "The doc line, without ///."
+              },
+              "body": {
+                "type": "array",
+                "description": "One step of the body. Repeats: one block per value, in order.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "piece": {
+                      "type": "string",
+                      "enum": [
+                        "count_true",
+                        "all",
+                        "any",
+                        "exactly_one",
+                        "at_most_one",
+                        "implies",
+                        "excludes",
+                        "in_range",
+                        "nonempty",
+                        "is_one_of",
+                        "guard",
+                        "ensure",
+                        "bail",
+                        "guard_with",
+                        "ensure_with",
+                        "bail_with",
+                        "ensure_eq",
+                        "ensure_ne",
+                        "ensure_nonempty",
+                        "ensure_empty",
+                        "ensure_len",
+                        "ensure_min_len",
+                        "ensure_max_len",
+                        "ensure_range",
+                        "ensure_all",
+                        "ensure_any",
+                        "ensure_exactly_one",
+                        "ensure_at_most_one",
+                        "ensure_implies",
+                        "ensure_excludes",
+                        "ensure_valid",
+                        "require_some",
+                        "require_ok",
+                        "some_or_return",
+                        "ok_or_return",
+                        "return_if",
+                        "return_unless",
+                        "none_if",
+                        "break_if",
+                        "continue_if",
+                        "some_or_continue",
+                        "some_or_break",
+                        "require_ok_into",
+                        "require_some_into",
+                        "ok_or_else_return",
+                        "return_if_err",
+                        "if_else",
+                        "table",
+                        "push_if",
+                        "push_some",
+                        "extend_if",
+                        "extend_some",
+                        "insert_if",
+                        "insert_some",
+                        "assign_if",
+                        "assign_if_some",
+                        "push_unique",
+                        "extend_unique",
+                        "sc_cmd",
+                        "sc_flags",
+                        "sc_flags_into",
+                        "sc_opt_kv",
+                        "sc_args",
+                        "sc_if_some",
+                        "sc_if_some_display",
+                        "sc_if_some_into",
+                        "sc_if_some_clone",
+                        "sc_if_some_prefix",
+                        "sc_each",
+                        "sc_each_display",
+                        "sc_if_some_flag",
+                        "simple_method",
+                        "checked_method",
+                        "checked_constructor",
+                        "getter",
+                        "getter_ref",
+                        "getter_mut",
+                        "getter_option_ref",
+                        "getter_option_deref",
+                        "getter_slice",
+                        "len_field",
+                        "is_empty_field",
+                        "bool_field",
+                        "contains_field",
+                        "find_by",
+                        "delegate",
+                        "delegate_mut",
+                        "newtype_value",
+                        "newtype_ref",
+                        "setter",
+                        "setter_into",
+                        "setter_some",
+                        "setter_some_into",
+                        "clear_collection",
+                        "take_field",
+                        "enable_field",
+                        "disable_field",
+                        "toggle_field",
+                        "with_field",
+                        "with_into",
+                        "with_some",
+                        "with_some_into",
+                        "with_push",
+                        "with_push_into",
+                        "with_extend",
+                        "with_flag",
+                        "without_flag",
+                        "with_unique_push",
+                        "newtype_constructor",
+                        "forward_trait_method",
+                        "builder_new_default",
+                        "builder_opt",
+                        "builder_opt_into",
+                        "builder_set",
+                        "builder_vec_into",
+                        "builder_vec_iter",
+                        "builder_push",
+                        "builder_flag",
+                        "impl_default_via_new",
+                        "impl_from_newtype",
+                        "impl_as_ref_newtype",
+                        "impl_deref_newtype",
+                        "impl_deref_mut_newtype",
+                        "impl_display_via",
+                        "impl_debug_redacted",
+                        "impl_std_error",
+                        "impl_partial_ord_via_ord",
+                        "impl_from_variant",
+                        "shell_command_builder",
+                        "define_shell_builder",
+                        "let",
+                        "value",
+                        "raw"
+                      ],
+                      "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
+                    },
+                    "bind": {
+                      "type": "string",
+                      "description": "The piece's `bind` argument, as its macro takes it."
+                    },
+                    "condition": {
+                      "type": "string",
+                      "description": "The piece's `condition` argument, as its macro takes it."
+                    },
+                    "conditions": {
+                      "type": "array",
+                      "description": "The piece's `conditions` arguments. Repeats: one value per line, in order.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "error": {
+                      "type": "string",
+                      "description": "The piece's `error` argument, as its macro takes it."
+                    },
+                    "errors": {
+                      "type": "array",
+                      "description": "The piece's `errors` arguments. Repeats: one value per line, in order.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "value": {
+                      "type": "string",
+                      "description": "The piece's `value` argument, as its macro takes it."
+                    },
+                    "values": {
+                      "type": "string",
+                      "description": "The piece's `values` argument, as its macro takes it."
+                    },
+                    "option": {
+                      "type": "string",
+                      "description": "The piece's `option` argument, as its macro takes it."
+                    },
+                    "result": {
+                      "type": "string",
+                      "description": "The piece's `result` argument, as its macro takes it."
+                    },
+                    "map_error": {
+                      "type": "string",
+                      "description": "The piece's `map_error` argument, as its macro takes it."
+                    },
+                    "return_value": {
+                      "type": "string",
+                      "description": "The piece's `return_value` argument, as its macro takes it."
+                    },
+                    "left": {
+                      "type": "string",
+                      "description": "The piece's `left` argument, as its macro takes it."
+                    },
+                    "right": {
+                      "type": "string",
+                      "description": "The piece's `right` argument, as its macro takes it."
+                    },
+                    "expected": {
+                      "type": "string",
+                      "description": "The piece's `expected` argument, as its macro takes it."
+                    },
+                    "minimum": {
+                      "type": "string",
+                      "description": "The piece's `minimum` argument, as its macro takes it."
+                    },
+                    "maximum": {
+                      "type": "string",
+                      "description": "The piece's `maximum` argument, as its macro takes it."
+                    },
+                    "collection": {
+                      "type": "string",
+                      "description": "The piece's `collection` argument, as its macro takes it."
+                    },
+                    "map": {
+                      "type": "string",
+                      "description": "The piece's `map` argument, as its macro takes it."
+                    },
+                    "key": {
+                      "type": "string",
+                      "description": "The piece's `key` argument, as its macro takes it."
+                    },
+                    "place": {
+                      "type": "string",
+                      "description": "The piece's `place` argument, as its macro takes it."
+                    },
+                    "cleanup": {
+                      "type": "string",
+                      "description": "The piece's `cleanup` argument, as its macro takes it."
+                    },
+                    "candidates": {
+                      "type": "array",
+                      "description": "The piece's `candidates` arguments. Repeats: one value per line, in order.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "parts": {
+                      "type": "string",
+                      "description": "The piece's `parts` argument, as its macro takes it."
+                    },
+                    "this": {
+                      "type": "string",
+                      "description": "The piece's `this` argument, as its macro takes it."
+                    },
+                    "fields": {
+                      "type": "array",
+                      "description": "The piece's `fields` arguments. Repeats: one value per line, in order.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "flags": {
+                      "type": "array",
+                      "description": "The piece's `flags` arguments. Repeats: one value per line, in order.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "args": {
+                      "type": "array",
+                      "description": "The piece's `args` arguments. Repeats: one value per line, in order.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "opt": {
+                      "type": "string",
+                      "description": "The piece's `opt` argument, as its macro takes it."
+                    },
+                    "prefix": {
+                      "type": "string",
+                      "description": "The piece's `prefix` argument, as its macro takes it."
+                    },
+                    "iter": {
+                      "type": "string",
+                      "description": "The piece's `iter` argument, as its macro takes it."
+                    },
+                    "vec": {
+                      "type": "string",
+                      "description": "The piece's `vec` argument, as its macro takes it."
+                    },
+                    "flag": {
+                      "type": "string",
+                      "description": "The piece's `flag` argument, as its macro takes it."
+                    },
+                    "field": {
+                      "type": "string",
+                      "description": "The piece's `field` argument, as its macro takes it."
+                    },
+                    "method": {
+                      "type": "string",
+                      "description": "The piece's `method` argument, as its macro takes it."
+                    },
+                    "pass": {
+                      "type": "string",
+                      "description": "The piece's `pass` argument, as its macro takes it."
+                    },
+                    "item": {
+                      "type": "string",
+                      "description": "The piece's `item` argument, as its macro takes it."
+                    },
+                    "target": {
+                      "type": "string",
+                      "description": "The piece's `target` argument, as its macro takes it."
+                    },
+                    "elem": {
+                      "type": "string",
+                      "description": "The piece's `elem` argument, as its macro takes it."
+                    },
+                    "error_ty": {
+                      "type": "string",
+                      "description": "The piece's `error_ty` argument, as its macro takes it."
+                    },
+                    "ty": {
+                      "type": "string",
+                      "description": "The piece's `ty` argument, as its macro takes it."
+                    },
+                    "wrapper": {
+                      "type": "string",
+                      "description": "The piece's `wrapper` argument, as its macro takes it."
+                    },
+                    "inner": {
+                      "type": "string",
+                      "description": "The piece's `inner` argument, as its macro takes it."
+                    },
+                    "text": {
+                      "type": "string",
+                      "description": "The piece's `text` argument, as its macro takes it."
+                    },
+                    "source": {
+                      "type": "string",
+                      "description": "The piece's `source` argument, as its macro takes it."
+                    },
+                    "variant": {
+                      "type": "string",
+                      "description": "The piece's `variant` argument, as its macro takes it."
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "The piece's `name` argument, as its macro takes it."
+                    },
+                    "command": {
+                      "type": "string",
+                      "description": "The piece's `command` argument, as its macro takes it."
+                    },
+                    "block": {
+                      "type": "string",
+                      "description": "The piece's `block` argument, as its macro takes it."
+                    },
+                    "code": {
+                      "type": "string",
+                      "description": "The piece's `code` argument, as its macro takes it."
+                    },
+                    "vis": {
+                      "type": "string",
+                      "description": "The piece's `vis` argument, as its macro takes it."
+                    }
+                  },
+                  "required": [
+                    "piece"
                   ],
-                  "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
-                },
-                "bind": {
-                  "type": "string",
-                  "description": "The piece's `bind` argument, as its macro takes it."
-                },
-                "condition": {
-                  "type": "string",
-                  "description": "The piece's `condition` argument, as its macro takes it."
-                },
-                "conditions": {
-                  "type": "string",
-                  "description": "The piece's `conditions` arguments. Repeats: one value per line, in order."
-                },
-                "error": {
-                  "type": "string",
-                  "description": "The piece's `error` argument, as its macro takes it."
-                },
-                "errors": {
-                  "type": "string",
-                  "description": "The piece's `errors` arguments. Repeats: one value per line, in order."
-                },
-                "value": {
-                  "type": "string",
-                  "description": "The piece's `value` argument, as its macro takes it."
-                },
-                "values": {
-                  "type": "string",
-                  "description": "The piece's `values` argument, as its macro takes it."
-                },
-                "option": {
-                  "type": "string",
-                  "description": "The piece's `option` argument, as its macro takes it."
-                },
-                "result": {
-                  "type": "string",
-                  "description": "The piece's `result` argument, as its macro takes it."
-                },
-                "map_error": {
-                  "type": "string",
-                  "description": "The piece's `map_error` argument, as its macro takes it."
-                },
-                "return_value": {
-                  "type": "string",
-                  "description": "The piece's `return_value` argument, as its macro takes it."
-                },
-                "left": {
-                  "type": "string",
-                  "description": "The piece's `left` argument, as its macro takes it."
-                },
-                "right": {
-                  "type": "string",
-                  "description": "The piece's `right` argument, as its macro takes it."
-                },
-                "expected": {
-                  "type": "string",
-                  "description": "The piece's `expected` argument, as its macro takes it."
-                },
-                "minimum": {
-                  "type": "string",
-                  "description": "The piece's `minimum` argument, as its macro takes it."
-                },
-                "maximum": {
-                  "type": "string",
-                  "description": "The piece's `maximum` argument, as its macro takes it."
-                },
-                "collection": {
-                  "type": "string",
-                  "description": "The piece's `collection` argument, as its macro takes it."
-                },
-                "map": {
-                  "type": "string",
-                  "description": "The piece's `map` argument, as its macro takes it."
-                },
-                "key": {
-                  "type": "string",
-                  "description": "The piece's `key` argument, as its macro takes it."
-                },
-                "place": {
-                  "type": "string",
-                  "description": "The piece's `place` argument, as its macro takes it."
-                },
-                "cleanup": {
-                  "type": "string",
-                  "description": "The piece's `cleanup` argument, as its macro takes it."
-                },
-                "candidates": {
-                  "type": "string",
-                  "description": "The piece's `candidates` arguments. Repeats: one value per line, in order."
-                },
-                "parts": {
-                  "type": "string",
-                  "description": "The piece's `parts` argument, as its macro takes it."
-                },
-                "this": {
-                  "type": "string",
-                  "description": "The piece's `this` argument, as its macro takes it."
-                },
-                "fields": {
-                  "type": "string",
-                  "description": "The piece's `fields` arguments. Repeats: one value per line, in order."
-                },
-                "flags": {
-                  "type": "string",
-                  "description": "The piece's `flags` arguments. Repeats: one value per line, in order."
-                },
-                "args": {
-                  "type": "string",
-                  "description": "The piece's `args` arguments. Repeats: one value per line, in order."
-                },
-                "opt": {
-                  "type": "string",
-                  "description": "The piece's `opt` argument, as its macro takes it."
-                },
-                "prefix": {
-                  "type": "string",
-                  "description": "The piece's `prefix` argument, as its macro takes it."
-                },
-                "iter": {
-                  "type": "string",
-                  "description": "The piece's `iter` argument, as its macro takes it."
-                },
-                "vec": {
-                  "type": "string",
-                  "description": "The piece's `vec` argument, as its macro takes it."
-                },
-                "flag": {
-                  "type": "string",
-                  "description": "The piece's `flag` argument, as its macro takes it."
-                },
-                "field": {
-                  "type": "string",
-                  "description": "The piece's `field` argument, as its macro takes it."
-                },
-                "method": {
-                  "type": "string",
-                  "description": "The piece's `method` argument, as its macro takes it."
-                },
-                "pass": {
-                  "type": "string",
-                  "description": "The piece's `pass` argument, as its macro takes it."
-                },
-                "item": {
-                  "type": "string",
-                  "description": "The piece's `item` argument, as its macro takes it."
-                },
-                "target": {
-                  "type": "string",
-                  "description": "The piece's `target` argument, as its macro takes it."
-                },
-                "elem": {
-                  "type": "string",
-                  "description": "The piece's `elem` argument, as its macro takes it."
-                },
-                "error_ty": {
-                  "type": "string",
-                  "description": "The piece's `error_ty` argument, as its macro takes it."
-                },
-                "ty": {
-                  "type": "string",
-                  "description": "The piece's `ty` argument, as its macro takes it."
-                },
-                "wrapper": {
-                  "type": "string",
-                  "description": "The piece's `wrapper` argument, as its macro takes it."
-                },
-                "inner": {
-                  "type": "string",
-                  "description": "The piece's `inner` argument, as its macro takes it."
-                },
-                "text": {
-                  "type": "string",
-                  "description": "The piece's `text` argument, as its macro takes it."
-                },
-                "source": {
-                  "type": "string",
-                  "description": "The piece's `source` argument, as its macro takes it."
-                },
-                "variant": {
-                  "type": "string",
-                  "description": "The piece's `variant` argument, as its macro takes it."
-                },
-                "name": {
-                  "type": "string",
-                  "description": "The piece's `name` argument, as its macro takes it."
-                },
-                "command": {
-                  "type": "string",
-                  "description": "The piece's `command` argument, as its macro takes it."
-                },
-                "block": {
-                  "type": "string",
-                  "description": "The piece's `block` argument, as its macro takes it."
-                },
-                "code": {
-                  "type": "string",
-                  "description": "The piece's `code` argument, as its macro takes it."
-                },
-                "vis": {
-                  "type": "string",
-                  "description": "The piece's `vis` argument, as its macro takes it."
+                  "x-1o-single-keys": true
                 }
               },
-              "required": [
-                "piece"
-              ],
-              "description": "A toolkit method generator that makes the whole function."
-            }
-          },
-          "required": [
-            "name"
-          ],
-          "description": "make_impl, add_trait_impl: a function of the impl. Repeats: one block per value, in order."
+              "generator": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "piece": {
+                    "type": "string",
+                    "enum": [
+                      "count_true",
+                      "all",
+                      "any",
+                      "exactly_one",
+                      "at_most_one",
+                      "implies",
+                      "excludes",
+                      "in_range",
+                      "nonempty",
+                      "is_one_of",
+                      "guard",
+                      "ensure",
+                      "bail",
+                      "guard_with",
+                      "ensure_with",
+                      "bail_with",
+                      "ensure_eq",
+                      "ensure_ne",
+                      "ensure_nonempty",
+                      "ensure_empty",
+                      "ensure_len",
+                      "ensure_min_len",
+                      "ensure_max_len",
+                      "ensure_range",
+                      "ensure_all",
+                      "ensure_any",
+                      "ensure_exactly_one",
+                      "ensure_at_most_one",
+                      "ensure_implies",
+                      "ensure_excludes",
+                      "ensure_valid",
+                      "require_some",
+                      "require_ok",
+                      "some_or_return",
+                      "ok_or_return",
+                      "return_if",
+                      "return_unless",
+                      "none_if",
+                      "break_if",
+                      "continue_if",
+                      "some_or_continue",
+                      "some_or_break",
+                      "require_ok_into",
+                      "require_some_into",
+                      "ok_or_else_return",
+                      "return_if_err",
+                      "if_else",
+                      "table",
+                      "push_if",
+                      "push_some",
+                      "extend_if",
+                      "extend_some",
+                      "insert_if",
+                      "insert_some",
+                      "assign_if",
+                      "assign_if_some",
+                      "push_unique",
+                      "extend_unique",
+                      "sc_cmd",
+                      "sc_flags",
+                      "sc_flags_into",
+                      "sc_opt_kv",
+                      "sc_args",
+                      "sc_if_some",
+                      "sc_if_some_display",
+                      "sc_if_some_into",
+                      "sc_if_some_clone",
+                      "sc_if_some_prefix",
+                      "sc_each",
+                      "sc_each_display",
+                      "sc_if_some_flag",
+                      "simple_method",
+                      "checked_method",
+                      "checked_constructor",
+                      "getter",
+                      "getter_ref",
+                      "getter_mut",
+                      "getter_option_ref",
+                      "getter_option_deref",
+                      "getter_slice",
+                      "len_field",
+                      "is_empty_field",
+                      "bool_field",
+                      "contains_field",
+                      "find_by",
+                      "delegate",
+                      "delegate_mut",
+                      "newtype_value",
+                      "newtype_ref",
+                      "setter",
+                      "setter_into",
+                      "setter_some",
+                      "setter_some_into",
+                      "clear_collection",
+                      "take_field",
+                      "enable_field",
+                      "disable_field",
+                      "toggle_field",
+                      "with_field",
+                      "with_into",
+                      "with_some",
+                      "with_some_into",
+                      "with_push",
+                      "with_push_into",
+                      "with_extend",
+                      "with_flag",
+                      "without_flag",
+                      "with_unique_push",
+                      "newtype_constructor",
+                      "forward_trait_method",
+                      "builder_new_default",
+                      "builder_opt",
+                      "builder_opt_into",
+                      "builder_set",
+                      "builder_vec_into",
+                      "builder_vec_iter",
+                      "builder_push",
+                      "builder_flag",
+                      "impl_default_via_new",
+                      "impl_from_newtype",
+                      "impl_as_ref_newtype",
+                      "impl_deref_newtype",
+                      "impl_deref_mut_newtype",
+                      "impl_display_via",
+                      "impl_debug_redacted",
+                      "impl_std_error",
+                      "impl_partial_ord_via_ord",
+                      "impl_from_variant",
+                      "shell_command_builder",
+                      "define_shell_builder",
+                      "let",
+                      "value",
+                      "raw"
+                    ],
+                    "description": "The toolkit piece (simple_impl 0.1.12's macro of that name) or a step: let, value, raw."
+                  },
+                  "bind": {
+                    "type": "string",
+                    "description": "The piece's `bind` argument, as its macro takes it."
+                  },
+                  "condition": {
+                    "type": "string",
+                    "description": "The piece's `condition` argument, as its macro takes it."
+                  },
+                  "conditions": {
+                    "type": "array",
+                    "description": "The piece's `conditions` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "error": {
+                    "type": "string",
+                    "description": "The piece's `error` argument, as its macro takes it."
+                  },
+                  "errors": {
+                    "type": "array",
+                    "description": "The piece's `errors` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "The piece's `value` argument, as its macro takes it."
+                  },
+                  "values": {
+                    "type": "string",
+                    "description": "The piece's `values` argument, as its macro takes it."
+                  },
+                  "option": {
+                    "type": "string",
+                    "description": "The piece's `option` argument, as its macro takes it."
+                  },
+                  "result": {
+                    "type": "string",
+                    "description": "The piece's `result` argument, as its macro takes it."
+                  },
+                  "map_error": {
+                    "type": "string",
+                    "description": "The piece's `map_error` argument, as its macro takes it."
+                  },
+                  "return_value": {
+                    "type": "string",
+                    "description": "The piece's `return_value` argument, as its macro takes it."
+                  },
+                  "left": {
+                    "type": "string",
+                    "description": "The piece's `left` argument, as its macro takes it."
+                  },
+                  "right": {
+                    "type": "string",
+                    "description": "The piece's `right` argument, as its macro takes it."
+                  },
+                  "expected": {
+                    "type": "string",
+                    "description": "The piece's `expected` argument, as its macro takes it."
+                  },
+                  "minimum": {
+                    "type": "string",
+                    "description": "The piece's `minimum` argument, as its macro takes it."
+                  },
+                  "maximum": {
+                    "type": "string",
+                    "description": "The piece's `maximum` argument, as its macro takes it."
+                  },
+                  "collection": {
+                    "type": "string",
+                    "description": "The piece's `collection` argument, as its macro takes it."
+                  },
+                  "map": {
+                    "type": "string",
+                    "description": "The piece's `map` argument, as its macro takes it."
+                  },
+                  "key": {
+                    "type": "string",
+                    "description": "The piece's `key` argument, as its macro takes it."
+                  },
+                  "place": {
+                    "type": "string",
+                    "description": "The piece's `place` argument, as its macro takes it."
+                  },
+                  "cleanup": {
+                    "type": "string",
+                    "description": "The piece's `cleanup` argument, as its macro takes it."
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "description": "The piece's `candidates` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "parts": {
+                    "type": "string",
+                    "description": "The piece's `parts` argument, as its macro takes it."
+                  },
+                  "this": {
+                    "type": "string",
+                    "description": "The piece's `this` argument, as its macro takes it."
+                  },
+                  "fields": {
+                    "type": "array",
+                    "description": "The piece's `fields` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "flags": {
+                    "type": "array",
+                    "description": "The piece's `flags` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "args": {
+                    "type": "array",
+                    "description": "The piece's `args` arguments. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "opt": {
+                    "type": "string",
+                    "description": "The piece's `opt` argument, as its macro takes it."
+                  },
+                  "prefix": {
+                    "type": "string",
+                    "description": "The piece's `prefix` argument, as its macro takes it."
+                  },
+                  "iter": {
+                    "type": "string",
+                    "description": "The piece's `iter` argument, as its macro takes it."
+                  },
+                  "vec": {
+                    "type": "string",
+                    "description": "The piece's `vec` argument, as its macro takes it."
+                  },
+                  "flag": {
+                    "type": "string",
+                    "description": "The piece's `flag` argument, as its macro takes it."
+                  },
+                  "field": {
+                    "type": "string",
+                    "description": "The piece's `field` argument, as its macro takes it."
+                  },
+                  "method": {
+                    "type": "string",
+                    "description": "The piece's `method` argument, as its macro takes it."
+                  },
+                  "pass": {
+                    "type": "string",
+                    "description": "The piece's `pass` argument, as its macro takes it."
+                  },
+                  "item": {
+                    "type": "string",
+                    "description": "The piece's `item` argument, as its macro takes it."
+                  },
+                  "target": {
+                    "type": "string",
+                    "description": "The piece's `target` argument, as its macro takes it."
+                  },
+                  "elem": {
+                    "type": "string",
+                    "description": "The piece's `elem` argument, as its macro takes it."
+                  },
+                  "error_ty": {
+                    "type": "string",
+                    "description": "The piece's `error_ty` argument, as its macro takes it."
+                  },
+                  "ty": {
+                    "type": "string",
+                    "description": "The piece's `ty` argument, as its macro takes it."
+                  },
+                  "wrapper": {
+                    "type": "string",
+                    "description": "The piece's `wrapper` argument, as its macro takes it."
+                  },
+                  "inner": {
+                    "type": "string",
+                    "description": "The piece's `inner` argument, as its macro takes it."
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "The piece's `text` argument, as its macro takes it."
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": "The piece's `source` argument, as its macro takes it."
+                  },
+                  "variant": {
+                    "type": "string",
+                    "description": "The piece's `variant` argument, as its macro takes it."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "The piece's `name` argument, as its macro takes it."
+                  },
+                  "command": {
+                    "type": "string",
+                    "description": "The piece's `command` argument, as its macro takes it."
+                  },
+                  "block": {
+                    "type": "string",
+                    "description": "The piece's `block` argument, as its macro takes it."
+                  },
+                  "code": {
+                    "type": "string",
+                    "description": "The piece's `code` argument, as its macro takes it."
+                  },
+                  "vis": {
+                    "type": "string",
+                    "description": "The piece's `vis` argument, as its macro takes it."
+                  }
+                },
+                "required": [
+                  "piece"
+                ],
+                "description": "A toolkit method generator that makes the whole function.",
+                "x-1o-single-keys": true
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "x-1o-single-keys": true
+          }
         },
         "field": {
           "type": "object",
@@ -2103,8 +2289,11 @@
               "description": "Its doc line."
             },
             "attrs": {
-              "type": "string",
-              "description": "An attribute line. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "An attribute line. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "default": {
               "type": "string",
@@ -2115,7 +2304,8 @@
             "name",
             "ty"
           ],
-          "description": "add_field: the field."
+          "description": "add_field: the field.",
+          "x-1o-single-keys": true
         },
         "variant": {
           "type": "object",
@@ -2130,47 +2320,60 @@
               "description": "Its doc line."
             },
             "attrs": {
-              "type": "string",
-              "description": "An attribute line. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "An attribute line. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "tuple": {
-              "type": "string",
-              "description": "A tuple field's type. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A tuple field's type. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "fields": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "name": {
-                  "type": "string",
-                  "description": "The field's name."
+              "type": "array",
+              "description": "A named field. Repeats: one block per value, in order.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "The field's name."
+                  },
+                  "ty": {
+                    "type": "string",
+                    "description": "Its type."
+                  },
+                  "vis": {
+                    "type": "string",
+                    "description": "pub, pub(crate)."
+                  },
+                  "doc": {
+                    "type": "string",
+                    "description": "Its doc line."
+                  },
+                  "attrs": {
+                    "type": "array",
+                    "description": "An attribute line. Repeats: one value per line, in order.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "default": {
+                    "type": "string",
+                    "description": "The expression every existing struct literal gets for it."
+                  }
                 },
-                "ty": {
-                  "type": "string",
-                  "description": "Its type."
-                },
-                "vis": {
-                  "type": "string",
-                  "description": "pub, pub(crate)."
-                },
-                "doc": {
-                  "type": "string",
-                  "description": "Its doc line."
-                },
-                "attrs": {
-                  "type": "string",
-                  "description": "An attribute line. Repeats: one value per line, in order."
-                },
-                "default": {
-                  "type": "string",
-                  "description": "The expression every existing struct literal gets for it."
-                }
-              },
-              "required": [
-                "name",
-                "ty"
-              ],
-              "description": "A named field. Repeats: one block per value, in order."
+                "required": [
+                  "name",
+                  "ty"
+                ],
+                "x-1o-single-keys": true
+              }
             },
             "discriminant": {
               "type": "string",
@@ -2180,11 +2383,15 @@
           "required": [
             "name"
           ],
-          "description": "add_variant: the variant."
+          "description": "add_variant: the variant.",
+          "x-1o-single-keys": true
         },
         "derive": {
-          "type": "string",
-          "description": "add_derive: a derive. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "add_derive: a derive. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "attribute": {
           "type": "string",
@@ -2195,8 +2402,11 @@
           "description": "add_trait_impl: the trait."
         },
         "assoc": {
-          "type": "string",
-          "description": "add_trait_impl: an associated item line (type Output = Self;). Repeats: one value per line, in order."
+          "type": "array",
+          "description": "add_trait_impl: an associated item line (type Output = Self;). Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "generator": {
           "type": "object",
@@ -2350,16 +2560,22 @@
               "description": "The piece's `condition` argument, as its macro takes it."
             },
             "conditions": {
-              "type": "string",
-              "description": "The piece's `conditions` arguments. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "The piece's `conditions` arguments. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "error": {
               "type": "string",
               "description": "The piece's `error` argument, as its macro takes it."
             },
             "errors": {
-              "type": "string",
-              "description": "The piece's `errors` arguments. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "The piece's `errors` arguments. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "value": {
               "type": "string",
@@ -2426,8 +2642,11 @@
               "description": "The piece's `cleanup` argument, as its macro takes it."
             },
             "candidates": {
-              "type": "string",
-              "description": "The piece's `candidates` arguments. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "The piece's `candidates` arguments. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "parts": {
               "type": "string",
@@ -2438,16 +2657,25 @@
               "description": "The piece's `this` argument, as its macro takes it."
             },
             "fields": {
-              "type": "string",
-              "description": "The piece's `fields` arguments. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "The piece's `fields` arguments. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "flags": {
-              "type": "string",
-              "description": "The piece's `flags` arguments. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "The piece's `flags` arguments. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "args": {
-              "type": "string",
-              "description": "The piece's `args` arguments. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "The piece's `args` arguments. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "opt": {
               "type": "string",
@@ -2545,7 +2773,8 @@
           "required": [
             "piece"
           ],
-          "description": "add_trait_impl: a toolkit impl generator."
+          "description": "add_trait_impl: a toolkit impl generator.",
+          "x-1o-single-keys": true
         },
         "module": {
           "type": "object",
@@ -2567,7 +2796,8 @@
           "required": [
             "name"
           ],
-          "description": "add_module, extract: the module."
+          "description": "add_module, extract: the module.",
+          "x-1o-single-keys": true
         },
         "dependency": {
           "type": "object",
@@ -2586,8 +2816,11 @@
               "description": "Or its path."
             },
             "features": {
-              "type": "string",
-              "description": "A feature. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A feature. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "optional": {
               "type": "boolean",
@@ -2597,37 +2830,45 @@
           "required": [
             "name"
           ],
-          "description": "add_dependency, change_dependency: the dependency."
+          "description": "add_dependency, change_dependency: the dependency.",
+          "x-1o-single-keys": true
         },
         "dependencies": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "name": {
-              "type": "string",
-              "description": "The crate."
+          "type": "array",
+          "description": "change_dependency: a dependency changed with the others, so a family moves together. Repeats: one block per value, in order.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The crate."
+              },
+              "version": {
+                "type": "string",
+                "description": "Its version."
+              },
+              "path": {
+                "type": "string",
+                "description": "Or its path."
+              },
+              "features": {
+                "type": "array",
+                "description": "A feature. Repeats: one value per line, in order.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "optional": {
+                "type": "boolean",
+                "description": "true: the dependency is optional (a feature turns it on with dep:<name>); false: required again."
+              }
             },
-            "version": {
-              "type": "string",
-              "description": "Its version."
-            },
-            "path": {
-              "type": "string",
-              "description": "Or its path."
-            },
-            "features": {
-              "type": "string",
-              "description": "A feature. Repeats: one value per line, in order."
-            },
-            "optional": {
-              "type": "boolean",
-              "description": "true: the dependency is optional (a feature turns it on with dep:<name>); false: required again."
-            }
-          },
-          "required": [
-            "name"
-          ],
-          "description": "change_dependency: a dependency changed with the others, so a family moves together. Repeats: one block per value, in order."
+            "required": [
+              "name"
+            ],
+            "x-1o-single-keys": true
+          }
         },
         "new_name": {
           "type": "string",
@@ -2638,16 +2879,22 @@
           "description": "move: the module route the item goes to; add_test: the inline test module (tests when unset)."
         },
         "items": {
-          "type": "string",
-          "description": "extract: an item moved out. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "extract: an item moved out. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "feature": {
           "type": "string",
           "description": "gate: the crate feature; declare_feature: the feature declared."
         },
         "enables": {
-          "type": "string",
-          "description": "declare_feature: what the feature turns on (dep:<name>, <dependency>/<feature>, another feature). Repeats: one value per line, in order."
+          "type": "array",
+          "description": "declare_feature: what the feature turns on (dep:<name>, <dependency>/<feature>, another feature). Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "linkage": {
           "type": "string",
@@ -2666,7 +2913,8 @@
               "description": "true: go ahead with call sites klepto could not resolve, listed for a person; unset, the preflight refuses while any is unresolved."
             }
           },
-          "description": "change_signature: what the call sites get."
+          "description": "change_signature: what the call sites get.",
+          "x-1o-single-keys": true
         },
         "compatibility": {
           "type": "string",
@@ -2674,56 +2922,87 @@
             "preserve",
             "break"
           ],
-          "description": "preserve (every existing use keeps compiling) or break."
+          "description": "preserve (every existing use keeps compiling) or break.",
+          "enumDescriptions": [
+            "keep every existing use compiling: a new field needs its default, a moved item its re-export, a new parameter the expression its call sites pass",
+            "existing uses may stop compiling; the preflight lists them and the cargo check over the target and its dependents says which"
+          ]
         },
         "scope": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "read": {
-              "type": "string",
-              "description": "A route the change may read. Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A route the change may read. Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             },
             "write": {
-              "type": "string",
-              "description": "A route the change may write (empty: the target's own file). Repeats: one value per line, in order."
+              "type": "array",
+              "description": "A route the change may write (empty: the target's own file). Repeats: one value per line, in order.",
+              "items": {
+                "type": "string"
+              }
             }
           },
-          "description": "What the change is authorized to read and write."
+          "description": "What the change is authorized to read and write.",
+          "x-1o-single-keys": true
         },
         "features": {
-          "type": "string",
-          "description": "A feature configuration that must still build: default, none, all, or a feature. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "A feature configuration that must still build: default, none, all, or a feature. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "validate": {
-          "type": "string",
-          "description": "A validation after the change: check, affected_tests, test:<name>. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "A validation after the change: check, affected_tests, test:<name>. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "postconditions": {
-          "type": "string",
-          "description": "What must hold after: exists <item>, resolves <path>, absent <item>. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "What must hold after: exists <item>, resolves <path>, absent <item>. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "decisions": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "question": {
-              "type": "string",
-              "description": "The question."
+          "type": "array",
+          "description": "A decision the change cannot make itself. Repeats: one block per value, in order.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "question": {
+                "type": "string",
+                "description": "The question."
+              },
+              "options": {
+                "type": "array",
+                "description": "An option. Repeats: one value per line, in order.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "why": {
+                "type": "string",
+                "description": "Why it matters."
+              }
             },
-            "options": {
-              "type": "string",
-              "description": "An option. Repeats: one value per line, in order."
-            },
-            "why": {
-              "type": "string",
-              "description": "Why it matters."
-            }
-          },
-          "required": [
-            "question"
-          ],
-          "description": "A decision the change cannot make itself. Repeats: one block per value, in order."
+            "required": [
+              "question"
+            ],
+            "x-1o-single-keys": true
+          }
+        },
+        "same_expansion": {
+          "type": "boolean",
+          "description": "The change keeps what the function compiles to (a body swapped for the toolkit calls whose expansion it already is): cargo expand of the target before and after, the same tokens in the normal form, is a postcondition of the transform."
         }
       },
       "required": [
@@ -2732,7 +3011,77 @@
         "operation",
         "target"
       ],
-      "description": "The change."
+      "description": "The change.",
+      "x-1o-single-keys": true,
+      "x-1o-required-when": {
+        "operation": {
+          "make_struct": [
+            "item"
+          ],
+          "make_enum": [
+            "item"
+          ],
+          "add_method": [
+            "function"
+          ],
+          "make_fn": [
+            "function"
+          ],
+          "add_test": [
+            "function"
+          ],
+          "add_constructor": [
+            "function"
+          ],
+          "add_field": [
+            "field"
+          ],
+          "add_variant": [
+            "variant"
+          ],
+          "add_derive": [
+            "derive"
+          ],
+          "add_attribute": [
+            "attribute"
+          ],
+          "add_module": [
+            "module"
+          ],
+          "change_signature": [
+            "function"
+          ],
+          "rename": [
+            "new_name"
+          ],
+          "move": [
+            "to"
+          ],
+          "extract": [
+            "items",
+            "module"
+          ],
+          "gate": [
+            "feature"
+          ],
+          "declare_feature": [
+            "feature"
+          ],
+          "anchor": [
+            "linkage"
+          ],
+          "replace_body": [
+            "function"
+          ],
+          "wrap": [
+            "function"
+          ],
+          "rename_paths": [
+            "new_name"
+          ]
+        }
+      }
     }
-  }
+  },
+  "x-1o-single-keys": true
 }

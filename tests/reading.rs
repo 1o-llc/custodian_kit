@@ -110,8 +110,8 @@ fn patterns_shape_every_function_and_find_the_shapes_repeated_across_crates() {
     let exact = fns.iter().filter(|f| f.attributes["status"] == "exact").count();
     assert!(exact > 0 && files.len() == exact, "{} files for {exact} exact matches", files.len());
     for (name, text) in &files {
-        let s = custodian_kit::change::ChangeSpec::from_toml(text).unwrap_or_else(|e| panic!("{name}: {e}\n{text}"));
-        assert!(name == &format!("{}.toml", s.name) && s.same_expansion && s.scope.write.len() == 1 && s.scope.write[0].starts_with("crate:"), "{text}");
+        let s = custodian_kit::change::ChangeSpec::from_1o(text).unwrap_or_else(|e| panic!("{name}: {e}\n{text}"));
+        assert!(name == &custodian_kit::oneo::Doc::Change.file_name(&s.name) && s.same_expansion && s.scope.write.len() == 1 && s.scope.write[0].starts_with("crate:"), "{text}");
     }
 }
 
@@ -441,9 +441,9 @@ fn a_patterns_spec_is_named_by_its_whole_route_and_two_impls_on_one_path_get_two
     assert_eq!(exact, 4, "two `From` bodies and the two long functions: {:?}", fns.iter().map(|f| (&f.label, &f.attributes["status"])).collect::<Vec<_>>());
     assert_eq!(files.len(), exact);
     let one = files.iter().find(|(n, _)| n.contains("characters_one")).expect("the long route's spec").0.clone();
-    assert!(one.starts_with("to-toolkit-levels_a_function_whose_route_runs_well_past_forty_eight_characters_one-") && one.len() == "to-toolkit-levels_a_function_whose_route_runs_well_past_forty_eight_characters_one-".len() + 8 + ".toml".len(), "{one}");
+    assert!(one.starts_with("v1.to-toolkit-levels_a_function_whose_route_runs_well_past_forty_eight_characters_one-") && one.len() == "v1.to-toolkit-levels_a_function_whose_route_runs_well_past_forty_eight_characters_one-".len() + 8 + ".1o.change".len(), "{one}");
     // each spec targets its own impl
-    let targets: std::collections::BTreeSet<String> = files.iter().map(|(_, t)| custodian_kit::change::ChangeSpec::from_toml(t).unwrap().target).collect();
+    let targets: std::collections::BTreeSet<String> = files.iter().map(|(_, t)| custodian_kit::change::ChangeSpec::from_1o(t).unwrap().target).collect();
     assert_eq!(targets.len(), 4, "{targets:?}");
     // (9) the whole `From<String>` impl a piece writes is reported apart and is not an exact match
     let w = fns.iter().find(|f| f.label == "levels::<Wrapper as std::From>::from").expect("Wrapper::from");

@@ -163,9 +163,13 @@ fn the_schema_refuses_what_the_spec_refuses() {
     // a missing required key
     let (_, m) = code("{ reading { name \"m\" question \"q\" kind \"reach\" } }");
     assert!(m.contains("Missing required key 'target'"), "{m}");
-    // a single key written twice: the Rust form refuses it
-    let (_, m) = code(&base("kind \"reach\" kind \"use_sites\""));
-    assert!(m.contains("`kind` is written 2 times"), "{m}");
+    // a single key written twice: the schema refuses it (x-1o-single-keys), no longer the Rust form
+    let (c, m) = code(&base("kind \"reach\" kind \"use_sites\""));
+    assert_eq!(c, "CUST0029");
+    assert!(m.contains("Key 'kind' is written 2 times in 'reading'; it takes one value"), "{m}");
+    // a repeating key checks each value it is written with
+    let (_, m) = code(&base("kind \"reach\" scope { exclude \"a/**\" exclude 7 }"));
+    assert!(m.contains("Expected string for 'exclude'"), "{m}");
     // a wrong type
     let (_, m) = code(&base("kind \"reach\" scope { tests \"yes\" }"));
     assert!(m.contains("Expected boolean"), "{m}");
@@ -175,6 +179,10 @@ fn enum_of<'a>(schema: &'a Value, path: &[&str]) -> Vec<&'a str> {
     let mut v = &schema["properties"]["reading"];
     for p in path {
         v = &v["properties"][*p];
+        // a repeating key's schema is its items'
+        if v["type"] == "array" {
+            v = &v["items"];
+        }
     }
     v["enum"].as_array().unwrap_or_else(|| panic!("{path:?} has no enum")).iter().map(|x| x.as_str().unwrap()).collect()
 }
@@ -206,6 +214,10 @@ fn keys(v: &Value, at: &str, out: &mut Vec<String>) {
 }
 
 fn schema_keys(v: &Value, at: &str, out: &mut Vec<String>) {
+    // a repeating key's keys are its items'
+    if let Some(items) = v.get("items") {
+        return schema_keys(items, at, out);
+    }
     if let Some(Value::Object(m)) = v.get("properties") {
         for (k, x) in m {
             let p = if at.is_empty() { k.clone() } else { format!("{at}.{k}") };
@@ -259,7 +271,7 @@ fn the_schemas_name_exactly_the_fields_of_the_rust_forms() {
         "generator": piece("impl_std_error"), "module": {"name": "m", "vis": "pub", "doc": "d"}, "dependency": {"name": "d", "version": "1", "path": "p", "features": ["f"], "optional": true},
         "dependencies": [{"name": "d", "version": "1", "path": "p", "features": ["f"], "optional": false}],
         "new_name": "n", "to": "crate:x/src/y.rs", "items": ["x::a"], "feature": "f", "enables": ["dep:d"], "linkage": "l", "call_sites": {"pass": "0", "allow_unresolved": true}, "compatibility": "preserve",
-        "scope": {"read": ["crate:x"], "write": ["crate:x"]}, "features": ["default"], "validate": ["check"], "postconditions": ["exists x::S"], "decisions": [{"question": "q", "options": ["a"], "why": "w"}]
+        "scope": {"read": ["crate:x"], "write": ["crate:x"]}, "features": ["default"], "validate": ["check"], "postconditions": ["exists x::S"], "decisions": [{"question": "q", "options": ["a"], "why": "w"}], "same_expansion": true
     });
     let spec: custodian_kit::change::ChangeSpec = serde_json::from_value(change).unwrap();
     let mut have = Vec::new();
@@ -293,14 +305,139 @@ fn the_job_file_and_the_paths_table_read_from_1o() {
     assert_eq!(back, p);
 }
 
+/// CUST0030 was a string holding a double quote; core-1o 0.2 reads escapes, so it is written as one and reads
+/// back. The record is written at the top level, without the outer `{ }`.
 #[test]
-fn a_double_quote_cannot_be_written_and_says_so() {
+fn a_double_quote_is_written_as_an_escape_and_reads_back() {
     let mut s = ReadingSpec::from_toml(TOML).unwrap();
-    s.question = "Who reads \"NODEPLAN_*\"?".into();
-    match s.to_1o() {
+    s.question = "Who reads \"NODEPLAN_*\"?\nC:\\kit\tand a tab".into();
+    let text = s.to_1o().unwrap();
+    assert!(text.starts_with("reading {\n"), "{text}");
+    assert!(text.contains(r#"question "Who reads \"NODEPLAN_*\"?\nC:\\kit\tand a tab""#), "{text}");
+    assert_eq!(ReadingSpec::from_1o(&text).unwrap(), s);
+    // the older wrapped form reads the same
+    assert_eq!(ReadingSpec::from_1o(&format!("{{\n{text}}}\n")).unwrap(), s);
+    // a negative number is still CUST0030: core-1o reads none
+    #[derive(serde::Serialize)]
+    struct Neg {
+        n: i64,
+    }
+    match oneo::render(Doc::Reading, &Neg { n: -1 }) {
         Err(custodian_kit::CustodianError::Reading { code, .. }) => assert_eq!(code, "CUST0030"),
         other => panic!("{other:?}"),
     }
+}
+
+/// Each vocabulary in a schema carries its words' descriptions (`enumDescriptions`, what the language server
+/// shows), and the change spec's operations the keys each needs (`x-1o-required-when`), as the Rust says them.
+#[test]
+fn the_schemas_carry_the_vocabularies_descriptions_and_each_operation_s_keys() {
+    use custodian_kit::change::{Compatibility, Operation};
+    fn said(v: &Value) -> (Vec<&str>, Vec<&str>) {
+        let words = v["enum"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
+        let docs = v["enumDescriptions"].as_array().unwrap_or_else(|| panic!("no enumDescriptions: {v}")).iter().map(|x| x.as_str().unwrap()).collect();
+        (words, docs)
+    }
+    macro_rules! same {
+        ($v:expr, $vocab:ty) => {
+            assert_eq!(said($v), (<$vocab>::ALL.iter().map(|k| k.as_str()).collect(), <$vocab>::ALL.iter().map(|k| k.doc()).collect()), stringify!($vocab))
+        };
+    }
+    let reading = Doc::Reading.schema();
+    same!(&reading["properties"]["reading"]["properties"]["kind"], ReadingKind);
+    same!(&reading["properties"]["reading"]["properties"]["declared_in"]["items"]["properties"]["role"], DeclaredRole);
+    same!(&Doc::Job.schema()["properties"]["job"]["properties"]["mode"], custodian_kit::jobs::JobMode);
+    same!(&Doc::Linkage.schema()["properties"]["linkage"]["properties"]["kind"], custodian_kit::linkage::LinkKind);
+    let change = Doc::Change.schema();
+    same!(&change["properties"]["change"]["properties"]["operation"], Operation);
+    same!(&change["properties"]["change"]["properties"]["compatibility"], Compatibility);
+    // the keys an operation needs: needs() where one key says it (functions, trait and dependency each have another
+    // way to be given, so they stay the Rust check's)
+    let when = &change["properties"]["change"]["x-1o-required-when"]["operation"];
+    for op in Operation::ALL {
+        let want: Vec<&str> = op.needs().iter().copied().filter(|k| !["functions", "trait", "dependency"].contains(k)).collect();
+        let have: Vec<&str> = when.get(op.as_str()).and_then(Value::as_array).map(|a| a.iter().map(|x| x.as_str().unwrap()).collect()).unwrap_or_default();
+        assert_eq!(have, want, "{}", op.as_str());
+    }
+    let e = custodian_kit::change::ChangeSpec::from_1o("change { name \"c\" objective \"o\" operation \"rename\" target \"x::a\" }").unwrap_err();
+    assert!(e.to_string().contains("Missing required key 'new_name' for operation 'rename'"), "{e}");
+    // every block says its single keys
+    fn single(v: &Value, at: &str) {
+        if v.get("properties").is_some() {
+            assert_eq!(v["x-1o-single-keys"], true, "{at}");
+            for (k, x) in v["properties"].as_object().unwrap() {
+                single(x, &format!("{at}.{k}"));
+            }
+        }
+        if let Some(i) = v.get("items") {
+            single(i, &format!("{at}[]"));
+        }
+    }
+    for d in Doc::ALL {
+        single(&d.schema(), d.modifier());
+    }
+}
+
+/// Every document under `CUSTODIAN_GOLDEN_CORPUS` (a copy of a project's `.custodian`) reads into its form: the
+/// 1o documents, and the reading specs, change specs and job files still in TOML; and each, written as the 1o
+/// every writer now writes, reads back as the same form.
+#[test]
+fn every_document_of_a_corpus_reads_and_its_1o_reads_back() {
+    use custodian_kit::change::ChangeSpec;
+    let Ok(root) = std::env::var("CUSTODIAN_GOLDEN_CORPUS") else { return };
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut stack = vec![std::path::PathBuf::from(root)];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+                continue;
+            }
+            let text = std::fs::read_to_string(&p).unwrap();
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            let at = p.display().to_string();
+            let kind = match Doc::of_file(&p) {
+                Some((Doc::Reading, _)) => {
+                    let s = ReadingSpec::from_1o(&text).unwrap_or_else(|e| panic!("{at}: {e}"));
+                    assert_eq!(ReadingSpec::from_1o(&s.to_1o().unwrap()).unwrap(), s, "{at}");
+                    "1o reading"
+                }
+                Some((Doc::Job, _)) => {
+                    let j: custodian_kit::jobs::JobFile = oneo::parse(Doc::Job, &at, &text).unwrap_or_else(|e| panic!("{at}: {e}"));
+                    let back: custodian_kit::jobs::JobFile = oneo::parse(Doc::Job, &at, &oneo::render(Doc::Job, &j).unwrap()).unwrap();
+                    assert_eq!(serde_json::to_value(&back).unwrap(), serde_json::to_value(&j).unwrap(), "{at}");
+                    "1o job"
+                }
+                Some((Doc::Paths, _)) => {
+                    let t: custodian_kit::paths::PathsFile = oneo::parse(Doc::Paths, &at, &text).unwrap_or_else(|e| panic!("{at}: {e}"));
+                    assert_eq!(oneo::parse::<custodian_kit::paths::PathsFile>(Doc::Paths, &at, &oneo::render(Doc::Paths, &t).unwrap()).unwrap(), t, "{at}");
+                    "1o paths"
+                }
+                Some((Doc::Change, _)) => {
+                    let c = ChangeSpec::from_1o(&text).unwrap_or_else(|e| panic!("{at}: {e}"));
+                    assert_eq!(ChangeSpec::from_1o(&c.to_1o().unwrap()).unwrap(), c, "{at}");
+                    "1o change"
+                }
+                Some((Doc::Linkage, _)) => "1o linkage",
+                None if name.ends_with(".toml") => {
+                    if let Ok(c) = ChangeSpec::from_toml(&text) {
+                        assert_eq!(ChangeSpec::from_1o(&c.to_1o().unwrap()).unwrap_or_else(|e| panic!("{at}: {e}")), c, "{at}");
+                        "toml change spec"
+                    } else if let Ok(s) = ReadingSpec::from_toml(&text) {
+                        assert_eq!(ReadingSpec::from_1o(&s.to_1o().unwrap()).unwrap_or_else(|e| panic!("{at}: {e}")), s, "{at}");
+                        "toml reading spec"
+                    } else {
+                        "toml, another document"
+                    }
+                }
+                None => continue,
+            };
+            *counts.entry(kind.to_string()).or_default() += 1;
+        }
+    }
+    eprintln!("{counts:?}");
+    assert!(!counts.is_empty());
 }
 
 #[test]

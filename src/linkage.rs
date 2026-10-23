@@ -93,21 +93,11 @@ pub fn load_all(store: &Store) -> Result<Vec<(PathBuf, LinkageRecord)>> {
     Ok(out)
 }
 
-/// A record written: in 1o, or its TOML twin when 1o cannot carry a value.
+/// A record written, in 1o (a TOML record beside it is still read).
 pub fn write(store: &Store, rec: &LinkageRecord) -> Result<PathBuf> {
     let dir = dir(store)?;
-    let p = match crate::oneo::render(crate::oneo::Doc::Linkage, rec) {
-        Ok(text) => {
-            let p = dir.join(crate::oneo::Doc::Linkage.file_name(&rec.name));
-            write_whole(&p, text.as_bytes())?;
-            p
-        }
-        Err(_) => {
-            let p = dir.join(format!("{}.toml", rec.name));
-            write_whole(&p, toml::to_string(rec).map_err(|e| ReadingRefusal::Write.refuse(e))?.as_bytes())?;
-            p
-        }
-    };
+    let p = dir.join(crate::oneo::Doc::Linkage.file_name(&rec.name));
+    write_whole(&p, crate::oneo::render(crate::oneo::Doc::Linkage, rec)?.as_bytes())?;
     Ok(p)
 }
 

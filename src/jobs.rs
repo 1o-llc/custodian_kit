@@ -469,14 +469,10 @@ fn step_spec(folder: &Path, n: usize, step: &Step, target: &str, items: &[String
     if !items.is_empty() {
         t.push_str(&format!("\n[change]\nitems = [{}]\n", items.iter().map(|i| toml_str(i)).collect::<Vec<_>>().join(", ")));
     }
-    // the step's spec in 1o; a value 1o cannot carry (a double quote) keeps it in TOML
+    // the step's spec, written in 1o
     let spec = ReadingSpec::from_toml(&t)?;
-    let (p, text) = match spec.to_1o() {
-        Ok(o) => (folder.join("steps").join(crate::oneo::Doc::Reading.file_name(&name)), o),
-        Err(crate::CustodianError::Reading { code, .. }) if code == liaise::Liaise::code(&ReadingRefusal::OneoUnwritable) => (folder.join("steps").join(format!("{name}.toml")), t),
-        Err(e) => return Err(e),
-    };
-    write_whole(&p, text.as_bytes())?;
+    let p = folder.join("steps").join(crate::oneo::Doc::Reading.file_name(&name));
+    write_whole(&p, spec.to_1o()?.as_bytes())?;
     Ok(p)
 }
 

@@ -26,15 +26,27 @@
             "guarded",
             "semantics"
           ],
-          "description": "Why the declarations are bound (the linkage kinds table in custodian_kit's README)."
+          "description": "Why the declarations are bound (the linkage kinds table in custodian_kit's README).",
+          "enumDescriptions": [
+            "a module uses another crate or module because that one owns the responsibility",
+            "an implementation depends on an invariant another declaration keeps",
+            "two types are connected for an architectural reason",
+            "a feature or a shape exists to satisfy a compatibility requirement",
+            "the declarations must stay synchronized with each other",
+            "a declaration must not be changed without considering the others",
+            "a dependency must not be replaced casually: its semantics are required"
+          ]
         },
         "why": {
           "type": "string",
           "description": "The reason, in the author's words."
         },
         "binds": {
-          "type": "string",
-          "description": "A declaration bound: an item path, a crate:/decl: route, or dep:<crate>. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "A declaration bound: an item path, a crate:/decl: route, or dep:<crate>. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         },
         "author": {
           "type": "string",
@@ -45,8 +57,11 @@
           "description": "When, UTC."
         },
         "evidence": {
-          "type": "string",
-          "description": "A bound file as it was when recorded: <path>=<sha256 hex>. Repeats: one value per line, in order."
+          "type": "array",
+          "description": "A bound file as it was when recorded: <path>=<sha256 hex>. Repeats: one value per line, in order.",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -54,7 +69,9 @@
         "kind",
         "why"
       ],
-      "description": "The record."
+      "description": "The record.",
+      "x-1o-single-keys": true
     }
-  }
+  },
+  "x-1o-single-keys": true
 }

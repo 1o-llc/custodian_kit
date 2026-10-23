@@ -138,8 +138,8 @@ fn read_requirements(ctx: &Ctx, name: &str, intent: &str, target: &str, dir: &Pa
     spec.requirements.faces = vec!["prerequisites".into()];
     let report = match &ctx.store {
         Some(_) => {
-            let p = dir.join(format!("{}.toml", spec.name));
-            write_whole(&p, toml::to_string(&spec).ok()?.as_bytes()).ok()?;
+            let p = dir.join(crate::oneo::Doc::Reading.file_name(&spec.name));
+            write_whole(&p, spec.to_1o().ok()?.as_bytes()).ok()?;
             match crate::runs::run_reading_by(ctx, &p, false, job, runner) {
                 Ok(r) => {
                     said.extend(r.said.iter().cloned());
@@ -389,7 +389,7 @@ pub fn run_plan(ctx: &Ctx, name: &str, intent: &str, job: Option<&InJob>, runner
         let rec = match &ctx.store {
             Some(_) => {
                 let p = dir.join(crate::oneo::Doc::Reading.file_name(&iname));
-                write_whole(&p, spec.to_1o().or_else(|_| toml::to_string(&spec).map_err(|e| ReadingRefusal::Write.refuse(e)))?.as_bytes())?;
+                write_whole(&p, spec.to_1o()?.as_bytes())?;
                 match crate::runs::run_reading_by(ctx, &p, false, job, runner) {
                     Ok(r) => {
                         said.extend(r.said.iter().cloned());
@@ -694,8 +694,8 @@ pub fn approve(store: &Store, name: &str, step: usize, operation: Option<&str>) 
         }
     }
     spec.decisions = plan.decisions.iter().map(|q| crate::change::Question { question: q.question.clone(), options: q.options.clone(), why: q.why.clone() }).collect();
-    let out = store.path(&named::CHANGE_SPEC, &[("name", &spec_name)])?.with_file_name(format!("{spec_name}.toml"));
-    write_whole(&out, spec.to_toml()?.as_bytes())?;
+    let out = store.path(&named::CHANGE_SPEC, &[("name", &spec_name)])?.with_file_name(crate::oneo::Doc::Change.file_name(&spec_name));
+    write_whole(&out, spec.to_1o()?.as_bytes())?;
     st.status = "approved".into();
     st.spec = Some(out.strip_prefix(&store.root).unwrap_or(&out).to_string_lossy().into_owned());
     write_whole(&file, (serde_json::to_string_pretty(&plan)? + "\n").as_bytes())?;

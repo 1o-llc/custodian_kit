@@ -55,8 +55,9 @@ fn the_picks_and_their_specs_come_from_the_index() {
         for unit in exercise::units_of(*op) {
             for (n, t) in exercise::targets(k, &root, *op, *unit, None).into_iter().take(3).enumerate() {
                 let Some(spec) = exercise::spec_for(k, &root, *op, &t, n as u64 + 1, &crates) else { continue };
-                let text = spec.to_toml().unwrap();
-                let back = ChangeSpec::from_toml(&text).unwrap_or_else(|e| panic!("{} on {}: {e}\n{text}", op.as_str(), t.route));
+                // the exercise writes each spec in 1o: every operation's spec is one the change schema takes
+                let text = spec.to_1o().unwrap();
+                let back = ChangeSpec::from_1o(&text).unwrap_or_else(|e| panic!("{} on {}: {e}\n{text}", op.as_str(), t.route));
                 assert_eq!((back.op(), back.target.as_str()), (*op, t.route.as_str()));
                 assert_eq!(back.scope.write.len(), crates.len(), "every crate of the copy is in its scope");
                 made += 1;

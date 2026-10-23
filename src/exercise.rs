@@ -1226,8 +1226,8 @@ impl CaseTask {
                 self.case.tree = Some(in_dir(&env.dir, &self.tree));
                 let (store, _) = Store::init(&self.tree, crate::store::Mode::Plain)?;
                 self.store = Some(store);
-                self.spec_path = self.folder.join(format!("{}.toml", spec.name));
-                write_whole(&self.spec_path, spec.to_toml()?.as_bytes())?;
+                self.spec_path = self.folder.join(crate::oneo::Doc::Change.file_name(&spec.name));
+                write_whole(&self.spec_path, spec.to_1o()?.as_bytes())?;
                 self.case.spec = Some(in_dir(&env.dir, &self.spec_path));
                 // the spec as the kit reads it: its own checks first
                 if let Err(e) = ChangeSpec::from_path(&self.spec_path) {
