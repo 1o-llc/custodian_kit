@@ -12,7 +12,7 @@
 //! (`code-passenger transform --revert RECORD`, or `passenger checkout`).
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const TRANSFORM_SCHEMA: &str = "custodian.transform.v1";
 
@@ -115,6 +115,24 @@ pub struct Uncovered {
     pub lines: Vec<u32>,
 }
 
+/// Whether `end` is reached from `start` through one write or more (each write a step from its `before` to its
+/// `after`, in any order).
+fn reached_by_writes(start: &str, end: &str, writes: &[&FileWrite]) -> bool {
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut frontier: Vec<&str> = vec![start];
+    while let Some(at) = frontier.pop() {
+        for w in writes.iter().filter(|w| w.before == at) {
+            if w.after == end {
+                return true;
+            }
+            if seen.insert(w.after.as_str()) {
+                frontier.push(w.after.as_str());
+            }
+        }
+    }
+    false
+}
+
 /// The files a job touched against what its transforms wrote: `open` and `close` are each file's digest at the
 /// job's open and close counts (path → hex), `transforms` the job's records in the order they ran. A file is covered
 /// when its transforms carry it from its open digest to its close digest, each one's `before` the last one's `after`.
@@ -130,14 +148,18 @@ pub fn coverage(open: &BTreeMap<String, String>, close: &BTreeMap<String, String
         if start == end && !transforms.iter().any(|t| t.files.iter().any(|f| &f.path == p)) {
             continue;
         }
-        // each write taken once, in any order: a batch's members of one file are recorded in the list's order, not
-        // the order their edits stack in, so the chain is followed until no write carries it further
+        // the writes in the order they ran; a batch records its members in the list's order, not the order their
+        // edits stack in, so when that walk does not reach the close, the file is covered when its writes reach the
+        // close from the open through one write or more, in any order
         let writes: Vec<&FileWrite> = transforms.iter().filter(|t| t.written).flat_map(|t| t.files.iter().filter(|f| &f.path == p)).collect();
-        let mut used = vec![false; writes.len()];
         let mut cur = start.clone();
-        while let Some(i) = (0..writes.len()).find(|i| !used[*i] && writes[*i].before == cur && writes[*i].after != cur) {
-            used[i] = true;
-            cur = writes[i].after.clone();
+        for f in &writes {
+            if f.before == cur {
+                cur = f.after.clone();
+            }
+        }
+        if cur != end && reached_by_writes(&start, &end, &writes) {
+            cur = end.clone();
         }
         if cur != end {
             out.push(Uncovered { path: p.clone(), from: cur, now: end, lines: Vec::new() });

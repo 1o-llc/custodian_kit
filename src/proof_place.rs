@@ -62,7 +62,7 @@ fn prune(all: &Path) {
     for e in entries.flatten() {
         let dir = e.path();
         let Ok(ws) = std::fs::read_to_string(dir.join("workspace")) else { continue };
-        if Path::new(ws.trim()).exists() {
+        if ws.trim().is_empty() || Path::new(ws.trim()).exists() {
             continue;
         }
         let Ok(lock) = std::fs::OpenOptions::new().write(true).open(dir.join("lock")) else { continue };
@@ -102,9 +102,10 @@ impl ProofPlace {
         }
         let base = place_of(&workspace);
         std::fs::create_dir_all(&base).map_err(io)?;
-        std::fs::write(base.join("workspace"), workspace.to_string_lossy().as_bytes()).map_err(io)?;
+        // held before the workspace file is written: another take's prune never reads it half written
         let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(base.join("lock")).map_err(io)?;
         lock.lock().map_err(|e| io(format!("{}: {e}", base.join("lock").display())))?;
+        std::fs::write(base.join("workspace"), workspace.to_string_lossy().as_bytes()).map_err(io)?;
         let me = ProofPlace { workspace, src: base.join("src"), target: base.join("target"), _lock: lock };
         me.hold_to_cap(cap_bytes());
         me.sync()?;
