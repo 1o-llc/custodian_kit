@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.14 (2026-10-23)
+
+Two fixes to 0.3.13, found by custodian's and code_passenger's CI on it. Nothing is added to or removed from the API.
+Links are pinned to a664493; the lines they replace to d7b4eee (0.3.13).
+
+- **A swap and its revert stay covered.** 0.3.13 followed a file's writes in whatever order carried the chain
+  ([transform.rs L138](https://github.com/1o-llc/custodian_kit/blob/d7b4eee57c9d9ef50e999b297b8506b315aea02c/src/transform.rs#L138)), and could take a batch member's write before the revert that
+  came first, ending short of the close: custodian's `a_bounded_job_that_swaps_then_reverts_closes_accepted_with_no_hand_lines`
+  was rejected. The writes are walked in the order they ran, as before 0.3.13, and only when that walk does not
+  reach the close is the file covered by its writes reaching the close from the open in any order, through one write
+  or more ([transform.rs L161](https://github.com/1o-llc/custodian_kit/blob/a66449372ad535880cad88f201bb8deba41ff92e/src/transform.rs#L161), `reached_by_writes` [L120](https://github.com/1o-llc/custodian_kit/blob/a66449372ad535880cad88f201bb8deba41ff92e/src/transform.rs#L120)). A
+  hand edit back to the open state is still a hand edit. Tests: that custodian test, and
+  `a_batch_whose_members_stack_in_another_order_than_recorded_still_covers_its_file`.
+- **A proof place is never pruned while it is being taken.** `take` wrote the place's `workspace` file before it
+  held the lock, so another take's prune could read it empty, find no such workspace and take the place away
+  (code_passenger's `the_proof_place_is_kept_and_a_sync_writes_only_what_differs`, CUST0009 on CI). The lock is held
+  first ([proof_place.rs L105](https://github.com/1o-llc/custodian_kit/blob/a66449372ad535880cad88f201bb8deba41ff92e/src/proof_place.rs#L105)) and a prune passes an empty workspace file by
+  ([L65](https://github.com/1o-llc/custodian_kit/blob/a66449372ad535880cad88f201bb8deba41ff92e/src/proof_place.rs#L65)).
+
+`cargo test --all-features`: 318 passed, 0 failed.
+
 ## 0.3.13 (2026-10-23)
 
 The whole-workspace swap job (toolkit-workspace) did its work, 5,215 functions in 282 crates through batches, and
