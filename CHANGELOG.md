@@ -1,5 +1,83 @@
 # Changelog
 
+## 0.3.13 (2026-10-23)
+
+The whole-workspace swap job (toolkit-workspace) did its work, 5,215 functions in 282 crates through batches, and
+its close refused it: it named all 1,531 touched files as written by hand, said no change spec was written and no
+test line ran, and found its verification `test:chain::tests::*` not run. One cause under all four: the agent named
+the job by its name (`--job toolkit-workspace`), every batch, transform and test receipt carried the name, and the
+close read the job's receipts by its id (`job-db0288d94483`). The batch's member records were sound: each file's
+digests chain from the base to the tree as it is. This release counts those receipts, closes a refused job again,
+and fixes what the job found on the way. Nothing is removed from the API; the additions are listed at the end.
+Links are pinned to baaac47 and fedee07; the lines they replace to 46dcc36 (0.3.12).
+
+- **The close counts the receipts a line kept under the job's name.** `runs_of`
+  ([jobs.rs L346](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/jobs.rs#L346)) takes the receipts carrying the job's id and those carrying its name after
+  it opened, while it is the newest job of that name (one job runs at a time); the close and `verifications` read
+  through it, where they read `runs_of_job(&id)` ([jobs.rs L912](https://github.com/1o-llc/custodian_kit/blob/46dcc36b37b7c35c8ab2299f172664b208ed0f26/src/jobs.rs#L912)). A batch's member records
+  then cover their lines exactly as a single transform's do. The handoff counts the receipts the close counted
+  ([handoff.rs L280](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/handoff.rs#L280)), so it names the batch's specs and the test lines. Test:
+  `a_batch_over_three_files_closes_accepted_with_no_line_by_hand` (tests/close.rs): a bounded job, one batch over
+  three files kept under the job's name, refused first, then closed accepted with no line by hand, its verification
+  satisfied by the test run kept under the name, and the handoff naming the specs and the test line.
+- **A batch's writes to one file are followed in the order they stack.** `coverage` took each record once, in the
+  order recorded ([transform.rs L136](https://github.com/1o-llc/custodian_kit/blob/46dcc36b37b7c35c8ab2299f172664b208ed0f26/src/transform.rs#L136)); a batch records its members in the list's order,
+  so seven swaps in one file (system_logging's config.rs) broke the chain at the first member recorded before the
+  one it stacks on. The chain is now followed until no written record carries it further
+  ([transform.rs L138](https://github.com/1o-llc/custodian_kit/blob/fedee07e48438e5994ead815f2268e5c5ddec31d/src/transform.rs#L138)). Test:
+  `a_batch_whose_members_stack_in_another_order_than_recorded_still_covers_its_file`.
+- **A file's base bytes are exact.** The base's digest came from git's text, which the line reader ends with a
+  newline ([jobs.rs L1349](https://github.com/1o-llc/custodian_kit/blob/46dcc36b37b7c35c8ab2299f172664b208ed0f26/src/jobs.rs#L1349)), so a manifest without a final newline never matched its record.
+  `base_bytes` ([jobs.rs L1384](https://github.com/1o-llc/custodian_kit/blob/fedee07e48438e5994ead815f2268e5c5ddec31d/src/jobs.rs#L1384)) takes that newline off when `git cat-file -s` says the
+  blob is shorter. Test: `a_base_without_a_final_newline_is_covered_and_a_test_runs_timings_are_its_own` (tests/close.rs).
+- **A test run's timing records are the test line's.** `.maintenance/timings/<run>.jsonl`, which `test run`
+  writes, is carried as `test run` ([jobs.rs L1375](https://github.com/1o-llc/custodian_kit/blob/fedee07e48438e5994ead815f2268e5c5ddec31d/src/jobs.rs#L1375)); the job's 665 were named files no
+  operation writes. Same test.
+- **A failure that differs only in cargo's build hash is the same failure.** The first failing lines are compared
+  with every `-<16 hex>` written `-#` (`same_first_line`, [baseline.rs L284](https://github.com/1o-llc/custodian_kit/blob/fedee07e48438e5994ead815f2268e5c5ddec31d/src/baseline.rs#L284); was
+  [L321](https://github.com/1o-llc/custodian_kit/blob/46dcc36b37b7c35c8ab2299f172664b208ed0f26/src/baseline.rs#L321)): casino_daemon_leg names its own test binary, built under another hash at the
+  base. Test: `a_first_line_that_differs_only_in_a_build_hash_is_the_same_failure`.
+- **A refused close is closed again.** `job close` on a done job whose close was not accepted moves it back to
+  running and closes it over the same receipts (`reopen_rejected`, [jobs.rs L358](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/jobs.rs#L358), called at
+  [L934](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/jobs.rs#L934)); the handoff already gave that line for a refused close. Same test.
+- **A test verification that names no test is refused when declared.** `job start` and `job verify` read the
+  workspace's tests and refuse a `test:` line that matches none, as the close matches them ("no test matches";
+  `check_tests_match`, [jobs.rs L1340](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/jobs.rs#L1340)), before the job opens. It was found `not run` at the
+  close. Test: `a_test_verification_that_matches_no_test_is_refused_at_start` (tests/close.rs). The close tests that
+  declared `test:x` over a fixture with no such test now declare `test:vault_key_is_42`.
+- **The batch preflight runs over threads.** A batch of 64 members or more splits over up to 6 threads, each
+  reading the code once itself (the parsed code holds proc_macro2 spans and is not shared between threads); the
+  task's records are written after, in the list's order ([preflight.rs L1155](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/preflight.rs#L1155); was one
+  loop, [L1105](https://github.com/1o-llc/custodian_kit/blob/46dcc36b37b7c35c8ab2299f172664b208ed0f26/src/preflight.rs#L1105)). 6,037 specs took 1 h 38 min on one core. Test:
+  `a_large_batch_preflight_runs_over_threads_and_keeps_each_verdict_in_order` (tests/bounded.rs).
+- **A patterns reading reads the code once per job.** klepto's shapes of the workspace are kept beside its parsed
+  index, one file per mining option (`mined`, [patterns.rs L226](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/reading/patterns.rs#L226)); a patterns
+  reading over code whose shapes are kept reads the index from its cache and parses nothing
+  ([mod.rs L112](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/reading/mod.rs#L112)), and a parse keeps the index too
+  ([facts.rs L221](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/reading/facts.rs#L221)). Each reading parsed the whole workspace and mined it again, about
+  3 minutes whatever the crate. Test: `a_patterns_reading_over_the_same_code_reads_the_index_once` (tests/reading.rs).
+- **Swap spec names stay under 200 characters.** A route too long keeps its first words and the same digest at its
+  end (`spec_name_for`, [matcher.rs L874](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/toolkit/matcher.rs#L874)); the full route is the spec's target. A
+  short route's name is as before. Test: `a_long_route_names_its_spec_under_200_characters_with_its_digest`.
+- **A tuple argument keeps its parentheses.** A filling that is one parenthesised group was always unwrapped
+  ([matcher.rs L402](https://github.com/1o-llc/custodian_kit/blob/46dcc36b37b7c35c8ab2299f172664b208ed0f26/src/toolkit/matcher.rs#L402)), so `if c { (a, b) } else { … }` became `if_else!(c => a, b, …)`,
+  the composite_runtimed swap that did not compile. Only grouping parentheses go now
+  ([matcher.rs L403](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/toolkit/matcher.rs#L403)). Test:
+  `a_tuple_argument_keeps_its_parentheses_and_a_pub_forward_is_not_made_private`.
+- **forward_trait_method never makes a `pub fn` private.** The macro writes a trait's method, with no visibility;
+  the render dropped `pub` ([change.rs L1149](https://github.com/1o-llc/custodian_kit/blob/46dcc36b37b7c35c8ab2299f172664b208ed0f26/src/change.rs#L1149)). A function with a visibility is not matched to
+  it ([matcher.rs L903](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/toolkit/matcher.rs#L903)) and the render refuses one
+  ([change.rs L1149](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/change.rs#L1149)). Same test.
+- **The proof's kept build is held under a cap.** `ProofPlace::take` measures the build before any compile and, over
+  `CUSTODIAN_PROOF_CAP_GB` (40 GB by default), lets go of its incremental folders, then of the whole build if still
+  over (`hold_to_cap`, [proof_place.rs L129](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/proof_place.rs#L129)); `prune_incremental`
+  ([L116](https://github.com/1o-llc/custodian_kit/blob/baaac472e981798c9c16b80b8660670028576d51/src/proof_place.rs#L116)) is what code_passenger calls after each batch. The job's proof folder grew to
+  168 GB. Test: `the_kept_build_is_held_under_its_cap_incremental_first`.
+
+API, additive: `jobs::runs_of`, `jobs::reopen_rejected`, `jobs::TEST_RUN_WRITTEN`, `baseline::same_first_line`, `preflight::PARALLEL_FROM`, `preflight::PREFLIGHT_THREADS`,
+`proof_place::{PROOF_CAP_ENV, PROOF_CAP_GB, cap_bytes, size_of}`, `ProofPlace::{prune_incremental, hold_to_cap}`,
+`toolkit::matcher::{SPEC_NAME_MAX, spec_name_for}`. `cargo test --all-features`: 318 passed, 0 failed.
+
 ## 0.3.12 (2026-10-23)
 
 core-1o 0.2 reads string escapes, comments, a record at the top level, and a schema that says which keys
