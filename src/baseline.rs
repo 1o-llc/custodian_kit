@@ -279,6 +279,31 @@ pub fn recorded(folder: &Path) -> Option<Baseline> {
     std::fs::read_to_string(folder.join(crate::jobs::JOB_DATA).join(BASELINE_FILE)).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
 
+/// Two first failing lines are the same failure when they differ only in cargo's build hashes (`leg-eb350b6bf5583434`
+/// in a path under the build folder): the base and the job's tree build the same test under another hash.
+pub fn same_first_line(a: Option<&str>, b: Option<&str>) -> bool {
+    a.map(masked) == b.map(masked)
+}
+
+/// A line with every `-<16 hex digits>` (cargo's metadata hash) written `-#`.
+fn masked(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hash = bytes[i] == b'-' && i + 17 <= bytes.len() && bytes[i + 1..i + 17].iter().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()) && bytes.get(i + 17).is_none_or(|c| !c.is_ascii_alphanumeric());
+        if hash {
+            out.push_str("-#");
+            i += 17;
+        } else {
+            let ch = line[i..].chars().next().unwrap_or_default();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
 /// The job's failing tests judged against its base: each failing test's last outcome in the job, run again on the
 /// job's tree for its first failing line, then looked up in the baseline, else run at the base commit.
 pub fn judge(ctx: &Ctx, folder: &Path, in_job: &InJob, base_commit: Option<&str>, tests: &[TestRow]) -> Result<Judged> {
@@ -318,7 +343,7 @@ pub fn judge(ctx: &Ctx, folder: &Path, in_job: &InJob, base_commit: Option<&str>
             (Some(m), _) if m.outcome != "FAILED" => format!("passed when run again ({}): flaky, and the job's", m.outcome),
             (_, None) => "not run at the base".to_string(),
             (_, Some(b)) if b.outcome != "FAILED" => format!("{} at the base", b.outcome),
-            (Some(m), Some(b)) if m.first_line == b.first_line => {
+            (Some(m), Some(b)) if same_first_line(m.first_line.as_deref(), b.first_line.as_deref()) => {
                 j.pre_existing.push(PreExisting { package: p.clone(), target: t.clone(), test: n.clone(), first_line: m.first_line.clone().unwrap_or_default(), from });
                 continue;
             }
@@ -350,3 +375,16 @@ mod tests {
         assert_eq!(outcomes("test a::x ... FAILED\ntest result: FAILED. 1 passed"), vec![("a::x".to_string(), "FAILED".to_string())]);
     }
 }
+
+#[cfg(test)]
+mod first_line_tests {
+    #[test]
+    fn a_first_line_that_differs_only_in_a_build_hash_is_the_same_failure() {
+        let here = "no daemon binaries beside /t/debug/deps/leg-c91e7a82f1e05340 (build them)";
+        let base = "no daemon binaries beside /t/debug/deps/leg-eb350b6bf5583434 (build them)";
+        assert!(super::same_first_line(Some(here), Some(base)));
+        assert!(!super::same_first_line(Some(here), Some("assertion failed: x == 2")));
+        assert!(!super::same_first_line(Some("left: 1"), Some("left: 2")));
+    }
+}
+

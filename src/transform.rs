@@ -130,13 +130,14 @@ pub fn coverage(open: &BTreeMap<String, String>, close: &BTreeMap<String, String
         if start == end && !transforms.iter().any(|t| t.files.iter().any(|f| &f.path == p)) {
             continue;
         }
+        // each write taken once, in any order: a batch's members of one file are recorded in the list's order, not
+        // the order their edits stack in, so the chain is followed until no write carries it further
+        let writes: Vec<&FileWrite> = transforms.iter().filter(|t| t.written).flat_map(|t| t.files.iter().filter(|f| &f.path == p)).collect();
+        let mut used = vec![false; writes.len()];
         let mut cur = start.clone();
-        for t in transforms.iter().filter(|t| t.written) {
-            for f in t.files.iter().filter(|f| &f.path == p) {
-                if f.before == cur {
-                    cur = f.after.clone();
-                }
-            }
+        while let Some(i) = (0..writes.len()).find(|i| !used[*i] && writes[*i].before == cur && writes[*i].after != cur) {
+            used[i] = true;
+            cur = writes[i].after.clone();
         }
         if cur != end {
             out.push(Uncovered { path: p.clone(), from: cur, now: end, lines: Vec::new() });
@@ -169,6 +170,17 @@ mod tests {
             written: true,
             reverts: None,
         }
+    }
+
+    #[test]
+    fn a_batch_whose_members_stack_in_another_order_than_recorded_still_covers_its_file() {
+        let open: BTreeMap<String, String> = [("a.rs".into(), "a0".into())].into();
+        let close: BTreeMap<String, String> = [("a.rs".into(), "a3".into())].into();
+        // recorded in the list's order: the third edit first
+        let ts = vec![rec(&[("a.rs", "a2", "a3")]), rec(&[("a.rs", "a0", "a1")]), rec(&[("a.rs", "a1", "a2")])];
+        assert!(coverage(&open, &close, &ts).is_empty());
+        let unwritten = TransformRecord { written: false, ..rec(&[("a.rs", "a0", "a3")]) };
+        assert_eq!(coverage(&open, &close, &[unwritten]).len(), 1, "a record not written carries nothing");
     }
 
     #[test]

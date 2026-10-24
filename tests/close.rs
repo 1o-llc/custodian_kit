@@ -362,3 +362,41 @@ fn a_test_verification_that_matches_no_test_is_refused_at_start() {
     assert!(jobs::declare_verify(&ctx, Some("m"), "test:chain::tests::*").unwrap_err().to_string().contains("no test matches"));
     jobs::declare_verify(&ctx, Some("m"), "test:core_lib").unwrap();
 }
+
+/// A file whose base has no final newline is carried by its record from its exact base bytes, and the timing records
+/// a test run writes (`.maintenance/timings/`) are the test line's, never a hand's.
+#[test]
+fn a_base_without_a_final_newline_is_covered_and_a_test_runs_timings_are_its_own() {
+    use custodian_kit::store::{Receipt, RECEIPT_SCHEMA};
+    let dir = fake_writer();
+    // SAFETY: the variable is set once, before any thread of this test reads it
+    unsafe { std::env::set_var("PATH", format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default())) };
+    let (store, ctx) = project("nonl");
+    let manifest = "crates/core_lib/Cargo.toml";
+    let before = std::fs::read_to_string(store.root.join(manifest)).unwrap().trim_end().to_string();
+    std::fs::write(store.root.join(manifest), &before).unwrap();
+    git(&store.root, &["commit", "-qam", "no final newline"]);
+    let w = Workspace::open_with(&store.root, &Default::default(), Resolving::Job).unwrap();
+    job(&store, "nl", "{ job { name \"nl\" kind \"specs\" mode \"bounded\" target \"crate:core_lib\" verify \"test:vault_key_is_42\" } }\n");
+    let started = jobs::start_with(&ctx, Some("nl"), false, Some(&w)).unwrap();
+    let after = format!("{before}\n# a line\n");
+    std::fs::write(store.root.join(manifest), &after).unwrap();
+    let timings = store.root.join(".maintenance/timings/custodian-1.jsonl");
+    std::fs::create_dir_all(timings.parent().unwrap()).unwrap();
+    std::fs::write(&timings, "{}\n").unwrap();
+    let hex = |b: &[u8]| stable_digest::StableDigest::sha256(b).as_str().to_string();
+    let out = started.folder.join("data/transforms/one.json");
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    let record = serde_json::json!({"schema": "custodian.transform.v1", "spec_name": "one", "spec": "one.toml", "spec_digest": "d", "operation": "add_dependency", "target": "core_lib", "files": [{ "path": manifest, "before": hex(before.as_bytes()), "after": hex(after.as_bytes()), "lines": [[2, 2]] }], "checks": [], "postconditions": [], "written": true});
+    std::fs::write(&out, record.to_string()).unwrap();
+    let rel = out.strip_prefix(&store.root).unwrap().to_string_lossy().into_owned();
+    let r = Receipt { schema: RECEIPT_SCHEMA.into(), seq: 0, utc: "2026-10-23T00:00:00Z".into(), command: "transform".into(), name: "one".into(), spec: None, spec_hash: None, code_digest: None, index_key: None, plan_id: "p".into(), plan_digest: "d".into(), operation_digest: "d".into(), receipt_digest: "r-one".into(), line: "l".into(), exit_code: Some(0), accepted: true, disposition: "Continue".into(), reason: "done".into(), outputs: vec![rel], job: Some(started.id.clone()), reused_seq: None, millis: 0, runner: "line".into() };
+    custodian_kit::receipts::keep(&store, r).unwrap();
+    let line = TestLine { package: "core_lib".into(), target: Some(Some("gate".into())), filters: vec!["vault_key_is_42".into()] };
+    testrun::run(&ctx, &[line], Observe::Failed, Some(&InJob { id: started.id.clone(), readings: started.folder.join("readings") })).unwrap();
+    let (c, _, _) = jobs::close_with(&ctx, "nl", Some(&w)).unwrap();
+    assert!(c.refusal.is_none(), "{:?} {:?}", c.refusal, c.touched_files);
+    assert!(c.touched_files.iter().any(|(p, how)| p == manifest && how.starts_with("transform #")), "{:?}", c.touched_files);
+    assert!(c.touched_files.iter().any(|(p, how)| p == ".maintenance/timings/custodian-1.jsonl" && how == "test run"), "{:?}", c.touched_files);
+    assert_eq!(c.result, "accepted", "{:?}", c.result_reason);
+}

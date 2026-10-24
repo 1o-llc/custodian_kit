@@ -1370,6 +1370,27 @@ fn cargo_written(path: &str) -> bool {
     CARGO_WRITTEN.iter().any(|c| path == *c || path.ends_with(&format!("/{c}")))
 }
 
+/// Files a test line writes: maintenance's timing records of each run (`.maintenance/timings/<run>.jsonl`,
+/// [`crate::testrun::write_timings`]). A job's test run writes them, never a hand.
+pub const TEST_RUN_WRITTEN: &str = ".maintenance/timings/";
+
+/// Whether a path is a file a test line writes ([`TEST_RUN_WRITTEN`]).
+fn test_run_written(path: &str) -> bool {
+    path.starts_with(TEST_RUN_WRITTEN) || path.contains(&format!("/{TEST_RUN_WRITTEN}"))
+}
+
+/// A file's bytes at `base`, exact: git's text as the line reads it (each line ends in a newline), the last
+/// newline taken off when the blob has none (`git cat-file -s`, its size in bytes).
+fn base_bytes(root: &Path, base: &str, path: &str) -> Option<Vec<u8>> {
+    let spec = format!("{base}:{path}");
+    let mut text = git_out(root, &["show", &spec])?.into_bytes();
+    let size: usize = git_out(root, &["cat-file", "-s", &spec])?.trim().parse().ok()?;
+    while text.len() > size && text.last() == Some(&b'\n') {
+        text.pop();
+    }
+    Some(text)
+}
+
 /// A git line's output in the tree at `root` (the kit's declared git line), when it ran and said yes.
 fn git_out(root: &Path, words: &[&str]) -> Option<String> {
     let line = crate::exec::Git::in_dir(root.as_os_str()).words(words.iter().map(std::ffi::OsString::from).collect::<Vec<_>>());
@@ -1415,7 +1436,7 @@ fn files_touched(ctx: &Ctx, folder: &Path, base: &str, allow: &[String], transfo
     for p in paths {
         let at_base = match at_open.get(&p) {
             Some(d) => d.clone(),
-            None => git_out(&ctx.root, &["show", &format!("{base}:{p}")]).map(|t| hex(t.as_bytes())).unwrap_or_else(|| "none".into()),
+            None => base_bytes(&ctx.root, base, &p).map(|b| hex(&b)).unwrap_or_else(|| "none".into()),
         };
         let now = digest_now(ctx, &p);
         if at_base == now {
@@ -1430,6 +1451,7 @@ fn files_touched(ctx: &Ctx, folder: &Path, base: &str, allow: &[String], transfo
             Some(u) => match globs.iter().find(|(_, m)| m.is_match(&p)) {
                 Some((g, _)) => format!("allow_file {g}"),
                 None if cargo_written(&p) => "cargo".to_string(),
+                None if test_run_written(&p) => "test run".to_string(),
                 None => format!("hand from {}", u.from),
             },
         };
