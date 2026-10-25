@@ -55,7 +55,7 @@ this is the next patch, as 0.3.13's additions were. Links are pinned to f6e18a7.
   [the verifier refuses what it cannot trust](https://github.com/1o-llc/custodian_kit/blob/68067d1/src/archive.rs#L929) (`..` and absolute entry names, a duplicate
   entry, a payload the manifest does not name, a digest or size the payload does not meet, no manifest).
 
-`cargo test --all-features`: 317 passed, 0 failed (`archive::tests`: 13 of them). Links in the item above are pinned to 68067d1.
+`cargo test --locked --all-features`: 331 passed, 0 failed (`archive::tests`: 13 of them). Links in the item above are pinned to 68067d1.
 
 ## 0.3.14 (2026-10-23)
 
