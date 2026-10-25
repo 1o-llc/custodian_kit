@@ -85,11 +85,13 @@ pub mod named {
     pub const INDEX_MODEL: ArtifactOutputDescriptor = file("custodian.index", "index", ArtifactEndpoint::FileCbor, AppPathRole::State, "index/{digest}/model.cbor.zst", PathMutability::Writable);
     /// A reading's or a reuse's cost record (`crate::cost`), under its receipt's number.
     pub const COST: ArtifactOutputDescriptor = part("custodian.cost.v1", "custodian.cost", "cost", ArtifactEndpoint::FileJson, AppPathRole::Data, "costs/{seq}.json", PathMutability::AppendOnly);
+    /// An archive (`crate::archive`): the crates a line named, as one ZIP, dated, every earlier one kept.
+    pub const ARCHIVE: ArtifactOutputDescriptor = part("custodian.archive.v1", "custodian.archive", "archive", ArtifactEndpoint::FileTxt, AppPathRole::Data, "archives/{name}/{stamp}.zip", PathMutability::AppendOnly);
 
     /// Every part of the folder, each once: what `custodian list` prints and what the golden test pins.
     pub const ALL: &[ArtifactOutputDescriptor] = &[
         SETTINGS, PATHS, SCHEMA, THRESHOLDS, JOB_TEMPLATE, QUEUED_SPEC, DONE_SPEC, READING_PAGE, RECEIPT, INVENTORY, PLAN, HISTORY_INDEX, JOURNAL, JOB_FILE, SOCKET,
-        READING_RECORD, CHECK_RUN, LOG, WRITER, CHANGE_SPEC, PREFLIGHT, TRANSFORM, LINKAGE, INTENT_PLAN, TREE, INDEX_MODEL, COST,
+        READING_RECORD, CHECK_RUN, LOG, WRITER, CHANGE_SPEC, PREFLIGHT, TRANSFORM, LINKAGE, INTENT_PLAN, TREE, INDEX_MODEL, COST, ARCHIVE,
     ];
 
     /// The folder's policy for the project at `root`: pathgen's dev policy whose base is the root and whose app

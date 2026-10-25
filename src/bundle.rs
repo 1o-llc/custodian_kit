@@ -419,6 +419,12 @@ fn held_items(f: &Facts) -> Result<HeldItems, Refusal> {
     Ok(HeldItems { items, levels })
 }
 
+/// The files (relative to the root) holding an item at `secret` or above, whole or in a window: what a bundle
+/// holds redacted, and what an archive (which copies files whole) refuses unless revealed. One rule, [`held_items`].
+pub(crate) fn held_files(f: &Facts) -> Result<std::collections::BTreeSet<String>, Refusal> {
+    Ok(held_items(f)?.iter().map(|h| h.file.clone()).collect())
+}
+
 /// Where `rel` sits in its package: by cargo's layout (`src/`, `tests/`,
 /// `benches/`, `examples/`) or as a declared target's own file.
 pub(crate) fn place_of(f: &Facts, rel: &str, file: &Path) -> Place {

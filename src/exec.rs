@@ -25,6 +25,7 @@ use xccute_runtime::{ExitDisposition, ExitStatusDecision, ExitStatusPolicy, Runt
 #[derive(CompositeShell, Debug, Clone, Copy, Default)]
 #[shell(program = "custodian")]
 #[composite(command = "exec-reading", method = "exec_reading", ty = ExecReading, init = "spec,root,out,stamp")]
+#[composite(command = "exec-archive", method = "exec_archive", ty = ExecArchive, init = "root")]
 pub struct Custodian;
 
 /// `custodian exec-reading --spec SPEC --root ROOT --out DIR|- --stamp STAMP`: one
@@ -51,6 +52,59 @@ pub struct ExecReading {
     #[builder(into)]
     #[arg(kv = "--job")]
     pub job: Option<OsString>,
+}
+
+/// `custodian exec-archive --root ROOT --include ROUTE... [--attach ROUTE]... [--workspace-deps] [--reveal]
+/// [--out ZIP] [--job ID]`, or `--root ROOT --verify ZIP`: the archive of the crates the routes name
+/// ([`crate::archive::exec_archive`]), written at `ZIP` (or planned only, without `--out`), its summary the last
+/// line; or an archive read back. `gaps`: a crate in the archive depends on a workspace crate that is not.
+#[allow(clippy::duplicated_attributes)]
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "exec-archive")]
+#[exit_status(code = 0, word = "archived")]
+#[exit_status(code = 1, word = "gaps")]
+#[exit_status(code = 2, word = "refused")]
+#[validate(with = "exec_archive_valid")]
+pub struct ExecArchive {
+    #[builder(init_required, into)]
+    #[arg(kv = "--root")]
+    pub root: OsString,
+    /// The crates, each a `crate:<name>` route.
+    #[builder(into)]
+    #[arg(kv = "--include")]
+    pub include: Vec<OsString>,
+    /// Files attached under `workspace/`, each a route (`crate:<name>/<file>`, `path:<file>`).
+    #[builder(into)]
+    #[arg(kv = "--attach")]
+    pub attach: Vec<OsString>,
+    /// The closure: every workspace crate an included crate depends on, recursively.
+    #[arg(flag = "--workspace-deps")]
+    pub workspace_deps: bool,
+    /// Copy a file holding an item at `secret` or above as it is (refused otherwise).
+    #[arg(flag = "--reveal")]
+    pub reveal: bool,
+    /// The archive written; without it, the plan only.
+    #[builder(into)]
+    #[arg(kv = "--out")]
+    pub out: Option<OsString>,
+    /// An archive read back instead of one made.
+    #[builder(into)]
+    #[arg(kv = "--verify")]
+    pub verify: Option<OsString>,
+    /// The job the archive is part of: declared routes only.
+    #[builder(into)]
+    #[arg(kv = "--job")]
+    pub job: Option<OsString>,
+}
+
+fn exec_archive_valid(line: &ExecArchive) -> CommandValidationResult {
+    let structural = |msg: &str, field: &str| Err(xccute_contract::CommandValidationError::structural(msg).with_field(field));
+    match (&line.verify, line.include.is_empty()) {
+        (Some(_), false) => structural("--verify reads an archive back; --include makes one", "verify"),
+        (Some(_), true) if line.out.is_some() || !line.attach.is_empty() || line.workspace_deps || line.reveal => structural("--verify takes no --out, --attach, --workspace-deps or --reveal", "verify"),
+        (None, true) => structural("an archive holds at least one crate: --include crate:<name>", "include"),
+        _ => Ok(()),
+    }
 }
 
 /// cargo.

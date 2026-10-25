@@ -69,6 +69,7 @@ pub mod proof_place;
 pub mod step_time;
 pub mod route;
 pub mod handoff;
+pub mod archive;
 
 #[cfg(test)]
 mod tests;

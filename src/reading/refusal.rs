@@ -114,6 +114,12 @@ pub enum ReadingRefusal {
     Entry,
     #[liaise(code = 120, msg = "the exercise's options are refused: a word that is not an operation or a unit kind, a number that is not one, or a rule of the exercise word broken")]
     ExerciseRefused,
+    #[liaise(code = 130, msg = "the archive job is refused: a route that is not a workspace crate, an attached file outside the root or missing, a duplicate archive path, or an output that exists")]
+    ArchiveRefused,
+    #[liaise(code = 131, msg = "a file the archive would copy whole holds an item at secret or above: refused rather than written open (--reveal copies it as it is)")]
+    ArchiveHeld,
+    #[liaise(code = 132, msg = "the archive does not read back as written: a ZIP entry, its manifest or a digest is wrong")]
+    ArchiveInvalid,
 }
 
 impl ReadingRefusal {
