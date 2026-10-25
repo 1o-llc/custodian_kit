@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased (2026-10-25)
+## 0.3.15 (2026-10-25)
 
 An archive: whole crates as one ZIP for delivery, beside the bundle (one annotated text file for reading, held
 redacted). The engine was built and tested standalone first (a three-crate fixture, `fixture_app -> fixture_mid ->
 fixture_leaf`, two builds the same bytes); this release carries it into the kit as the body of a declared line, so a
 custodian line runs it through the executor with a receipt, and its crate discovery is the kit's own. Nothing is
-removed from the API. Links are pinned to f6e18a7.
+removed from the API; the additions are a module, a declared line, a part of the folder and three refusal codes, so
+this is the next patch, as 0.3.13's additions were. Links are pinned to f6e18a7. custodian 0.3.13 is its command line.
 
 - **`archive`, a module.** [`Members::read`](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/archive.rs#L126) lists the workspace's members and
   their path dependencies by the declared `cargo metadata --no-deps` line (`exec::CargoMetadata`, run through
