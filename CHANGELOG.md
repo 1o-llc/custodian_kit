@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased (2026-10-25)
+
+An archive: whole crates as one ZIP for delivery, beside the bundle (one annotated text file for reading, held
+redacted). The engine was built and tested standalone first (a three-crate fixture, `fixture_app -> fixture_mid ->
+fixture_leaf`, two builds the same bytes); this release carries it into the kit as the body of a declared line, so a
+custodian line runs it through the executor with a receipt, and its crate discovery is the kit's own. Nothing is
+removed from the API. Links are pinned to f6e18a7.
+
+- **`archive`, a module.** [`Members::read`](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/archive.rs#L126) lists the workspace's members and
+  their path dependencies by the declared `cargo metadata --no-deps` line (`exec::CargoMetadata`, run through
+  `requirements::cargo::run`, so it is recorded as the requirements reading records a cargo line); the prototype's
+  own TOML scan is gone. `plan_with_options` takes the closure when asked and records why each crate is there
+  (explicit, or a dependency and of which), the gaps otherwise, every included crate's files under `crates/<name>/`
+  (its `Cargo.toml` with them), attached files under `workspace/`, each archive path once, every path checked
+  ([L428](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/archive.rs#L428): no `..`, no root, no symlink). [`build_zip`](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/archive.rs#L255) writes
+  ZIP32, stored, no timestamps, the same bytes for the same inputs, to a `.zip.partial` renamed into place, and
+  refuses an output that exists; the manifest `META/archive-manifest.tsv` (schema `custodian.archive.v1`) carries
+  each crate's provenance, each attachment, each gap and every file's sha256 and size.
+  [`verify_zip`](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/archive.rs#L311) reads an archive back: every CRC, the schema, every named file with the
+  digest and size the manifest says, no file it does not name. Every digest is `crate::digest`'s (stable_digest);
+  the prototype's own SHA-256 is gone.
+- **`exec_archive`, the body of the declared line.** [`exec::ExecArchive`](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/exec.rs#L68) declares
+  `custodian exec-archive --root R --include ROUTE... [--attach ROUTE]... [--workspace-deps] [--reveal] [--out ZIP]
+  [--job ID]`, or `--verify ZIP`, with its statuses named (0 `archived`, 1 `gaps`, 2 `refused`) and its rule
+  ([L100](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/exec.rs#L100): `--verify` alone, else at least one `--include`).
+  [`archive::exec_archive`](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/archive.rs#L662) resolves every route through the declared table
+  (`PathsTable::resolve`: a job archives declared routes only; an attached file is `crate:<name>/<file>` or a
+  declared `path:`), reads the members, plans, and applies the bundle's rule through
+  [`bundle::held_files`](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/bundle.rs#L424), one place: a file holding an item at `secret` or above is
+  refused rather than copied open, unless `--reveal`. With `--out` the archive is written and read back; the summary
+  (the crates and why, the gaps, the attachments, the file count and bytes, the revealed files, the archive and its
+  digest, the read-back, the cargo line) is what the line prints last.
+- **`data/archives/{name}/{stamp}.zip`**, a part of the folder ([`named::ARCHIVE`](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/store.rs#L89),
+  append-only), pinned in `tests/layout.rs`.
+- **Three refusal codes**: CUST0130 `ArchiveRefused` (a route that is not a crate, an attached file outside the
+  root or missing, a duplicate path, an output that exists), CUST0131 `ArchiveHeld`, CUST0132 `ArchiveInvalid` (an
+  archive that does not read back) ([refusal.rs L118](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/reading/refusal.rs#L118)).
+- Tests (`archive::tests`): the members from the declared cargo line with their path dependencies; the gaps closing
+  as crates are added by hand; [the closure's provenance and the attachments' place](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/archive.rs#L798)
+  (13 files, the manifest's lines); an unsafe or missing attachment refused; [the build byte for byte repeatable,
+  never written over, read back, a flipped byte caught](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/archive.rs#L832);
+  [the line's body over routes](https://github.com/1o-llc/custodian_kit/blob/f6e18a7/src/archive.rs#L861) (a gap is status 1 and nothing written; a file route is not
+  a crate; an undeclared path in a job is CUST0023). What differs from the prototype: the schema line of the
+  manifest (`custodian.archive.v1`, was `custodian.archive.prototype.v3`); the twelve payload entries of the
+  prototype's fixture archive are byte for byte the same, so only that line moves the whole-archive digest.
+
+`cargo test --all-features`: 313 passed, 0 failed (the README's vocabulary test counted after the archive note moved below the kinds table; `archive::tests`: 9 of them).
+
 ## 0.3.14 (2026-10-23)
 
 Two fixes to 0.3.13, found by custodian's and code_passenger's CI on it. Nothing is added to or removed from the API.

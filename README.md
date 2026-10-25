@@ -98,12 +98,17 @@ enum; a test holds the two equal.
 | `diagnostics` | every liaise code table (liaise_codes! and #[derive(LiaiseCodes)]): each code's meaning and declaration, and the sites that raise it; a code or a log's text as the target narrows it |
 | `count` | how much there is in a route (the workspace, a crate, a declared set, a module): files, lines, code, comments, blanks per language and per crate by tokei, and the share that is tests by klepto |
 | `bundle` | a crate, a declared set or a file as one annotated bundles file beside the reading, items at secret or above redacted |
-| `archive` (not a reading kind: `archive::exec_archive`, the body of the declared line `custodian exec-archive`) | whole crates named by `crate:` routes as one ZIP for delivery: the workspace crates they depend on (by the declared `cargo metadata --no-deps` line) with why each is there, attached files as routes, a manifest with every file's sha256, the same bytes for the same inputs, written whole and read back; a file holding a secret item refused unless revealed (the bundle's rule) |
 | `sweep` | a read-only walk of an undeclared tree (the one walk custodian makes): files by extension, crates, TOML directories, the routes to declare; never in a job |
 | `impact` | everything a change to a crate, a file or an item entails, in one reading: its definitions, use sites, constructions, matches, impls, dependents, reach, the tests that cover it, the features and feature configurations that build it, the linkage records naming it, and the cost of the change by dimension, each measured, heuristic or unknown |
 | `linkage` | the architectural linkage records (why declarations are bound together) naming the target, `*` for all: each bound declaration resolved through klepto, stale when it no longer resolves, to review when its file changed since the record was made; comment anchors with no record behind them |
 | `patterns` | every function body in scope (`*`, or crates by name) against the simple_impl toolkit: its shape, the toolkit pieces whose expansion it holds (exact: the call expands to the same tokens; near: the difference named) with the replace_body spec that swaps them, the shapes that repeat across crates and no piece writes (ranked by count times size, each with a body and a proposed macro), and the counts by crate |
 | `requirements` | what an intended change needs from the workspace as it is, without compiling: the manifests read with no cargo (each crate's governing workspace root by cargo's rule, `workspace = true` against it, paths, renames, features in their four forms), then the intent's or the change spec's needs against cargo metadata; each crate's rust-version and edition against the lock's demands and the installed toolchain; the packages the lock holds in more than one version (cargo tree -d); every finding observed, inferred or unknown, with an order of steps, required or recommended |
+
+Beside the readings, an **archive** (`archive::exec_archive`, the body of the declared line `custodian exec-archive`):
+whole crates named by `crate:` routes as one ZIP for delivery, with the workspace crates they depend on (by the
+declared `cargo metadata --no-deps` line) and why each is there, attached files as routes, a manifest with every
+file's sha256, the same bytes for the same inputs, written whole and read back; a file holding a secret item is
+refused unless revealed (the bundle's rule, one place).
 
 ### The toolkit's shapes (`patterns`)
 
