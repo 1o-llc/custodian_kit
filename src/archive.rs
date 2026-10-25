@@ -148,8 +148,12 @@ impl Members {
         }
         let mut packages = BTreeMap::new();
         for p in &members {
-            // the directory as the root is spelled (canonical), so every file's source is relative to the root
+            // the directory as the root is spelled (canonical), so every file's source is relative to the root; a
+            // member whose directory is a symlink out of the root would be followed into undeclared content: refused
             let dir = fs::canonicalize(p.manifest_path.parent().unwrap_or(Path::new("."))).map_err(|e| refused(format!("cannot resolve package directory of {}: {e}", p.name)))?;
+            if !dir.starts_with(&root) {
+                return Err(refused(format!("member {} is outside the workspace root (its directory is a symlink to {})", p.name, dir.display())));
+            }
             let mut local = BTreeSet::new();
             for d in p.dependencies.iter().filter_map(|d| d.path.as_ref()) {
                 let at = if d.is_absolute() { d.clone() } else { dir.join(d) };
@@ -853,6 +857,102 @@ mod tests {
         fs::write(&broken, &bytes).unwrap();
         let e = verify_zip(&broken).unwrap_err().to_string();
         assert!(e.starts_with("[CUST0132]") && e.contains("CRC mismatch for crates/fixture_leaf/README.md"), "{e}");
+    }
+
+    /// A symlink is refused wherever it stands: a file inside a crate, an attached file, a member whose directory
+    /// points out of the root. None is followed.
+    #[test]
+    fn a_symlink_is_refused_wherever_it_points() {
+        let root = fixture("symlink");
+        let outside = root.parent().unwrap().join(format!("custodian_archive_symlink_outside_{}", std::process::id()));
+        fs::create_dir_all(outside.join("src")).unwrap();
+        fs::write(outside.join("secret.txt"), "outside\n").unwrap();
+        // an attached file that is a symlink out of the root
+        std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("docs/link.txt")).unwrap();
+        let m = members(&root);
+        let options = PlanOptions { include_workspace_dependencies: false, attachments: vec![PathBuf::from("docs/link.txt")] };
+        let e = m.plan_with_options(&["fixture_leaf".to_owned()], &options).unwrap_err().to_string();
+        assert!(e.starts_with("[CUST0130]") && e.contains("attached file may not be a symlink"), "{e}");
+        // a file inside a crate that is a symlink
+        std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("crates/fixture_leaf/src/link.rs")).unwrap();
+        let e = m.plan(&["fixture_leaf".to_owned()]).unwrap_err().to_string();
+        assert!(e.starts_with("[CUST0130]") && e.contains("symlinks are not allowed in package") && e.contains("fixture_leaf/src/link.rs"), "{e}");
+        assert!(m.plan(&["fixture_mid".to_owned()]).is_ok(), "the other crates are untouched");
+        // a member whose directory is a symlink out of the root: cargo lists it; the archive refuses it
+        fs::write(outside.join("Cargo.toml"), "[package]\nname = \"fixture_outside\"\nversion = \"0.1.0\"\nedition = \"2021\"\n").unwrap();
+        fs::write(outside.join("src/lib.rs"), "pub fn outside() {}\n").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("crates/fixture_outside")).unwrap();
+        let mut ran = Vec::new();
+        let e = Members::read(&root, &mut ran).unwrap_err().to_string();
+        assert!(e.starts_with("[CUST0130]") && e.contains("member fixture_outside is outside the workspace root (its directory is a symlink to "), "{e}");
+    }
+
+    /// Two inputs never share an entry: the same attachment twice is a duplicate archive path, refused. The manifest's
+    /// place is never an input's: a crate's files are under `crates/<name>/`, an attachment's under `workspace/`.
+    #[test]
+    fn two_inputs_never_share_an_entry() {
+        let m = members(&fixture("collide"));
+        let options = PlanOptions { include_workspace_dependencies: true, attachments: vec![PathBuf::from("README.md"), PathBuf::from("./README.md")] };
+        let e = m.plan_with_options(&["fixture_app".to_owned()], &options).unwrap_err().to_string();
+        assert!(e.starts_with("[CUST0130]") && e.contains("duplicate archive path: workspace/README.md"), "{e}");
+        let plan = m.plan_with_options(&["fixture_app".to_owned()], &recursive_options()).unwrap();
+        assert!(plan.files.iter().all(|f| f.path.starts_with("crates/") || f.path.starts_with("workspace/")), "no input reaches META/");
+        assert!(plan.files.iter().all(|f| f.path != MANIFEST_PATH));
+    }
+
+    /// A build that fails writes nothing at the output and leaves no partial; an archive that exists is refused
+    /// untouched, byte for byte.
+    #[test]
+    fn a_failed_build_leaves_no_archive_and_an_existing_one_untouched() {
+        let root = fixture("failed");
+        let m = members(&root);
+        let plan = m.plan_with_options(&["fixture_app".to_owned()], &recursive_options()).unwrap();
+        // the output's parent is a file: the directory cannot be made, nothing is written
+        fs::write(root.join("blocked"), "a file, not a directory\n").unwrap();
+        let out = root.join("blocked/fixture.zip");
+        let e = plan.build_zip(&out).unwrap_err().to_string();
+        assert!(e.starts_with("[CUST0130]") && e.contains("cannot create output directory"), "{e}");
+        assert!(!out.exists() && !root.join("blocked/fixture.zip.partial").exists());
+        assert_eq!(fs::read_to_string(root.join("blocked")).unwrap(), "a file, not a directory\n");
+        // an archive that exists: refused before anything is written, its bytes the same after
+        let kept = root.join("out/kept.zip");
+        plan.build_zip(&kept).unwrap();
+        let before = fs::read(&kept).unwrap();
+        assert!(plan.build_zip(&kept).unwrap_err().to_string().contains("refusing to overwrite"));
+        assert_eq!(fs::read(&kept).unwrap(), before);
+        assert!(!root.join("out/kept.zip.partial").exists());
+    }
+
+    /// The verifier trusts nothing in the archive: an unsafe entry name, a duplicate entry, a payload the manifest
+    /// does not name, a manifest digest the payload does not meet, and no manifest at all are each refused.
+    #[test]
+    fn verify_refuses_an_archive_it_cannot_trust() {
+        let dir = fixture("verify");
+        let file = |path: &str, bytes: &[u8]| ArchiveFile { path: path.to_owned(), source: String::new(), bytes: bytes.to_vec() };
+        let manifest = |lines: &[String]| format!("schema\t{SCHEMA}\ncrate\texplicit\tx\n{}", lines.iter().map(|l| format!("{l}\n")).collect::<String>());
+        let file_line = |path: &str, bytes: &[u8]| format!("file\t{}\t{}\t{path}", crate::digest::tagged(bytes), bytes.len());
+        let write = |name: &str, entries: &[ArchiveFile]| {
+            let p = dir.join(name);
+            fs::write(&p, encode_zip(entries).unwrap()).unwrap();
+            p
+        };
+        let good = write("good.zip", &[file(MANIFEST_PATH, manifest(&[file_line("crates/x/a.txt", b"alpha")]).as_bytes()), file("crates/x/a.txt", b"alpha")]);
+        assert_eq!(verify_zip(&good).unwrap().files, 1);
+        let unsafe_name = write("unsafe.zip", &[file(MANIFEST_PATH, manifest(&[file_line("../a.txt", b"alpha")]).as_bytes()), file("../a.txt", b"alpha")]);
+        let e = verify_zip(&unsafe_name).unwrap_err().to_string();
+        assert!(e.starts_with("[CUST0132]") && e.contains("unsafe archive entry name: ../a.txt"), "{e}");
+        let absolute = write("absolute.zip", &[file(MANIFEST_PATH, manifest(&[file_line("/etc/a.txt", b"alpha")]).as_bytes()), file("/etc/a.txt", b"alpha")]);
+        assert!(verify_zip(&absolute).unwrap_err().to_string().contains("unsafe archive entry name: /etc/a.txt"));
+        let duplicate = write("duplicate.zip", &[file(MANIFEST_PATH, manifest(&[file_line("crates/x/a.txt", b"alpha")]).as_bytes()), file("crates/x/a.txt", b"alpha"), file("crates/x/a.txt", b"alpha")]);
+        assert!(verify_zip(&duplicate).unwrap_err().to_string().contains("duplicate ZIP entry: crates/x/a.txt"));
+        let unnamed = write("unnamed.zip", &[file(MANIFEST_PATH, manifest(&[file_line("crates/x/a.txt", b"alpha")]).as_bytes()), file("crates/x/a.txt", b"alpha"), file("crates/x/b.txt", b"beta")]);
+        assert!(verify_zip(&unnamed).unwrap_err().to_string().contains("archive contains 2 payload entries but manifest declares 1"));
+        let wrong_digest = write("digest.zip", &[file(MANIFEST_PATH, manifest(&[file_line("crates/x/a.txt", b"ALPHA")]).as_bytes()), file("crates/x/a.txt", b"alpha")]);
+        assert!(verify_zip(&wrong_digest).unwrap_err().to_string().contains("digest mismatch for crates/x/a.txt"), "the CRC holds, the manifest's digest is checked on its own");
+        let wrong_size = write("size.zip", &[file(MANIFEST_PATH, format!("schema\t{SCHEMA}\ncrate\texplicit\tx\nfile\t{}\t9\tcrates/x/a.txt\n", crate::digest::tagged(b"alpha")).as_bytes()), file("crates/x/a.txt", b"alpha")]);
+        assert!(verify_zip(&wrong_size).unwrap_err().to_string().contains("size mismatch for crates/x/a.txt"));
+        let no_manifest = write("none.zip", &[file("crates/x/a.txt", b"alpha")]);
+        assert!(verify_zip(&no_manifest).unwrap_err().to_string().contains("archive does not contain META/archive-manifest.tsv"));
     }
 
     /// The line's body over the fixture: routes resolved through the declared table, the closure, the archive written
