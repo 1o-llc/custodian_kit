@@ -230,3 +230,49 @@ fn an_experiment_names_its_specimen_the_lock_on_its_copy_and_its_measurements() 
     assert_eq!(read.measurements, [kept]);
     assert!(custodian_kit::provenance::measure(&store.root.join("nowhere"), &store.root, &m, "x").is_err(), "a job that is no experiment keeps none");
 }
+
+/// Audit #5: a named receipt that authorized the spec over the code is not enough when a later preflight of the same
+/// spec over the same code did not: the later decision stands.
+#[test]
+fn a_later_refusal_of_the_same_spec_over_the_same_code_outranks_a_named_older_receipt() {
+    let (store, ctx, _) = governed("later");
+    custodian_kit::exec::lock_crate(&store.root).unwrap();
+    let w = Workspace::open_with(&store.root, &Scope::default(), Resolving::Free).unwrap();
+    let file = spec_file(&store.root, "first-free", &BODY.replace("TARGET", ID));
+    let a = preflight::run_preflight(&ctx, &file, None, Runner::InProcess(&w)).unwrap().receipt.unwrap();
+    let spec = ChangeSpec::from_path(&file).unwrap();
+    let code = code_digest(&store.root);
+    assert_eq!(preflight::authorizing(&store, &spec, &code, Some(a.seq)).unwrap().seq, a.seq);
+    // a later preflight of the same spec over the same code refused it (a bounded job's facts, a decision opened)
+    let later = custodian_kit::store::Receipt { seq: 0, reason: preflight::NOT_AUTHORIZED.into(), exit_code: Some(1), accepted: false, ..a.clone() };
+    let (later, _) = custodian_kit::receipts::keep(&store, later).unwrap();
+    let e = preflight::authorizing(&store, &spec, &code, Some(a.seq)).unwrap_err().to_string();
+    assert!(e.starts_with("[CUST0047]") && e.contains(&format!("preflight #{} of the same spec over the same code did not authorize it", later.seq)), "{e}");
+    assert!(preflight::authorizing(&store, &spec, &code, None).is_err(), "the newest decides without a number too");
+}
+
+/// Audit #6: a batch preflight's record is the receipt's only while its members are the ones the receipt digested; a
+/// record edited since (another spec's digest put in, a verdict turned) authorizes nothing.
+#[test]
+fn an_edited_batch_record_authorizes_nothing() {
+    let (store, ctx, _) = governed("batch-forge");
+    custodian_kit::exec::lock_crate(&store.root).unwrap();
+    let w = Workspace::open_with(&store.root, &Scope::default(), Resolving::Free).unwrap();
+    let good = spec_file(&store.root, "first-free", &BODY.replace("TARGET", ID));
+    let ran = preflight::run_preflight_batch(&ctx, "list", std::slice::from_ref(&good), None, &w).unwrap();
+    assert_eq!(ran.batch.authorized, 1, "{:?}", ran.said);
+    let spec = ChangeSpec::from_path(&good).unwrap();
+    let code = code_digest(&store.root);
+    let r = preflight::authorizing(&store, &spec, &code, None).unwrap();
+    assert_eq!(r.seq, ran.receipt.as_ref().unwrap().seq, "the batch's receipt goes for its member");
+    // another spec's digest written into the record: the record no longer reads as the receipt's
+    let other: ChangeSpec = toml::from_str(&BODY.replace("TARGET", ID).replace("found = Some(index);", "found = Some(index + 1);")).unwrap();
+    let json = ran.outputs.iter().find(|o| o.ends_with(".json")).unwrap();
+    let path = store.root.join(json);
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, text.replace(&spec.digest(), &other.digest())).unwrap();
+    assert!(preflight::batch_record(&store.root, ran.receipt.as_ref().unwrap()).is_none(), "an edited record is no batch's");
+    let e = preflight::authorizing(&store, &other, &code, None).unwrap_err().to_string();
+    assert!(e.starts_with("[CUST0047]"), "{e}");
+    assert!(preflight::authorizing(&store, &spec, &code, None).is_err(), "nor does it authorize the spec it really held");
+}

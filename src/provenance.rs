@@ -285,6 +285,18 @@ pub fn close(folder: &Path, root: &Path, closing: &crate::jobs::Closing, runs: &
     Ok(Some(p))
 }
 
+/// The running job of the project at `root` that is an experiment (its folder holds a provenance record), when one
+/// is open: while it is, its tree is written only by a transform on an authorized preflight.
+pub fn running_experiment(root: &Path) -> Option<(String, PathBuf)> {
+    let store = crate::store::Store::find(root)?;
+    let dir = store.jobs_dir(crate::store::JobState::Running).ok()?;
+    let mut folders: Vec<PathBuf> = std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| data(p).join(PROVENANCE_FILE).is_file()).collect();
+    folders.sort();
+    let folder = folders.into_iter().next()?;
+    let job = read(&folder).map(|p| p.job).unwrap_or_default();
+    Some((job, folder))
+}
+
 /// The record in lines a person reads.
 pub fn render(p: &Provenance) -> String {
     let mut s = String::from("## provenance\n\n");

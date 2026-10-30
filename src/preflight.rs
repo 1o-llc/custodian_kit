@@ -1007,9 +1007,14 @@ pub fn authorizing(store: &Store, spec: &ChangeSpec, code_digest: &str, named: O
     let names: BTreeSet<&str> = [spec.name.as_str()].into();
     let all = preflights_by_name(store, &names)?.remove(&spec.name).unwrap_or_default();
     let covers = |r: &Receipt| r.spec_hash.as_deref() == Some(digest.as_str()) && r.code_digest.as_deref() == Some(code_digest) && r.reason == AUTHORIZED;
+    let same = |r: &Receipt| r.spec_hash.as_deref() == Some(digest.as_str()) && r.code_digest.as_deref() == Some(code_digest);
     match named {
         Some(n) => match all.iter().find(|r| r.seq == n) {
-            Some(r) if covers(r) => Ok(r.clone()),
+            // a later preflight of the same spec over the same code that did not authorize it is the decision now
+            Some(r) if covers(r) => match all.iter().filter(|x| x.seq > n && same(x) && x.reason != AUTHORIZED).max_by_key(|x| x.seq) {
+                Some(later) => Err(refuse(format!("preflight #{} of the same spec over the same code did not authorize it ({}), after #{n}", later.seq, later.reason))),
+                None => Ok(r.clone()),
+            },
             Some(r) if r.reason != AUTHORIZED => Err(refuse(format!("preflight #{n} did not authorize it ({})", r.reason))),
             Some(r) if r.spec_hash.as_deref() != Some(digest.as_str()) => Err(refuse(format!("preflight #{n} authorized another version of the spec ({} there, {digest} now): preflight it again", r.spec_hash.clone().unwrap_or_default()))),
             Some(_) => Err(refuse(format!("preflight #{n} read other code ({code_digest} now): the code moved since; preflight it again"))),
@@ -1146,7 +1151,15 @@ pub struct BatchRan {
 /// A batch preflight's record, from its receipt.
 pub fn batch_record(root: &Path, r: &Receipt) -> Option<BatchPreflight> {
     let json = r.outputs.iter().find(|o| o.ends_with(".json"))?;
-    serde_json::from_str(&std::fs::read_to_string(root.join(json)).ok()?).ok()
+    let b: BatchPreflight = serde_json::from_str(&std::fs::read_to_string(root.join(json)).ok()?).ok()?;
+    // the record is the receipt's only when its members are the ones the receipt digested: a record edited since (a
+    // member's spec digest or verdict changed) is no batch's, and authorizes nothing
+    (r.spec_hash.as_deref() == Some(members_digest(&b.members).as_str())).then_some(b)
+}
+
+/// What a batch preflight's receipt keeps of its members: each one's name, spec digest and verdict, digested.
+pub fn members_digest(members: &[BatchMember]) -> String {
+    crate::digest::of_value(&members.iter().map(|m| (&m.name, &m.spec_digest, m.authorized, &m.reason)).collect::<Vec<_>>())
 }
 
 /// One member of a batch preflight, read: its line in the batch, its own preflight (none when its spec does not
@@ -1296,7 +1309,7 @@ pub fn run_preflight_batch(ctx: &Ctx, list: &str, spec_paths: &[PathBuf], job: O
         command: BATCH_COMMAND.into(),
         name: list.to_string(),
         spec: Some(list.to_string()),
-        spec_hash: Some(crate::digest::of_value(&batch.members.iter().map(|m| (&m.name, &m.spec_digest)).collect::<Vec<_>>())),
+        spec_hash: Some(members_digest(&batch.members)),
         code_digest: Some(code_digest),
         index_key: None,
         plan_id: format!("preflight-batch:{list}"),
