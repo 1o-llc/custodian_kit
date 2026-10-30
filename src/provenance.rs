@@ -89,7 +89,8 @@ pub struct Measurement {
     pub label: String,
     /// The file as given.
     pub source: String,
-    /// Its copy in the job folder, relative to the root.
+    /// Its copy, relative to the job's folder (`data/measurements/<label>/<name>`): the folder moves from running to
+    /// done at close, the path in it does not.
     pub file: String,
     pub digest: String,
     pub bytes: u64,
@@ -224,7 +225,7 @@ pub fn open(folder: &Path, root: &Path, job: &str, specimen: &Path) -> Result<Pr
 }
 
 /// Keeps `file` with the experiment of the job at `folder`: copied into its data under `label`, its digest recorded.
-pub fn measure(folder: &Path, root: &Path, file: &Path, label: &str) -> Result<Measurement> {
+pub fn measure(folder: &Path, _root: &Path, file: &Path, label: &str) -> Result<Measurement> {
     let mut p = read(folder).ok_or_else(|| ReadingRefusal::JobState.refuse(format!("{}: the job is no experiment (job start --specimen names one)", folder.display())))?;
     let label = crate::jobs::slug_of(label);
     let bytes = std::fs::read(file).map_err(|e| ReadingRefusal::MissingInput.refuse(format!("{}: {e}", file.display())))?;
@@ -234,7 +235,7 @@ pub fn measure(folder: &Path, root: &Path, file: &Path, label: &str) -> Result<M
         return Err(ReadingRefusal::Write.refuse(format!("{}: a measurement of that label and name is kept already with other contents; give it another label", to.display())));
     }
     write_whole(&to, &bytes)?;
-    let m = Measurement { label, source: file.display().to_string(), file: to.strip_prefix(root).unwrap_or(&to).to_string_lossy().replace('\\', "/"), digest: crate::digest::tagged(&bytes), bytes: bytes.len() as u64, utc: crate::runs::now_utc() };
+    let m = Measurement { label, source: file.display().to_string(), file: to.strip_prefix(folder).unwrap_or(&to).to_string_lossy().replace('\\', "/"), digest: crate::digest::tagged(&bytes), bytes: bytes.len() as u64, utc: crate::runs::now_utc() };
     p.measurements.retain(|x| !(x.label == m.label && x.file == m.file));
     p.measurements.push(m.clone());
     keep(folder, &p)?;

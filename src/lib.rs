@@ -69,6 +69,9 @@ pub mod proof_place;
 pub mod step_time;
 pub mod route;
 pub mod handoff;
+/// This crate's version, as its manifest names it: what a writer built on it says it was built with.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod archive;
 pub mod delta;
 pub mod provenance;

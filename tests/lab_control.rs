@@ -224,7 +224,8 @@ fn an_experiment_names_its_specimen_the_lock_on_its_copy_and_its_measurements() 
     let kept = custodian_kit::provenance::measure(&folder, &store.root, &m, "bench run 1").unwrap();
     assert_eq!(kept.label, "bench-run-1");
     assert_eq!(kept.digest, custodian_kit::digest::tagged(b"{\"ns\": 41}\n"));
-    assert_eq!(std::fs::read(store.root.join(&kept.file)).unwrap(), b"{\"ns\": 41}\n");
+    assert_eq!(kept.file, "data/measurements/bench-run-1/".to_string() + m.file_name().unwrap().to_str().unwrap(), "relative to the job's folder");
+    assert_eq!(std::fs::read(folder.join(&kept.file)).unwrap(), b"{\"ns\": 41}\n");
     let read = custodian_kit::provenance::read(&folder).unwrap();
     assert_eq!(read.measurements, [kept]);
     assert!(custodian_kit::provenance::measure(&store.root.join("nowhere"), &store.root, &m, "x").is_err(), "a job that is no experiment keeps none");

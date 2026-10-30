@@ -1105,15 +1105,13 @@ pub fn close_as(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>, reje
             };
             crate::task_records::verification(&task, &format!("cargo test -p {} {} {}", t.package, t.target, t.test), passed, t.millis.map(|m| format!("{m} ms")).as_deref())?;
         }
-        for r in runs.iter().filter(|r| r.command == "check") {
-            crate::task_records::verification(&task, &format!("custodian check {}", r.name), Some(r.accepted), Some(&r.reason))?;
+        for r in runs.iter().filter(|r| r.command == "check" || r.command == "delta") {
+            crate::task_records::verification(&task, &format!("custodian {} {}", r.command, r.name), Some(r.accepted), Some(&r.reason))?;
         }
-        let failed = !judged.own.is_empty() || runs.iter().any(|r| r.command == "check" && !r.accepted);
-        let (status, why) = result_of(failed, &uncovered, &verify);
-        result = (status.to_string(), why.clone());
+        // the result decided once above (the evidence, or a rejection given at close): the history keeps that one
         let tree = crate::api::IndexKey::of_root(&ctx.root, &Default::default()).ok().map(|k| k.0);
-        crate::task_records::close_noted(&task, status, tree.as_deref(), why.as_deref())?;
-        history_said.push(format!("task history: {}/{} ({} changes, {} verifications, result)", task.task_id, task.revision, changes, tests.len() + runs.iter().filter(|r| r.command == "check").count()));
+        crate::task_records::close_noted(&task, &result.0, tree.as_deref(), result.1.as_deref())?;
+        history_said.push(format!("task history: {}/{} ({} changes, {} verifications, result)", task.task_id, task.revision, changes, tests.len() + runs.iter().filter(|r| r.command == "check" || r.command == "delta").count()));
     }
     let kind = jf.kind.clone().unwrap_or_else(|| "specs".into());
     let mut guidance = (kind != "specs").then(|| template_in(store, &kind).ok().map(|t| t.summary)).flatten();
@@ -1226,19 +1224,9 @@ pub fn close_as(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>, reje
     Ok((closing, done, said))
 }
 
-/// The job's result from its evidence: a bounded job with lines no transform covers is `rejected`; a failed test or
-/// check is `failed_test`; no verification declared, or one not satisfied, is `pending` (never `accepted` without
-/// evidence); else `accepted`.
-fn result_of(failed: bool, uncovered: &[crate::transform::Uncovered], verify: &[(String, String)]) -> (&'static str, Option<String>) {
-    let (s, w) = result_of_parts(uncovered, verify, failed);
-    (match s.as_str() {
-        "rejected" => "rejected",
-        "failed_test" => "failed_test",
-        "pending" => "pending",
-        _ => "accepted",
-    }, w)
-}
-
+/// The job's result from its evidence: a bounded job with lines no transform covers is `rejected`; a failed test,
+/// check or delta is `failed_test`; no verification declared, or one not satisfied, is `pending` (never `accepted`
+/// without evidence); else `accepted`.
 fn result_of_parts(uncovered: &[crate::transform::Uncovered], verify: &[(String, String)], failed: bool) -> (String, Option<String>) {
     if !uncovered.is_empty() {
         return ("rejected".into(), Some(format!("bounded: {} files touched by hand, not by a transform of the job", uncovered.len())));
