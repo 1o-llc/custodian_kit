@@ -29,6 +29,8 @@ fn project(tag: &str) -> (Store, Ctx, Workspace) {
         "shop/src/lib.rs",
         "use marks::keep;\n\n#[keep]\npub struct Packed {\n    pub bits: u8,\n}\n\nfn double(n: u32) -> u32 {\n    n * 2\n}\n\npub fn twice(o: u32) -> u32 {\n    double(o) + double(1)\n}\n\nfn early(n: u32) -> u32 {\n    if n > 3 {\n        return 3;\n    }\n    n\n}\n\npub fn capped() -> u32 {\n    early(9)\n}\n\npub fn version() -> u32 {\n    1\n}\n\nimpl Packed {\n    pub fn zero() -> Self {\n        Self { bits: 0 }\n    }\n}\n",
     );
+    // a governed preflight needs the lock that fixes the dependency state (preflight::LOCK_CHECK)
+    custodian_kit::exec::lock_crate(&root).unwrap();
     let (store, _) = Store::init(&root, Mode::Agent).unwrap();
     let ctx = Ctx { root: store.root.clone(), store: Some(store.clone()), exe: PathBuf::from("custodian") };
     let w = Workspace::open_with(&store.root, &Scope::default(), Resolving::Free).unwrap();
@@ -307,6 +309,8 @@ fn forms(tag: &str) -> (Store, Ctx, Workspace) {
     write(&root, "b/src/lib.rs", "pub fn b() -> u8 {\n    2\n}\n");
     write(&root, "c/Cargo.toml", "[package]\nname = \"c\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[features]\nz = []\n");
     write(&root, "c/src/lib.rs", "pub fn c() -> u8 {\n    1\n}\n");
+    // a governed preflight needs the lock that fixes the dependency state (preflight::LOCK_CHECK)
+    custodian_kit::exec::lock_crate(&root).unwrap();
     let (store, _) = Store::init(&root, Mode::Agent).unwrap();
     let ctx = Ctx { root: store.root.clone(), store: Some(store.clone()), exe: PathBuf::from("custodian") };
     let w = Workspace::open_with(&store.root, &Scope::default(), Resolving::Free).unwrap();

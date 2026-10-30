@@ -98,6 +98,12 @@ pub enum ReadingRefusal {
     AmbiguousTarget,
     #[liaise(code = 45, msg = "two receipt folders number receipts the same: merge them with `custodian receipts merge <other>`, which renumbers by union")]
     ReceiptCollision,
+    #[liaise(code = 46, msg = "the workspace has no Cargo.lock: the dependency state a proof builds on is not fixed")]
+    NoLock,
+    #[liaise(code = 47, msg = "a write needs the preflight that authorized this exact spec over this exact code")]
+    WriteUnauthorized,
+    #[liaise(code = 48, msg = "the code moved between the proof and the write: what would be written is not what was proved")]
+    ProvedNotWritten,
     #[liaise(code = 101, msg = "the bundle filters break the word's own rules")]
     FiltersRefused,
     #[liaise(code = 102, msg = "the route holds no file the filters keep")]

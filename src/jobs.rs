@@ -98,13 +98,14 @@ crate::reading::spec::vocabulary! {
 }
 
 /// The ways a job declares what done looks like, each `<form>:<what>`.
-pub const VERIFY_FORMS: &[&str] = &["test", "reading", "check"];
+pub const VERIFY_FORMS: &[&str] = &["test", "reading", "check", "delta"];
 
-/// A verify line checked: `test:<name>`, `reading:<spec>` (a reading that must change), `check:<which>`.
+/// A verify line checked: `test:<name>`, `reading:<spec>` (a reading that must change), `check:<which>`, `delta:<kind>`
+/// (no format or lint finding the base does not have: [`crate::delta`]).
 pub fn check_verify(line: &str) -> Result<()> {
     match line.split_once(':') {
         Some((form, what)) if VERIFY_FORMS.contains(&form) && !what.trim().is_empty() => Ok(()),
-        _ => Err(ReadingRefusal::SpecInvalid.refuse(format!("`{line}` is not a verification: test:<name> (or test:<module>::* for every test of a module), reading:<spec>, check:<which>"))),
+        _ => Err(ReadingRefusal::SpecInvalid.refuse(format!("`{line}` is not a verification: test:<name> (or test:<module>::* for every test of a module), reading:<spec>, check:<which>, delta:fmt or delta:clippy"))),
     }
 }
 
@@ -926,6 +927,12 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
 
 /// `job close`, its closing count answered in this process over `ws` when given.
 pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) -> Result<(Closing, PathBuf, Vec<String>)> {
+    close_as(ctx, which, ws, None)
+}
+
+/// [`close_with`], rejected when `reject` gives why: the evidence is still read and recorded, and the result is
+/// `rejected` with that reason. A rejection never needs evidence; an acceptance always does.
+pub fn close_as(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>, reject: Option<&str>) -> Result<(Closing, PathBuf, Vec<String>)> {
     let by = match ws {
         Some(ws) => Runner::InProcess(ws),
         None => Runner::Line,
@@ -1059,8 +1066,12 @@ pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) ->
     };
     let target_known_at = known_at(jf.target_known, &["preflight", "plan"]);
     let outcome_known_at = known_at(jf.outcome_known, &["verify"]);
-    let failed_any = !judged.own.is_empty() || runs.iter().any(|r| r.command == "check" && !r.accepted);
+    let failed_any = !judged.own.is_empty() || runs.iter().any(|r| (r.command == "check" || r.command == "delta") && !r.accepted);
     let mut result: (String, Option<String>) = result_of_parts(&uncovered, &verify, failed_any);
+    // a rejection the experimenter gives: the job is rejected whatever its evidence says (nothing makes it accepted)
+    if let Some(why) = reject {
+        result = ("rejected".into(), Some(format!("rejected at close: {why}")));
+    }
     // the task history: changes (from the open and close counts), verifications, the result
     let mut history_said = Vec::new();
     if let Some(task) = crate::task_records::of_job(store, jf.task_id.as_deref(), jf.revision.as_deref())? {
@@ -1283,7 +1294,8 @@ fn verified_with(line: &str, runs: &[Receipt], tests: &[crate::store::TestRow], 
             }
         }
         "reading" => (reading(what), None),
-        "check" => match runs.iter().rev().find(|r| r.command == "check" && r.name == what) {
+        // a check, or a delta (no finding the base does not have): its newest receipt in the job decides it
+        "check" | "delta" => match runs.iter().rev().find(|r| r.command == form && r.name == what) {
             Some(r) if r.accepted => ("satisfied", Some(r.seq)),
             Some(r) => ("failed", Some(r.seq)),
             None => ("not run", None),

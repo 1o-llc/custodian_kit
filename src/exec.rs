@@ -116,7 +116,49 @@ fn exec_archive_valid(line: &ExecArchive) -> CommandValidationResult {
 #[composite(command = "generate-lockfile", method = "generate_lockfile", ty = CargoGenerateLockfile, init = "manifest_path")]
 #[composite(command = "metadata", ty = CargoMetadata, init = "manifest_path")]
 #[composite(command = "tree", ty = CargoTree, init = "manifest_path")]
+#[composite(command = "fmt", method = "fmt", ty = CargoFmt, init = "manifest_path")]
+#[composite(command = "clippy", method = "clippy", ty = CargoClippy, init = "manifest_path")]
 pub struct Cargo;
+
+/// `cargo fmt --manifest-path M --all -- --check`: whether the workspace's code is as rustfmt writes it, the places
+/// it is not printed as diffs. Nothing is written.
+#[allow(clippy::duplicated_attributes)]
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "fmt")]
+#[exit_status(code = 0, word = "formatted")]
+#[exit_status(code = 1, word = "differs")]
+pub struct CargoFmt {
+    #[builder(init_required, into)]
+    #[arg(kv = "--manifest-path")]
+    pub manifest_path: OsString,
+    #[arg(flag = "--all")]
+    pub all: bool,
+    /// `--`, then rustfmt's words (`--check`).
+    #[arg(positional)]
+    pub rest: Vec<OsString>,
+}
+
+/// `cargo clippy --manifest-path M --workspace --all-targets --message-format json`: clippy's findings, one JSON
+/// message a line. Run on a copy (it builds).
+#[allow(clippy::duplicated_attributes)]
+#[derive(SimpleSubCommand, Debug, Clone, Default)]
+#[subcommand(segment = "clippy")]
+#[exit_status(code = 0, word = "linted")]
+#[exit_status(code = 101, word = "does not build")]
+pub struct CargoClippy {
+    #[builder(init_required, into)]
+    #[arg(kv = "--manifest-path")]
+    pub manifest_path: OsString,
+    #[arg(flag = "--workspace")]
+    pub workspace: bool,
+    #[arg(flag = "--all-targets")]
+    pub all_targets: bool,
+    #[arg(flag = "--offline")]
+    pub offline: bool,
+    #[builder(into)]
+    #[arg(kv = "--message-format")]
+    pub message_format: Option<OsString>,
+}
 
 /// `cargo metadata --manifest-path M --format-version 1 [--frozen | --no-deps]`: the workspace as cargo reads it
 /// (the requirements reading's truth). `--frozen` resolves from the lock as it is, no network and no lock written;

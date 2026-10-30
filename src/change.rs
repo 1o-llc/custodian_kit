@@ -1189,12 +1189,28 @@ pub fn render_body(f: &FnSpec, indent: &str) -> std::result::Result<String, Stri
             return Err(format!("{}: `{}` gives the body's value, so it is the last step (or `bind` it)", f.name, step.piece));
         }
         let line = render_step(step)?;
-        for l in line.lines() {
+        push_indented(&mut out, &inner, &line);
+    }
+    // as rustfmt leaves a block: no blank line after its opening brace or before its closing one
+    while out.ends_with("\n\n") {
+        out.pop();
+    }
+    let body = out.strip_prefix("{\n").unwrap_or(&out).trim_start_matches('\n');
+    let mut out = format!("{{\n{body}");
+    out.push_str(&format!("{indent}}}"));
+    Ok(out)
+}
+
+/// `text`'s lines, each indented by `inner`; a blank line stays empty, so the writer adds no trailing whitespace a
+/// format check would find in the candidate.
+fn push_indented(out: &mut String, inner: &str, text: &str) {
+    for l in text.lines() {
+        if l.trim().is_empty() {
+            out.push('\n');
+        } else {
             out.push_str(&format!("{inner}{l}\n"));
         }
     }
-    out.push_str(&format!("{indent}}}"));
-    Ok(out)
 }
 
 fn field_line(fl: &FieldSpec, indent: &str) -> String {
@@ -1321,9 +1337,7 @@ pub fn render_wrapped(f: &FnSpec, indent: &str, old: &str) -> std::result::Resul
         if step.piece == "value" || (piece(&step.piece).is_some_and(|d| d.family == Family::Expression) && step.bind.is_none()) {
             return Err(format!("{}: `{}` gives a value, and a wrapped body's value is the body it wraps (`bind` it)", f.name, step.piece));
         }
-        for l in render_step(step)?.lines() {
-            out.push_str(&format!("{inner}{l}\n"));
-        }
+        push_indented(&mut out, &inner, &render_step(step)?);
     }
     out.push_str(&format!("{inner}{}\n{indent}}}", old.trim()));
     Ok(out)
@@ -1555,8 +1569,43 @@ impl Landing {
     }
 }
 
+/// `p` relative to `root`, as a landing names its file: the root as given first, then both spelled as the file
+/// system resolves them (`.`, or `/var/...` against klepto's `/private/var/...`, are the same directory). A path
+/// that is not under the root stays as it is.
 fn rel(root: &Path, p: &Path) -> String {
-    p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/")
+    if let Ok(r) = p.strip_prefix(root) {
+        return r.to_string_lossy().replace('\\', "/");
+    }
+    let canon = |x: &Path| x.canonicalize().ok();
+    match (canon(root), canon(p).or_else(|| p.parent().and_then(canon).zip(p.file_name()).map(|(d, n)| d.join(n)))) {
+        (Some(r), Some(c)) => c.strip_prefix(&r).map(|x| x.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| p.to_string_lossy().replace('\\', "/")),
+        _ => p.to_string_lossy().replace('\\', "/"),
+    }
+}
+
+/// The scan's own ids a target that names no item was probably meant to be: the same path once generic arguments and
+/// spacing are set aside (`Registry::first_free`, `Registry<WORKS, SUBSCRIBERS>::first_free` for the scan's
+/// `Registry<WORKS,SUBSCRIBERS>::first_free`). Never used to choose an item: a target names one item as the scan
+/// writes its id, and these are said so a caller can copy that id.
+pub fn ids_like(k: &klepto::Klepto, target: &str) -> Vec<String> {
+    fn bare(s: &str) -> String {
+        let mut out = String::new();
+        let mut depth = 0usize;
+        for c in s.chars() {
+            match c {
+                '<' => depth += 1,
+                '>' => depth = depth.saturating_sub(1),
+                c if depth == 0 && !c.is_whitespace() => out.push(c),
+                _ => {}
+            }
+        }
+        out
+    }
+    let want = bare(target.trim());
+    let mut v: Vec<String> = k.items.iter().filter(|d| d.id != target.trim() && bare(&d.id) == want).map(|d| d.id.clone()).collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 /// The module whose own file is `file` (not an inline one).
@@ -2229,9 +2278,17 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
                 l.item = Some(spec.target.trim().to_string());
                 return Ok(l);
             }
-            let d = item_named(k, &spec.target).ok_or_else(|| match &k.dep_macro_note {
-                Some(note) => format!("`{}` names no item of the scan ({note}: a function a dependency's macro writes is not seen until the lock file names the dependency; cargo writes it, and a transform that changes a manifest writes it too)", spec.target),
-                None => format!("`{}` names no item of the scan", spec.target),
+            let d = item_named(k, &spec.target).ok_or_else(|| {
+                let like = ids_like(k, &spec.target);
+                let hint = match like.as_slice() {
+                    [] => String::new(),
+                    [one] => format!("; the scan's id for it is `{one}` (the knowledge graph's item `target`): name it exactly so"),
+                    many => format!("; the scan's ids like it: {} (the knowledge graph's item `target`): name one exactly so", many.iter().map(|m| format!("`{m}`")).collect::<Vec<_>>().join(", ")),
+                };
+                match &k.dep_macro_note {
+                    Some(note) => format!("`{}` names no item of the scan ({note}: a function a dependency's macro writes is not seen until the lock file names the dependency; cargo writes it, and a transform that changes a manifest writes it too){hint}", spec.target),
+                    None => format!("`{}` names no item of the scan{hint}", spec.target),
+                }
             })?;
             Ok(match op {
                 AddField | AddVariant => at_item(d, |l| At::Inside { line: l }),

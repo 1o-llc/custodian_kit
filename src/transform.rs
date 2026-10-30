@@ -79,6 +79,15 @@ pub struct TransformRecord {
     /// For a revert: the record it undid.
     #[serde(default)]
     pub reverts: Option<String>,
+    /// The code digest of the tree after the write: what the change made, under the same scan as `code_digest`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_digest_after: Option<String>,
+    /// The workspace lock the proof built on (`None`: the tree had none).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock: Option<crate::preflight::LockState>,
+    /// The program that proved and wrote it, as it names itself (`code_passenger 0.4.10 (custodian_kit 0.3.16)`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writer: Option<String>,
 }
 
 /// A function's expansion before and after a change, in the toolkit's proof form (its locals named by where they are
@@ -191,6 +200,9 @@ mod tests {
             generated: vec![],
             written: true,
             reverts: None,
+            code_digest_after: None,
+            lock: None,
+            writer: None,
         }
     }
 

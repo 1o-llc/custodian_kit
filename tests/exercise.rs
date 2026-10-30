@@ -32,6 +32,8 @@ fn project(tag: &str) -> (Store, Ctx) {
 fn project_of(fixture: &str, tag: &str) -> (Store, Ctx) {
     let dir = std::env::temp_dir().join(format!("custodian-kit-exercise-{tag}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     copy(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(fixture), &dir);
+    // a governed preflight needs the lock that fixes the dependency state (preflight::LOCK_CHECK)
+    custodian_kit::exec::lock_crate(&dir).unwrap();
     let (store, _) = Store::init(&dir, Mode::Agent).unwrap();
     let ctx = Ctx { root: store.root.clone(), store: Some(store.clone()), exe: PathBuf::from("custodian") };
     (store, ctx)

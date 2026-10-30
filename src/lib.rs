@@ -70,6 +70,8 @@ pub mod step_time;
 pub mod route;
 pub mod handoff;
 pub mod archive;
+pub mod delta;
+pub mod provenance;
 
 #[cfg(test)]
 mod tests;

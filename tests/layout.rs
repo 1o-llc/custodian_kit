@@ -35,6 +35,7 @@ const GOLDEN: &[(&str, &str)] = &[
     ("custodian.index", "state/index/{digest}/model.cbor.zst"),
     ("custodian.cost", "data/costs/{seq}.json"),
     ("custodian.archive", "data/archives/{name}/{stamp}.zip"),
+    ("custodian.delta", "data/deltas/{kind}/{stamp}.json"),
 ];
 
 #[test]

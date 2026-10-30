@@ -159,6 +159,43 @@ pub struct Preflight {
     /// the line to run. A reference only: it decides nothing here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requirements: Option<String>,
+    /// The workspace's lock when the preflight read the code: its path relative to the root and its digest. `None`:
+    /// no lock, so the dependency state was not fixed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock: Option<LockState>,
+}
+
+/// A workspace's Cargo.lock as a preflight or a transform found it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LockState {
+    /// Relative to the root (`Cargo.lock`).
+    pub path: String,
+    /// `sha256:<hex>` of its bytes.
+    pub digest: String,
+}
+
+/// The precondition a project custodian keeps adds: its workspace has a lock.
+pub const LOCK_CHECK: &str = "a Cargo.lock fixes the dependency state";
+
+/// The lock of the workspace that governs `root` (cargo's rule), with its digest; `None` when it has none.
+pub fn lock_of(root: &Path) -> Option<LockState> {
+    let ws = crate::reading::requirements::manifest::governing_root_of(root).unwrap_or_else(|| root.to_path_buf());
+    let file = ws.join("Cargo.lock");
+    let bytes = std::fs::read(&file).ok()?;
+    let rel = file.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| file.display().to_string());
+    Some(LockState { path: rel, digest: crate::digest::tagged(&bytes) })
+}
+
+/// What the lock check says: the lock and its digest, or exactly what to do when there is none.
+fn lock_detail(root: &Path, lock: Option<&LockState>) -> String {
+    match lock {
+        Some(l) => format!("{} {}: part of the code digest this preflight binds", l.path, l.digest),
+        None => format!(
+            "[{}] no Cargo.lock in the workspace at {}: a proof here would build on whatever versions cargo resolves that day, and nothing would record them. Put a lock on this copy (never on the baseline it was taken from): `cargo generate-lockfile --offline` here, or the lock the experiment ships; then preflight again, and the lock's digest is part of the code digest",
+            liaise::Liaise::code(&ReadingRefusal::NoLock),
+            root.display()
+        ),
+    }
 }
 
 /// The requirements line a preflight names for a dependency or feature change (`None` for any other operation).
@@ -209,6 +246,10 @@ impl Preflight {
             s.push_str(&format!("- job: {} ({}; target known: {}, outcome known: {})\n", j.id, j.mode.as_str(), j.target_known, j.outcome_known));
         }
         s.push_str(&format!("- spec digest: `{}` · code digest: `{}`\n- flags: {}\n", self.spec_digest, self.code_digest, self.flags.join(", ")));
+        s.push_str(&match &self.lock {
+            Some(l) => format!("- dependency state: `{}` `{}`\n", l.path, l.digest),
+            None => "- dependency state: no Cargo.lock\n".into(),
+        });
         if !self.decisions.is_empty() {
             s.push_str("\n## decisions to make first\n\n");
             for q in &self.decisions {
@@ -304,6 +345,12 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
     pre.push(Check { what: "the target resolves".into(), holds: resolved, detail: match &land { Ok(l) => l.line(), Err(e) => e.clone() } });
     let todo = crate::plan::has_todo(spec);
     pre.push(Check { what: "no TODO is left in the spec".into(), holds: !todo, detail: if todo { "a plan's approval left TODO where the operation's details go: fill them in".into() } else { "filled".into() } });
+    // the dependency state: the workspace's lock is part of the code digest this preflight binds; a project custodian
+    // keeps (a store) does not authorize a change whose proof would build on versions cargo picks that day
+    let lock = lock_of(&f.root);
+    if store.is_some() {
+        pre.push(Check { what: LOCK_CHECK.into(), holds: lock.is_some(), detail: lock_detail(&f.root, lock.as_ref()) });
+    }
     let rows = impact.as_ref().map(|(_, _, r)| r.clone()).unwrap_or_default();
     let kind_rows = |k: &str| rows.iter().filter(move |r| r.kind == k).cloned().collect::<Vec<_>>();
     let preserve = spec.compatibility != Some(Compatibility::Break);
@@ -786,6 +833,7 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
         utc: crate::runs::now_utc(),
         millis: started.elapsed().as_millis() as i64,
         requirements: requirements_line(spec, spec_rel),
+        lock,
     })
 }
 
@@ -931,6 +979,52 @@ pub const NOT_AUTHORIZED: &str = "not authorized";
 /// A preflight receipt's reason when what the spec asks for is in the code already: nothing waits on a person.
 pub const ALREADY_IN_PLACE: &str = "not authorized: already in place";
 
+/// Each name's preflights in journal order: its own receipts, and its lines in the batches that name it (the
+/// batch's receipt under the member's name, spec and verdict).
+fn preflights_by_name(store: &Store, names: &BTreeSet<&str>) -> Result<BTreeMap<String, Vec<Receipt>>> {
+    let runs = store.journal()?.runs()?;
+    let mut by_name: BTreeMap<String, Vec<Receipt>> = BTreeMap::new();
+    for r in &runs {
+        if r.command == "preflight" && names.contains(r.name.as_str()) {
+            by_name.entry(r.name.clone()).or_default().push(r.clone());
+        } else if r.command == BATCH_COMMAND {
+            let Some(batch) = batch_record(&store.root, r) else { continue };
+            for m in batch.members.iter().filter(|m| names.contains(m.name.as_str())) {
+                by_name.entry(m.name.clone()).or_default().push(m.receipt_in(r));
+            }
+        }
+    }
+    Ok(by_name)
+}
+
+/// The preflight receipt a write goes on: the one that authorized this exact spec (its digest now) over this exact
+/// code (its digest now). With `named`, that receipt and no other: a number that names another spec, other code, or
+/// a refusal is refused, and so is a spec edited or code moved since it. The writer (code_passenger) asks this before
+/// it writes, so a write is never made on a preflight that did not cover it, whoever runs the writer.
+pub fn authorizing(store: &Store, spec: &ChangeSpec, code_digest: &str, named: Option<i64>) -> Result<Receipt> {
+    let refuse = |why: String| ReadingRefusal::WriteUnauthorized.refuse(format!("{}: {why}", spec.name));
+    let digest = spec.digest();
+    let names: BTreeSet<&str> = [spec.name.as_str()].into();
+    let all = preflights_by_name(store, &names)?.remove(&spec.name).unwrap_or_default();
+    let covers = |r: &Receipt| r.spec_hash.as_deref() == Some(digest.as_str()) && r.code_digest.as_deref() == Some(code_digest) && r.reason == AUTHORIZED;
+    match named {
+        Some(n) => match all.iter().find(|r| r.seq == n) {
+            Some(r) if covers(r) => Ok(r.clone()),
+            Some(r) if r.reason != AUTHORIZED => Err(refuse(format!("preflight #{n} did not authorize it ({})", r.reason))),
+            Some(r) if r.spec_hash.as_deref() != Some(digest.as_str()) => Err(refuse(format!("preflight #{n} authorized another version of the spec ({} there, {digest} now): preflight it again", r.spec_hash.clone().unwrap_or_default()))),
+            Some(_) => Err(refuse(format!("preflight #{n} read other code ({code_digest} now): the code moved since; preflight it again"))),
+            None => Err(refuse(format!("receipt #{n} is no preflight of this spec"))),
+        },
+        None => {
+            let (d, prev) = gate(store, spec, code_digest)?;
+            match prev {
+                Some(r) if d.go && covers(&r) => Ok(r),
+                _ => Err(refuse(d.reason)),
+            }
+        }
+    }
+}
+
 /// The step-input gate of a code-changing step: the newest preflight receipt of this spec (its digest now) over
 /// this code (its digest now). Go only when it authorized the change; a spec edited or code moved since is
 /// preflighted again.
@@ -943,21 +1037,8 @@ pub fn gate(store: &Store, spec: &ChangeSpec, code_digest: &str) -> Result<(crat
 /// receipt or its line in a batch preflight's receipt ([`BATCH_COMMAND`]), decides it by the same rule. A member of a
 /// batch goes on the batch's receipt: the receipt handed back is the batch's, under the member's name, spec and verdict.
 pub fn gate_all(store: &Store, specs: &[&ChangeSpec], code_digest: &str) -> Result<Vec<(crate::decisions::Decided, Option<Receipt>)>> {
-    let journal = store.journal()?;
-    let runs = journal.runs()?;
     let names: BTreeSet<&str> = specs.iter().map(|s| s.name.as_str()).collect();
-    // each name's preflights in journal order: its own receipts, and its lines in the batches that name it
-    let mut by_name: BTreeMap<String, Vec<Receipt>> = BTreeMap::new();
-    for r in &runs {
-        if r.command == "preflight" && names.contains(r.name.as_str()) {
-            by_name.entry(r.name.clone()).or_default().push(r.clone());
-        } else if r.command == BATCH_COMMAND {
-            let Some(batch) = batch_record(&store.root, r) else { continue };
-            for m in batch.members.iter().filter(|m| names.contains(m.name.as_str())) {
-                by_name.entry(m.name.clone()).or_default().push(m.receipt_in(r));
-            }
-        }
-    }
+    let by_name = preflights_by_name(store, &names)?;
     Ok(specs
         .iter()
         .map(|spec| {
