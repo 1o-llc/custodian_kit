@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 (unreleased)
+## 0.4.0 (2026-10-30)
 
 The laboratory-control repair (2026-10-30). BFCB's Round 49 runs showed a proof that compiled under all twelve
 configurations and passed its tests reported its own inserted line absent, and a change that could be written on a
