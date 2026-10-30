@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.1 (2026-10-30)
+
+A write code-passenger makes on its own line is an experiment's change. The release run of the next experiment's
+protocol wrote the change with `code-passenger --root . transform --spec ... --preflight N --write`, the form the
+protocol gives first: the write was authorized and proved, but the job's close counted only custodian's own
+`transform` receipts ([L1022](https://github.com/1o-llc/custodian_kit/blob/8aa047c/src/jobs.rs#L1022)), so the
+provenance recorded no change: no spec, no preflight, no writer. code-passenger's receipt is `code-passenger` /
+`transform` in the same journal, tagged with the running job; the close now counts it as it counts custodian's
+([`is_transform`](https://github.com/1o-llc/custodian_kit/blob/0495496/src/jobs.rs#L932), used at
+[L1029](https://github.com/1o-llc/custodian_kit/blob/0495496/src/jobs.rs#L1029)), and the file it wrote is named as
+the transform's. Test: `a_transform_code_passenger_wrote_on_its_own_line_is_the_jobs` (fails on 0.4.0: the close's
+transforms are `[]`).
+
+`cargo test --all-features`: 345 passed, 0 failed (stable and Rust 1.89).
+
 ## 0.4.0 (2026-10-30)
 
 The laboratory-control repair (2026-10-30). BFCB's Round 49 runs showed a proof that compiled under all twelve
