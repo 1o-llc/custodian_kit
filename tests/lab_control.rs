@@ -276,3 +276,17 @@ fn an_edited_batch_record_authorizes_nothing() {
     assert!(e.starts_with("[CUST0047]"), "{e}");
     assert!(preflight::authorizing(&store, &spec, &code, None).is_err(), "nor does it authorize the spec it really held");
 }
+
+/// The code digest is the tree's, however its root is spelled: relative (as `--root .` is from where a runner stands),
+/// through a symlink, or resolved. A preflight digests the resolved root; the writer that checks it must get the same.
+#[test]
+fn the_code_digest_is_the_same_however_the_root_is_spelled() {
+    let scope = Scope { tests: true, ..Default::default() };
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ws");
+    let resolved = custodian_kit::code_digest(&fixture.canonicalize().unwrap(), &scope.scan_options()).unwrap();
+    // cargo runs this test from the crate's own folder
+    assert_eq!(custodian_kit::code_digest(Path::new("tests/fixtures/ws"), &scope.scan_options()).unwrap(), resolved);
+    let link = fresh("digest-link").join("ws");
+    std::os::unix::fs::symlink(&fixture, &link).unwrap();
+    assert_eq!(custodian_kit::code_digest(&link, &scope.scan_options()).unwrap(), resolved);
+}

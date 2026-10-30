@@ -35,7 +35,10 @@ pub fn klepto_scan(root: &Path, opts: &ScanOptions) -> std::result::Result<Klept
 
 /// The code digest: the canonical form of klepto's fingerprint (every file
 /// the scan reads, relative to the root, with its content digest), digested.
+/// The root is read as the file system resolves it, so every spelling of one directory (`.`, `/var/...` against
+/// `/private/var/...`, a symlink) gives the same digest: a preflight and the writer that checks it agree.
 pub fn code_digest(root: &Path, opts: &ScanOptions) -> std::result::Result<String, KleptoError> {
+    let root = &root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let fp = klepto_builder(root, opts)?.fingerprint()?;
     let manifest: Vec<(String, &String)> = fp.files.iter().map(|(p, h)| (relative_display(root, p), h)).collect();
     Ok(crate::digest::of_value(&manifest))
