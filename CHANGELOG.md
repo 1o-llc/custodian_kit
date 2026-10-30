@@ -40,6 +40,11 @@ patch: `TransformRecord` and `Preflight` gain public fields, and a governed pref
   keyed by what it says, the base's inherited, the rest introduced; clippy on copies, neither tree written. Declared
   lines `CargoFmt`, `CargoClippy`; the verification form `delta:<kind>` ([jobs.rs L1286](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/jobs.rs#L1286));
   `data/deltas/{kind}/{stamp}.json`. Test: `a_delta_counts_only_what_the_candidate_adds`.
+- **A format check that never ran is refused.** `cargo fmt --check` exits 1 both for a tree with diffs and when
+  the toolchain has no rustfmt; the second read as a formatted tree, so a delta on a toolchain without rustfmt called
+  any candidate clean (the release run on Rust 1.89 found it). An exit 1 with no diff is now refused with cargo's own
+  words ([`read_fmt`](https://github.com/1o-llc/custodian_kit/blob/a363d9d/src/delta.rs#L123)), and CI's test job installs
+  rustfmt on every Rust. Test: `a_fmt_that_never_ran_is_refused_never_a_formatted_tree`.
 - **`provenance`**, a module: an experiment's record in its job's folder ([`open`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/provenance.rs#L207),
   [`measure`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/provenance.rs#L228), [`close`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/provenance.rs#L275), [`running_experiment`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/provenance.rs#L290)).
   Test: `an_experiment_names_its_specimen_the_lock_on_its_copy_and_its_measurements`.
@@ -52,7 +57,7 @@ patch: `TransformRecord` and `Preflight` gain public fields, and a governed pref
   writer's digest from `--root .` never matched the preflight's. Test: `the_code_digest_is_the_same_however_the_root_is_spelled`.
 - Test fixtures in `bounded`, `operations` and `exercise` get a lock (the new check).
 
-`cargo test --all-features`: 343 passed, 0 failed. `tests/lab_control.rs`: 10.
+`cargo test --all-features`: 344 passed, 0 failed. `tests/lab_control.rs`: 10.
 
 ## 0.3.15 (2026-10-25)
 
