@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+The laboratory-control repair (2026-10-30). BFCB's Round 49 runs showed a proof that compiled under all twelve
+configurations and passed its tests reported its own inserted line absent, and a change that could be written on a
+receipt that did not cover it. This release makes the binding between a specimen, a change spec, the preflight that
+authorized it and the tree that is proved and written exact, and adds what an experiment needs: a lock as the
+dependency state, a delta for inherited format and lint findings, and a provenance record per experiment. Minor, not
+patch: `TransformRecord` and `Preflight` gain public fields, and a governed preflight refuses what 0.3.15 authorized
+(a workspace with no lock). Nothing is removed. Links are pinned to db4d314 (ecf0f02 for the code digest); the lines they replace to 4e5c57b (0.3.15).
+
+- **A landing's file is relative to the root however the root is spelled.** `rel` ([change.rs L1575](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/change.rs#L1575))
+  strips the canonical root when the given spelling does not match; it returned the absolute path for a root spelled
+  `.` or `/var/...` against klepto's `/private/var/...` ([L1558](https://github.com/1o-llc/custodian_kit/blob/4e5c57b/src/change.rs#L1558)), and code_passenger's text
+  fact then read the specimen instead of the proof's copy. Test: `a_landing_names_its_file_relative_to_the_root_however_the_root_is_spelled`.
+- **A near name is refused naming the scan's id.** `landing` refuses a target that differs from an item's id only in
+  generic arguments or spacing, and names the id to copy ([`ids_like`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/change.rs#L1590)); identity is
+  unchanged. Test: `a_name_without_its_generics_is_refused_naming_the_scans_id`.
+- **Blank lines stay empty.** `render_body` and `render_wrapped` indented blank lines and kept a blank line before the
+  closing brace ([L1193](https://github.com/1o-llc/custodian_kit/blob/4e5c57b/src/change.rs#L1193), [L1325](https://github.com/1o-llc/custodian_kit/blob/4e5c57b/src/change.rs#L1325)); the writer itself added
+  trailing whitespace a format check holds against the candidate. [`push_indented`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/change.rs#L1206). Test:
+  `a_raw_body_leaves_blank_lines_empty`.
+- **A governed preflight needs a lock.** With a store, a preflight adds the check `a Cargo.lock fixes the dependency
+  state` ([preflight.rs L352](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/preflight.rs#L352)): without a lock it is not authorized, and the check says
+  where to put one (the candidate's copy, never its baseline). The record keeps `lock` ([`lock_of`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/preflight.rs#L181)).
+  CUST0046. Test: `a_governed_preflight_needs_a_lock_and_binds_its_digest`.
+- **The preflight a write goes on.** [`authorizing`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/preflight.rs#L1004): the receipt that authorized this exact
+  spec over this exact code, named or the newest; a named receipt is refused when a later preflight of the same spec
+  over the same code did not authorize it ([L1013](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/preflight.rs#L1013)). The journal lookup `gate_all` used is
+  one function now ([`preflights_by_name`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/preflight.rs#L984)). CUST0047, CUST0048. Tests:
+  `a_write_goes_only_on_the_preflight_that_covered_this_spec_over_this_code`,
+  `a_later_refusal_of_the_same_spec_over_the_same_code_outranks_a_named_older_receipt`.
+- **A batch record is its receipt's only while it holds what the receipt digested.** The batch receipt's digest is
+  [`members_digest`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/preflight.rs#L1161) (name, spec digest and verdict), checked by [`batch_record`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/preflight.rs#L1152)
+  on every read: an edited record authorizes nothing. A batch receipt made by 0.3.x does not read as one: preflight
+  again. Test: `an_edited_batch_record_authorizes_nothing`.
+- **`TransformRecord`** gains `code_digest_after`, `lock`, `writer` ([transform.rs L84](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/transform.rs#L84)).
+- **`delta`**, a module ([L90](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/delta.rs#L90)): rustfmt's check or clippy on a base and a candidate, each finding
+  keyed by what it says, the base's inherited, the rest introduced; clippy on copies, neither tree written. Declared
+  lines `CargoFmt`, `CargoClippy`; the verification form `delta:<kind>` ([jobs.rs L1286](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/jobs.rs#L1286));
+  `data/deltas/{kind}/{stamp}.json`. Test: `a_delta_counts_only_what_the_candidate_adds`.
+- **`provenance`**, a module: an experiment's record in its job's folder ([`open`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/provenance.rs#L207),
+  [`measure`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/provenance.rs#L228), [`close`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/provenance.rs#L275), [`running_experiment`](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/provenance.rs#L290)).
+  Test: `an_experiment_names_its_specimen_the_lock_on_its_copy_and_its_measurements`.
+- **`jobs::close_as`** ([L935](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/jobs.rs#L935)): a close rejected with its reason. The close decides its result
+  once; the task history kept a second computation of it that lost a rejection and a delta.
+- `VERSION` ([lib.rs L73](https://github.com/1o-llc/custodian_kit/blob/db4d314/src/lib.rs#L73)): the writer names the kit it was built on.
+- **The code digest is the tree's however the root is spelled.** `code_digest` resolves the root first
+  ([graph.rs L40](https://github.com/1o-llc/custodian_kit/blob/ecf0f02/src/graph.rs#L40)); a root spelled `.` kept
+  klepto's paths unstripped ([L38](https://github.com/1o-llc/custodian_kit/blob/4e5c57b/src/graph.rs#L38)), so the
+  writer's digest from `--root .` never matched the preflight's. Test: `the_code_digest_is_the_same_however_the_root_is_spelled`.
+- Test fixtures in `bounded`, `operations` and `exercise` get a lock (the new check).
+
+`cargo test --all-features`: 343 passed, 0 failed. `tests/lab_control.rs`: 10.
+
 ## 0.3.15 (2026-10-25)
 
 An archive: whole crates as one ZIP for delivery, beside the bundle (one annotated text file for reading, held
