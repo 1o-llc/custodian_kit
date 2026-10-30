@@ -28,6 +28,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
+          # the delta's tests run rustfmt's check (a toolchain without rustfmt is refused, never a formatted tree)
+          components: rustfmt
       - name: Test
         # the committed Cargo.lock: the oldest Rust builds the same tree rust-version was checked against
         run: cargo test --locked --all-features

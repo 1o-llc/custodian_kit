@@ -114,10 +114,19 @@ pub fn delta(kind: Kind, base: &Path, candidate: &Path) -> Result<Delta> {
 pub fn fmt_findings(root: &Path, lines: &mut Vec<(String, Option<i32>)>) -> Result<Vec<Finding>> {
     let l = Cargo::fmt(root.join("Cargo.toml").as_os_str()).all().rest(["--", "--check"]);
     let w = run("delta-fmt", exec::line("fmt", &l)?.in_dir(root), lines)?;
-    if !matches!(w.code, Some(0) | Some(1)) {
-        return Err(ReadingRefusal::LineRefused.refuse(format!("cargo fmt --check in {}: exit {:?}: {}", root.display(), w.code, w.stderr.trim())));
+    read_fmt(root, w.code, &w.stdout, &w.stderr)
+}
+
+/// `cargo fmt --check`'s answer: exit 0 is a formatted tree, exit 1 a tree with diffs, each one a finding. An exit 1
+/// with no diff in it is cargo or rustup refusing before rustfmt ran (no rustfmt for the toolchain): refused, never a
+/// formatted tree.
+fn read_fmt(root: &Path, code: Option<i32>, stdout: &str, stderr: &str) -> Result<Vec<Finding>> {
+    let found = parse_fmt(root, stdout);
+    match code {
+        Some(0) => Ok(found),
+        Some(1) if !found.is_empty() => Ok(found),
+        _ => Err(ReadingRefusal::LineRefused.refuse(format!("cargo fmt --check in {}: exit {code:?}: {}", root.display(), stderr.trim()))),
     }
-    Ok(parse_fmt(root, &w.stdout))
 }
 
 /// `cargo fmt --check`'s output read into findings: `Diff in <file>:<line>:` (or `at line <n>:`) opens a hunk, its
@@ -235,6 +244,17 @@ mod tests {
         assert_eq!(a.len(), 1);
         assert_eq!((a[0].file.as_str(), a[0].key.as_str(), a[0].line), ("src/lib.rs", "-    let x=1;\n+    let x = 1;", Some(3)));
         assert_eq!(a[0].key, b[0].key, "the line moved; the finding is the same");
+    }
+
+    #[test]
+    fn a_fmt_that_never_ran_is_refused_never_a_formatted_tree() {
+        let root = Path::new("/w");
+        let no_rustfmt = "error: 'cargo-fmt' is not installed for the toolchain '1.89-x86_64-unknown-linux-gnu'.\n";
+        let e = read_fmt(root, Some(1), "", no_rustfmt).unwrap_err().to_string();
+        assert!(e.contains("exit Some(1)") && e.contains("'cargo-fmt' is not installed"), "{e}");
+        assert!(read_fmt(root, Some(0), "", "").unwrap().is_empty());
+        assert_eq!(read_fmt(root, Some(1), "Diff in /w/src/lib.rs:1:\n-fn a( ) {}\n+fn a() {}\n", "").unwrap().len(), 1);
+        assert!(read_fmt(root, None, "", "").is_err());
     }
 
     #[test]
