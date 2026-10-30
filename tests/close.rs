@@ -349,6 +349,37 @@ fn a_batch_over_three_files_closes_accepted_with_no_line_by_hand() {
     assert!(!said.contains("No test line ran") && said.contains("core_lib"), "{said}");
 }
 
+/// A transform code-passenger wrote on its own line (`code-passenger transform --preflight N --write`, its receipt
+/// `code-passenger` / `transform`) is the job's as custodian's `transform` line is: the close counts it and names the
+/// file it wrote as its, so an experiment's provenance names the change.
+#[test]
+fn a_transform_code_passenger_wrote_on_its_own_line_is_the_jobs() {
+    let (store, ctx) = project("own-line");
+    let w = Workspace::open_with(&store.root, &Default::default(), Resolving::Job).unwrap();
+    job(&store, "o", "{ job { name \"o\" kind \"specs\" target \"crate:core_lib\" } }\n");
+    let started = jobs::start_with(&ctx, Some("o"), false, Some(&w)).unwrap();
+    let file = "crates/core_lib/src/lib.rs";
+    let before = std::fs::read(store.root.join(file)).unwrap();
+    let mut after = before.clone();
+    after.extend_from_slice(b"\n// written\n");
+    std::fs::write(store.root.join(file), &after).unwrap();
+    let hex = |b: &[u8]| stable_digest::StableDigest::sha256(b).as_str().to_string();
+    let record = serde_json::json!({
+        "schema": "custodian.transform.v1", "spec_name": "one", "spec": "one.toml", "spec_digest": "d", "operation": "replace_body",
+        "target": "core_lib::f", "preflight_seq": 1, "files": [{ "path": file, "before": hex(&before), "after": hex(&after), "lines": [[1, 1]] }],
+        "checks": [], "postconditions": [], "written": true, "writer": "code_passenger 0.5.0 (custodian_kit 0.4.1)"
+    });
+    // the record where the experimenter's --out put it: outside the tree
+    let out = std::env::temp_dir().join(format!("custodian-kit-own-line-{}.json", std::process::id()));
+    std::fs::write(&out, record.to_string()).unwrap();
+    let mut r = receipt("transform", 0);
+    (r.command, r.line, r.job, r.outputs) = ("code-passenger".into(), "code-passenger transform --spec one.toml --preflight 1 --write".into(), Some(started.id.clone()), vec![format!("./{file}"), out.display().to_string()]);
+    let (kept, _) = custodian_kit::receipts::keep(&store, r).unwrap();
+    let (c, _, _) = jobs::close_with(&ctx, &started.id, Some(&w)).unwrap();
+    assert_eq!(c.transforms, [kept.seq], "{c:?}");
+    assert!(c.touched_files.iter().any(|(p, how)| p == file && *how == format!("transform #{}", kept.seq)), "{:?}", c.touched_files);
+}
+
 /// A `test:` verification that names no test of the workspace is refused when the job starts and when it is declared.
 #[test]
 fn a_test_verification_that_matches_no_test_is_refused_at_start() {

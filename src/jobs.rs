@@ -926,6 +926,13 @@ pub fn close(ctx: &Ctx, which: &str) -> Result<(Closing, PathBuf, Vec<String>)> 
 }
 
 /// `job close`, its closing count answered in this process over `ws` when given.
+/// A transform the job ran: custodian's `transform` line, or code-passenger's own (`code-passenger transform`, run on
+/// the preflight it names), whose receipt lands in the same journal tagged with the running job. Each keeps its record
+/// as a `.json` output.
+fn is_transform(r: &Receipt) -> bool {
+    r.command == "transform" || (r.command == "code-passenger" && r.name == "transform")
+}
+
 pub fn close_with(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>) -> Result<(Closing, PathBuf, Vec<String>)> {
     close_as(ctx, which, ws, None)
 }
@@ -1019,7 +1026,7 @@ pub fn close_as(ctx: &Ctx, which: &str, ws: Option<&crate::api::Workspace>, reje
     let mode = jf.mode.unwrap_or(JobMode::Unbounded);
     let transforms: Vec<(i64, crate::transform::TransformRecord)> = runs
         .iter()
-        .filter(|r| r.command == "transform" && r.accepted)
+        .filter(|r| is_transform(r) && r.accepted)
         .filter_map(|r| r.outputs.iter().find(|o| o.ends_with(".json")).and_then(|o| std::fs::read_to_string(ctx.root.join(o)).ok()).and_then(|t| serde_json::from_str(&t).ok()).map(|t| (r.seq, t)))
         .collect();
     let mut uncovered = if mode == JobMode::Bounded { uncovered_lines(ctx, &running, &transforms.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>())? } else { Vec::new() };
