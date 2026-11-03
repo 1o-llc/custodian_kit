@@ -247,7 +247,7 @@ fn each_way_a_transition_does_not_hold_is_refused() {
         "(on disk .git",
     );
     // the left-out folders and root files in any case (on a disk that ignores case, `.GIT` is `.git`)
-    for (tag, path) in [("git-case", ".GIT/hooks/post-checkout"), ("custodian-case", ".Custodian/state/j.txt"), ("target-case", "Target/x"), ("oneo-case", "OneO.Project.JSON"), ("deep-case", "crates/a/TARGET/debug/x")] {
+    for (tag, path) in [("git-case", ".GIT/hooks/post-checkout"), ("custodian-case", ".Custodian/state/j.txt"), ("target-case", "Target/x"), ("oneo-case", "OneO.Project.JSON"), ("deep-case", "crates/a/TARGET/debug/x"), ("long-s", ".cu\u{17F}todian/state/j.txt"), ("long-s-root", "oneo.project.j\u{17F}on")] {
         one(fails(tag, vec![w(path, None)], |_, _| {}), "where the tree digest does not read");
     }
     // a file named is never a folder of another, whatever the case

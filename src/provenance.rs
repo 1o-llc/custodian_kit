@@ -39,11 +39,13 @@ const LEFT_OUT_DIRS: &[&str] = &["target", ".git", ".passenger", crate::store::F
 const LEFT_OUT_ROOT_FILES: &[&str] = &["oneo.project.json"];
 
 /// Whether a tree digest leaves out `rel` (relative to the root, `/` between its parts): a path with a part named as
-/// one of the folders above, or one of the root files, in any case (`.GIT` is `.git` on a disk that ignores case).
-/// What [`tree_files`] does not read, a write checked by the tree cannot be seen in: a replay is refused such a path
-/// ([`crate::change::replay_place`]).
+/// one of the folders above, or one of the root files, in any case (`.GIT` is `.git` on a disk that ignores case),
+/// Unicode's too: a name is compared lowercased, with the long s (`ſ`) as `s` and the Kelvin sign as `k`, which a
+/// disk that folds case may make the same letters. What [`tree_files`] does not read, a write checked by the tree
+/// cannot be seen in: a replay is refused such a path ([`crate::change::replay_place`]).
 pub fn left_out(rel: &str) -> bool {
-    LEFT_OUT_ROOT_FILES.iter().any(|f| f.eq_ignore_ascii_case(rel)) || rel.split('/').any(|p| LEFT_OUT_DIRS.iter().any(|d| d.eq_ignore_ascii_case(p)))
+    let fold = |s: &str| s.to_lowercase().replace('\u{17F}', "s").replace('\u{212A}', "k");
+    LEFT_OUT_ROOT_FILES.iter().any(|f| *f == fold(rel)) || rel.split('/').any(|p| LEFT_OUT_DIRS.contains(&fold(p).as_str()))
 }
 
 /// A tree as it was read: every file's digest, digested.
