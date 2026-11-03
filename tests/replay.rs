@@ -168,6 +168,20 @@ fn a_whole_transition_holds_and_its_steps_say_each_file_after() {
     assert_eq!(mode(&root, "bin/tool"), 0o755);
 }
 
+/// A file replaced with no `mode` keeps every bit of its own: set-user-id, set-group-id and sticky with the nine.
+#[test]
+fn a_replaced_file_with_no_mode_keeps_its_set_id_and_sticky_bits() {
+    let (root, specs) = tree("setid");
+    write(&root, "bin/tool", b"old");
+    write(&root, "bin/flag", b"old");
+    set_mode(&root, "bin/tool", 0o4755);
+    set_mode(&root, "bin/flag", 0o1640);
+    write(&specs, "payloads/new", b"new");
+    let r = change::replay_read(&root, &specs, &replay(vec![writes("bin/tool", Some(b"old"), "new", b"new"), writes("bin/flag", Some(b"old"), "new", b"new")]));
+    assert!(r.holds(), "{:?}", r.failures());
+    assert_eq!(r.steps.iter().map(|s| (s.path.as_str(), s.mode())).collect::<Vec<_>>(), [("bin/flag", Some(0o1640)), ("bin/tool", Some(0o4755))]);
+}
+
 /// The one check that fails (its `what`) for a replay of `files` over a tree with `src/lib.rs` = "a" and payload
 /// `payloads/b` = "b"; the rest hold, and no step is given.
 fn fails(tag: &str, files: Vec<ReplayFile>, setup: impl FnOnce(&Path, &Path)) -> Vec<String> {
@@ -222,8 +236,22 @@ fn each_way_a_transition_does_not_hold_is_refused() {
             let outside = fresh("outside");
             std::os::unix::fs::symlink(&outside, root.join("out")).unwrap();
         }),
-        "out is a symbolic link",
+        "reaches",
     );
+    // a link inside the root to a folder the tree digest leaves out: where the path reaches on disk is refused
+    one(
+        fails("link-to-git", vec![w("g/hooks/post-checkout", None)], |root, _| {
+            std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+            std::os::unix::fs::symlink(root.join(".git"), root.join("g")).unwrap();
+        }),
+        "(on disk .git",
+    );
+    // the left-out folders and root files in any case (on a disk that ignores case, `.GIT` is `.git`)
+    for (tag, path) in [("git-case", ".GIT/hooks/post-checkout"), ("custodian-case", ".Custodian/state/j.txt"), ("target-case", "Target/x"), ("oneo-case", "OneO.Project.JSON"), ("deep-case", "crates/a/TARGET/debug/x")] {
+        one(fails(tag, vec![w(path, None)], |_, _| {}), "where the tree digest does not read");
+    }
+    // a file named is never a folder of another, whatever the case
+    one(fails("folder-case", vec![w("Gen/out/x", None), w("gen/OUT", None)], |_, _| {}), "gen/OUT: not a folder of another file named: Gen/out/x is under it");
     one(fails("no-files", Vec::new(), |_, _| {}), "the replay names its files");
 }
 

@@ -65,7 +65,7 @@ vocabulary! {
         RemoveDependency = "remove_dependency" : "a dependency a crate names, dropped from its manifest (target: crate:<name>; `dependency`: its name): refused while a feature names it or a source file of the crate still names its paths (each place said), then proved by the compile",
         RenamePaths = "rename_paths" : "every path through one crate in a crate's sources made a path through another (target: crate:<name>; `dependency.name`: the crate the paths name now, `new_name`: the crate they name after): `old::` becomes `new::`, `use old` and `extern crate old` with it, in every source file of the crate; proved by the compile",
         DeclareFeature = "declare_feature" : "a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given",
-        Replay = "replay" : "an exact transition of whole files, of any type (target: `*`, the workspace; `replay`: one block per file): each file's path relative to the root, its state before (`before_sha256`, or `absent_before`) and after (`after_sha256` with the `payload` file beside the spec that holds those bytes, and its `mode`; or `delete`); every file and payload is checked before the first is written, then each is written byte for byte",
+        Replay = "replay" : "an exact transition of whole files, of any type (target: `*`, the workspace; `replay`: one block per file): each file's path relative to the root, its state before (`before_sha256`, or `absent_before`) and after (`after_sha256` with the `payload` file beside the spec that holds those bytes, and its `mode`; or `delete`); every file and payload is checked before the first is written, then each is written byte for byte; no cargo proof: a replay reproduces a kept state, and the experiment's verification judges it",
     }
 }
 
@@ -2397,6 +2397,34 @@ pub fn replay_mode(raw: &str) -> std::result::Result<u32, String> {
     u32::from_str_radix(digits, 8).map_err(|e| format!("mode `{raw}`: {e}"))
 }
 
+/// A replay path where the tree is: its one spelling ([`replay_path`]), not where the tree digest does not read (in any
+/// case: [`crate::provenance::left_out`]), and where it reaches on disk is that too: the longest part of it that is
+/// there, its links and its case as the disk resolves them, is inside the root and not left out. The rule every write
+/// and revert of a replay places a file by.
+pub fn replay_place(root: &Path, raw: &str) -> std::result::Result<String, String> {
+    let path = replay_path(raw)?;
+    let left = |p: &str| format!("{p} is where the tree digest does not read (target, .git, .passenger, .custodian, oneo.project.json, in any case): no check of the tree would see the write");
+    if crate::provenance::left_out(&path) {
+        return Err(left(&path));
+    }
+    let base = root.canonicalize().map_err(|e| format!("{}: {e}", root.display()))?;
+    let mut there = root.to_path_buf();
+    let mut found = base.clone();
+    for part in path.split('/') {
+        there.push(part);
+        match there.canonicalize() {
+            Ok(c) => found = c,
+            Err(_) => break,
+        }
+    }
+    let rel = found.strip_prefix(&base).map_err(|_| format!("{path} reaches {} on disk, outside the root", found.display()))?;
+    let rel = rel.to_string_lossy().replace('\\', "/");
+    if !rel.is_empty() && crate::provenance::left_out(&rel) {
+        return Err(left(&format!("{path} (on disk {rel})")));
+    }
+    Ok(path)
+}
+
 /// A digest as a replay declares it: lowercase sha256 hex, 64 digits.
 fn is_sha256(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
@@ -2407,11 +2435,12 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     stable_digest::StableDigest::sha256(bytes).as_str().to_string()
 }
 
-/// A file's permission bits as a replay reads and writes them.
+/// A file's permission bits as a replay reads and writes them: all twelve (set-user-id, set-group-id and sticky with
+/// the nine), so a file replaced with no `mode` keeps every one of them.
 #[cfg(unix)]
 pub fn mode_of(meta: &std::fs::Metadata) -> u32 {
     use std::os::unix::fs::PermissionsExt;
-    meta.permissions().mode() & 0o777
+    meta.permissions().mode() & 0o7777
 }
 
 /// A file's permission bits as a replay reads and writes them (no Unix mode here: read-only or not).
@@ -2527,11 +2556,7 @@ pub fn replay_read(root: &Path, spec_dir: &Path, spec: &ChangeSpec) -> ReplayRea
     let mut named: BTreeMap<String, String> = BTreeMap::new();
     let mut folded: BTreeMap<String, String> = BTreeMap::new();
     for f in &spec.replay {
-        let path = match replay_path(&f.path) {
-            Ok(p) if crate::provenance::left_out(&p) => {
-                check(format!("{}: a path inside the tree", f.path), false, format!("{p} is where the tree digest does not read (target, .git, .passenger, .custodian, oneo.project.json): no check of the tree would see the write"));
-                continue;
-            }
+        let path = match replay_place(root, &f.path) {
             Ok(p) => {
                 check(format!("{p}: a path inside the tree"), true, if p == f.path { "as written".into() } else { format!("`{}` spelled once: {p}", f.path) });
                 p
@@ -2632,7 +2657,8 @@ pub fn replay_read(root: &Path, spec_dir: &Path, spec: &ChangeSpec) -> ReplayRea
     // a file named is never a folder of another file named
     let paths: Vec<&String> = named.keys().collect();
     for (i, p) in paths.iter().enumerate() {
-        if let Some(q) = paths[i + 1..].iter().find(|q| q.starts_with(&format!("{p}/"))) {
+        let under = format!("{}/", p.to_lowercase());
+        if let Some(q) = paths.iter().enumerate().find(|(j, q)| *j != i && q.to_lowercase().starts_with(&under)).map(|(_, q)| q) {
             check(format!("{p}: not a folder of another file named"), false, format!("{q} is under it"));
         }
     }
