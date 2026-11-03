@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.5.0 (2026-11-03)
+
+`replay`, an operation of the change vocabulary: an exact transition of whole files, of any type, that the writer
+makes only once the whole of it is checked. A downstream campaign carried a local copy of the kit, still calling itself
+0.4.1, with a `Replay` word added; code_passenger 0.5.0 (`custodian_kit = "^0.4.1"`) built against it stopped
+compiling (`E0004`, `Operation::Replay` not covered, at its exhaustive `match spec.op()`). `Operation` is a closed
+vocabulary every writer matches word for word, so a new word is a minor up: 0.5.0, never a 0.4.x a published writer
+would be handed. code_passenger 0.5.0 and custodian 0.5.1 stay on 0.4.1; code_passenger 0.6.0 and custodian 0.6.0
+take 0.5.0. Breaking: `Operation` gains `Replay`, `ChangeSpec` gains `replay` (a struct literal without `..` stops
+compiling), `At` gains `Files`. Nothing is removed. Links are pinned to b7c44f8 (2cb5870 for CI).
+
+- **The operation.** [`Replay`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L68), target `*` (the workspace its paths are relative to), one
+  `replay` block per file ([`ReplayFile`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L434), the spec's [`replay`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L521)):
+  its path; its state before, `before_sha256` or `absent_before`; its state after, `after_sha256` with the `payload`
+  file beside the spec that holds those bytes and its `mode` (three octal digits; unset, a made file is 644 and a
+  replaced one keeps its own), or `delete`. The field is left out of a spec that has none, so every other spec's
+  digest, and every receipt bound to one, is what it was.
+- **One rule for the preflight and the writer.** [`replay_read`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L2519) reads the whole transition
+  against the tree and the payloads: each path in its one spelling ([`replay_path`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L2368): relative,
+  no `..`, no root, no drive, no `\`), named once (a second entry for a path, a write and a delete of one path, two
+  spellings of one file where case is ignored, a file named under another file named: each refused), one state before
+  and one after, a valid mode ([`replay_mode`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L2392)), the file as declared before reached through
+  folders only ([`replay_on_disk`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L2484): a symbolic link on the way is refused), every payload the
+  bytes declared after. A path the tree digest does not read is refused ([`provenance::left_out`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/provenance.rs#L44):
+  `.custodian`, `.passenger`, `.git`, `target`), since the writer's check that the tree did not move cannot see a
+  write there. The steps come back, in path order, only when every check holds.
+- **The preflight** keeps each of those checks as a precondition ([preflight.rs L705](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/preflight.rs#L705)); its write
+  set is the files the replay names ([L359](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/preflight.rs#L359)), and with no `scope.write` the files are its
+  authorized scope ([L742](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/preflight.rs#L742)); a scope that does not hold every file is a scope expansion asked
+  for. The binding is every operation's: the spec's digest, the code digest, the lock, the receipt `authorizing`
+  finds. The landing is [`At::Files`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L1579) ([L2275](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L2275)).
+- **Never exercised** ([exercise.rs L129](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/exercise.rs#L129), [L561](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/exercise.rs#L561)): a replay's
+  payloads are a kept state's bytes, which neither an exercise nor a model makes up. A plan's approval leaves a
+  `replay` block TODO ([plan.rs L693](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/plan.rs#L693)). The change schema gains the word, its keys and the
+  `replay` block.
+- **CI builds the crates that use this one before it publishes.** [`consumers`](https://github.com/1o-llc/custodian_kit/blob/2cb5870/.github/workflows/ci.yml#L54): the
+  current code_passenger and custodian (the branch of the push's name, else the default) tested against the checkout;
+  [`published-consumers`](https://github.com/1o-llc/custodian_kit/blob/2cb5870/.github/workflows/ci.yml#L98): every published version of every crate on crates.io that
+  depends on this one and whose requirement takes this version, checked through a scratch crate that patches the kit
+  to the checkout; [`publish`](https://github.com/1o-llc/custodian_kit/blob/2cb5870/.github/workflows/ci.yml#L156) needs both. Run against this kit labelled 0.4.2, the
+  second fails on code_passenger 0.5.0 with the `E0004` above; labelled 0.5.0, no published version takes it.
+
+Tests: `tests/replay.rs`: `a_replay_spec_reads_from_toml_and_1o_and_round_trips`,
+`a_replay_path_has_one_spelling_inside_the_root`, `a_whole_transition_holds_and_its_steps_say_each_file_after`,
+`each_way_a_transition_does_not_hold_is_refused` (24 refusals),
+`a_governed_preflight_of_a_replay_keeps_each_check_and_binds_the_spec_the_code_and_the_lock`,
+`a_replay_that_does_not_hold_or_writes_outside_its_scope_is_not_authorized`;
+`the_schemas_name_exactly_the_fields_of_the_rust_forms` and
+`the_schemas_carry_the_vocabularies_descriptions_and_each_operation_s_keys` hold the schema to the Rust;
+`every_operation_but_replay_applies_to_a_unit_and_the_word_holds_the_options`.
+
+`cargo test --all-features`: 351 passed, 0 failed (stable and Rust 1.90); 6 of them in `tests/replay.rs`.
+
 ## 0.4.1 (2026-10-30)
 
 A write code-passenger makes on its own line is an experiment's change. The release run of the next experiment's
