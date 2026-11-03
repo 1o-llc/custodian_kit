@@ -690,6 +690,7 @@ pub fn approve(store: &Store, name: &str, step: usize, operation: Option<&str>) 
             "items" => spec.items = vec![TODO.into()],
             "feature" => spec.feature = Some(TODO.into()),
             "linkage" => spec.linkage = Some(TODO.into()),
+            "replay" => spec.replay = vec![crate::change::ReplayFile { path: TODO.into(), before_sha256: Some(TODO.into()), after_sha256: Some(TODO.into()), payload: Some(TODO.into()), ..Default::default() }],
             _ => {}
         }
     }

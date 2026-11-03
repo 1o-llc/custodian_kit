@@ -456,12 +456,23 @@ transform are bound to.
 | `wrap` | a function's body wrapped (target: the function, `function`: its name and the pieces that run first): the pieces, then the body as it was, as one block; its signature, docs and attributes kept, so its callers are untouched |
 | `make_lib` | a crate's library root, src/lib.rs, made beside its binary (target: crate:<name>, a crate with no library; `module.doc`: the file's inner doc): cargo builds it as the crate's library, and the binary reaches it by the crate's name |
 | `declare_feature` | a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given |
+| `replay` | an exact transition of whole files, of any type (target: `*`, the workspace; `replay`: one block per file): each file's path relative to the root, its state before (`before_sha256`, or `absent_before`) and after (`after_sha256` with the `payload` file beside the spec that holds those bytes, and its `mode`; or `delete`); every file and payload is checked before the first is written, then each is written byte for byte |
 
 A function body is never free text the tool trusts. It is a list of pieces,
 each one of simple_impl 0.1.12's toolkit macros (130 of them, the table is
 `change::PIECES` and a test holds it equal to the published registry), or
 `let`, `value`, or `raw`. A `raw` piece is allowed and the preflight flags it.
 A whole function can come from a toolkit generator instead.
+
+A `replay` edits no code: it carries a state kept elsewhere into the tree,
+file by file and byte for byte, any file type. Each `replay` block names one
+file (relative to the root), its state before (`before_sha256`, or
+`absent_before = true`) and after (`after_sha256` with the `payload` file,
+beside the spec, that holds those bytes, and its `mode`; or `delete = true`).
+`change::replay_read` is the one rule for the preflight and the writer: every
+path in its one spelling and inside the tree, each named once, every state
+declared once, every file as declared before and every payload's digest the
+one declared after, all read before anything is written.
 
 `preflight::run_preflight` decides a change spec over the code as it is,
 before anything is written: where it lands (`change::landing`), its impact

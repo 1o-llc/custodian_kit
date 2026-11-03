@@ -38,6 +38,13 @@ pub const MEASUREMENTS_DIR: &str = "measurements";
 const LEFT_OUT_DIRS: &[&str] = &["target", ".git", ".passenger", crate::store::FOLDER];
 const LEFT_OUT_ROOT_FILES: &[&str] = &["oneo.project.json"];
 
+/// Whether a tree digest leaves out `rel` (relative to the root, `/` between its parts): a path with a part named as
+/// one of the folders above, or one of the root files. What [`tree_files`] does not read, a write checked by the tree
+/// cannot be seen in: a replay is refused such a path ([`crate::change::replay_read`]).
+pub fn left_out(rel: &str) -> bool {
+    LEFT_OUT_ROOT_FILES.contains(&rel) || rel.split('/').any(|p| LEFT_OUT_DIRS.contains(&p))
+}
+
 /// A tree as it was read: every file's digest, digested.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TreeState {

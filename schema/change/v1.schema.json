@@ -49,7 +49,8 @@
             "make_lib",
             "remove_dependency",
             "rename_paths",
-            "declare_feature"
+            "declare_feature",
+            "replay"
           ],
           "description": "What the writer does (the operations table in custodian_kit's README).",
           "enumDescriptions": [
@@ -80,7 +81,8 @@
             "a crate's library root, src/lib.rs, made beside its binary (target: crate:<name>, a crate with no library; `module.doc`: the file's inner doc): cargo builds it as the crate's library, and the binary reaches it by the crate's name",
             "a dependency a crate names, dropped from its manifest (target: crate:<name>; `dependency`: its name): refused while a feature names it or a source file of the crate still names its paths (each place said), then proved by the compile",
             "every path through one crate in a crate's sources made a path through another (target: crate:<name>; `dependency.name`: the crate the paths name now, `new_name`: the crate they name after): `old::` becomes `new::`, `use old` and `extern crate old` with it, in every source file of the crate; proved by the compile",
-            "a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given"
+            "a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given",
+            "an exact transition of whole files, of any type (target: `*`, the workspace; `replay`: one block per file): each file's path relative to the root, its state before (`before_sha256`, or `absent_before`) and after (`after_sha256` with the `payload` file beside the spec that holds those bytes, and its `mode`; or `delete`); every file and payload is checked before the first is written, then each is written byte for byte"
           ]
         },
         "target": {
@@ -2900,6 +2902,48 @@
           "type": "string",
           "description": "anchor: the linkage record's name."
         },
+        "replay": {
+          "type": "array",
+          "description": "replay: one file of the transition (where it is, what it is before, what it is after). Repeats: one block per value, in order.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "The file, relative to the root, `/` between its parts."
+              },
+              "before_sha256": {
+                "type": "string",
+                "description": "Lowercase sha256 hex of the file's bytes before."
+              },
+              "absent_before": {
+                "type": "boolean",
+                "description": "true: the file is not there before (the replay makes it)."
+              },
+              "after_sha256": {
+                "type": "string",
+                "description": "Lowercase sha256 hex of the file's bytes after."
+              },
+              "payload": {
+                "type": "string",
+                "description": "The file that holds the bytes after, relative to the spec's folder."
+              },
+              "mode": {
+                "type": "string",
+                "description": "The permission bits after, three octal digits (644, 755); unset, a file made is 644 and a file replaced keeps its own."
+              },
+              "delete": {
+                "type": "boolean",
+                "description": "true: the replay deletes the file."
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "x-1o-single-keys": true
+          }
+        },
         "call_sites": {
           "type": "object",
           "additionalProperties": false,
@@ -3078,6 +3122,9 @@
           ],
           "rename_paths": [
             "new_name"
+          ],
+          "replay": [
+            "replay"
           ]
         }
       }

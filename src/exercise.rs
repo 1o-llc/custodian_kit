@@ -125,6 +125,8 @@ pub fn units_of(op: Operation) -> &'static [Unit] {
         AddMethod | AddConstructor => &[Unit::Impl, Unit::Item],
         AddAttribute | Gate | Anchor | Rename | Move => &[Unit::Item, Unit::Function],
         ChangeSignature | ReplaceBody | AddTest | Inline | Wrap => &[Unit::Function],
+        // never exercised: a replay carries the bytes of a state kept elsewhere, which no exercise makes up
+        Replay => &[],
     }
 }
 
@@ -555,6 +557,8 @@ pub fn spec_for(k: &Klepto, root: &Path, op: Operation, t: &Target, n: u64, crat
     s.scope.write = crates.iter().map(|c| format!("crate:{c}")).collect();
     let u32fn = |name: String, receiver: Option<&str>| FnSpec { name, vis: Some("pub".into()), receiver: receiver.map(str::to_string), ret: Some("u32".into()), body: vec![step_value("0")], ..FnSpec::default() };
     match op {
+        // no unit (units_of): a replay's payloads are a kept state's bytes, not a spec's fields
+        Replay => return None,
         MakeStruct => s.item = Some(ItemSpec { name: format!("ExerciseStruct{n}"), vis: Some("pub".into()), derives: vec!["Debug".into()], fields: vec![FieldSpec { name: "value".into(), ty: "u32".into(), vis: Some("pub".into()), ..FieldSpec::default() }], ..ItemSpec::default() }),
         MakeEnum => s.item = Some(ItemSpec { name: format!("ExerciseEnum{n}"), vis: Some("pub".into()), derives: vec!["Debug".into()], variants: vec![VariantSpec { name: "One".into(), ..VariantSpec::default() }, VariantSpec { name: "Two".into(), ..VariantSpec::default() }], ..ItemSpec::default() }),
         MakeFn => s.function = Some(u32fn(format!("exercise_fn_{n}"), None)),
@@ -1523,7 +1527,8 @@ fn strip_fences(s: &str) -> String {
 pub fn prompt(intent: &str, offered: &[String]) -> String {
     let mut p = String::from("Write one change spec for custodian, in TOML. Answer with the TOML only: no prose, no code fences.\n\n");
     p.push_str("Fields: name (any), objective (the intent in your words), operation (one of the list), target (an item path or a route from the targets list), and what the operation needs.\n\nOperations (operation: what it does; needs):\n");
-    for o in Operation::ALL {
+    // the operations an exercise makes (a replay's payloads are a kept state's bytes, which a model does not write)
+    for o in Operation::ALL.iter().filter(|o| !units_of(**o).is_empty()) {
         p.push_str(&format!("- {}: {}; needs: {}\n", o.as_str(), o.doc(), o.needs().join(", ")));
     }
     p.push_str(
@@ -1720,9 +1725,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_operation_applies_to_a_unit_and_the_word_holds_the_options() {
+    fn every_operation_but_replay_applies_to_a_unit_and_the_word_holds_the_options() {
         for op in Operation::ALL {
-            assert!(!units_of(*op).is_empty(), "{}", op.as_str());
+            assert_eq!(units_of(*op).is_empty(), *op == Operation::Replay, "{}", op.as_str());
         }
         let o = Options::from_words(Some("add_field,rename"), Some("item"), Some("2"), true, Some("crate:core_lib"), None, Some("7")).unwrap();
         let w = ExerciseWord::from_raw(o.word);

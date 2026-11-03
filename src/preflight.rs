@@ -356,7 +356,12 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
     let preserve = spec.compatibility != Some(Compatibility::Break);
     let ty = land.as_ref().ok().and_then(|l| l.item.as_ref()).and_then(|id| f.k.type_decl(id));
     if let Ok(l) = &land {
-        write.insert(l.file.clone());
+        if op == Operation::Replay {
+            // every file the replay names, in its one spelling (a path with none is a precondition that fails below)
+            write.extend(spec.replay.iter().filter_map(|r| crate::change::replay_path(&r.path).ok()));
+        } else {
+            write.insert(l.file.clone());
+        }
         if let At::NewFile { parent } = &l.at {
             if !parent.is_empty() {
                 write.insert(parent.clone());
@@ -697,6 +702,13 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
                 pre.push(Check { what: "the pieces run first and the body gives the value".into(), holds: matches!(pieces, Some(Ok(_))), detail: match pieces { Some(Err(e)) => e, _ => "pieces first, then the body as it was".into() } });
             }
             Operation::AddAttribute => {}
+            Operation::Replay => {
+                // the whole transition, read against the tree and the payloads beside the spec: the rule the writer
+                // refuses by (crate::change::replay_read)
+                let spec_file = f.root.join(spec_rel);
+                let read = crate::change::replay_read(&f.root, spec_file.parent().unwrap_or(&f.root), spec);
+                pre.extend(read.checks);
+            }
         }
         // code that names an optional dependency builds only with a feature that turns it on (crate::change::optional_uses,
         // the rule the writer's refusal names too)
@@ -726,6 +738,8 @@ pub fn assess(f: &Facts, store: Option<&Store>, spec_rel: &str, spec: &ChangeSpe
     let (scope_routes, prefixes): (Vec<String>, Vec<String>) = if spec.scope.write.is_empty() {
         let own: Vec<String> = land.as_ref().map(|l| match &l.at {
             At::NewFile { parent } if !parent.is_empty() => vec![l.file.clone(), parent.clone()],
+            // a replay's own files are the ones it names
+            At::Files { .. } => write.iter().cloned().collect(),
             // a changed dependency's own files are the manifests that name it (every crate's, for `*`)
             At::Manifest if op == Operation::ChangeDependency => crate::change::dependency_changes(&f.k, &f.root, spec).map(|c| c.into_iter().map(|c| c.manifest).collect::<BTreeSet<_>>().into_iter().collect()).unwrap_or_else(|_| vec![l.file.clone()]),
             _ => vec![l.file.clone()],

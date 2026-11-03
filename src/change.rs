@@ -65,6 +65,7 @@ vocabulary! {
         RemoveDependency = "remove_dependency" : "a dependency a crate names, dropped from its manifest (target: crate:<name>; `dependency`: its name): refused while a feature names it or a source file of the crate still names its paths (each place said), then proved by the compile",
         RenamePaths = "rename_paths" : "every path through one crate in a crate's sources made a path through another (target: crate:<name>; `dependency.name`: the crate the paths name now, `new_name`: the crate they name after): `old::` becomes `new::`, `use old` and `extern crate old` with it, in every source file of the crate; proved by the compile",
         DeclareFeature = "declare_feature" : "a crate feature declared in its Cargo.toml (target: crate:<name>, `feature`: the name, `enables`: what it turns on, each `dep:<name>` (an optional dependency), `<dependency>/<feature>` or another feature of the crate); a feature the crate already declares gets the list given",
+        Replay = "replay" : "an exact transition of whole files, of any type (target: `*`, the workspace; `replay`: one block per file): each file's path relative to the root, its state before (`before_sha256`, or `absent_before`) and after (`after_sha256` with the `payload` file beside the spec that holds those bytes, and its `mode`; or `delete`); every file and payload is checked before the first is written, then each is written byte for byte",
     }
 }
 
@@ -101,13 +102,14 @@ impl Operation {
             Inline | MakeLib => &[],
             RemoveDependency => &["dependency"],
             RenamePaths => &["dependency", "new_name"],
+            Replay => &["replay"],
         }
     }
 
     /// Whether the operation's target is an existing item (else a place: a module route, a crate).
     pub fn targets_an_item(self) -> bool {
         use Operation::*;
-        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | ChangeDependency | DeclareFeature | MakeLib | Extract | RemoveDependency | RenamePaths)
+        !matches!(self, MakeStruct | MakeEnum | MakeFn | AddModule | AddDependency | ChangeDependency | DeclareFeature | MakeLib | Extract | RemoveDependency | RenamePaths | Replay)
     }
 
     /// The name the operation makes, which must be free where it lands.
@@ -423,6 +425,36 @@ pub struct CallSites {
     pub allow_unresolved: bool,
 }
 
+/// One file of a `replay`: where it is, what it is before, what it is after. Before is `before_sha256` (the file's
+/// bytes) or `absent_before`; after is `after_sha256` with its `payload` (and `mode` when it is not the file's own),
+/// or `delete`. Exactly one of each; [`replay_read`] checks it, and every file against the tree, before anything is
+/// written.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayFile {
+    /// Relative to the root, `/` between its parts ([`replay_path`] is its one spelling).
+    pub path: String,
+    /// Lowercase sha256 hex of the file's bytes before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_sha256: Option<String>,
+    /// `true`: the file is not there before (the replay makes it).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub absent_before: bool,
+    /// Lowercase sha256 hex of the file's bytes after.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_sha256: Option<String>,
+    /// The file that holds the bytes after, relative to the spec's folder (`/` between its parts).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<String>,
+    /// The permission bits after, three octal digits (`644`, `755`); unset, a file the replay makes is `644` and a
+    /// file it replaces keeps its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// `true`: the replay deletes the file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub delete: bool,
+}
+
 /// One change spec.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -484,6 +516,9 @@ pub struct ChangeSpec {
     /// `anchor`: the linkage record's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linkage: Option<String>,
+    /// `replay`: the files of the transition, one entry each ([`ReplayFile`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replay: Vec<ReplayFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_sites: Option<CallSites>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -567,6 +602,7 @@ impl ChangeSpec {
             "items" => !self.items.is_empty(),
             "feature" => self.feature.is_some(),
             "linkage" => self.linkage.is_some(),
+            "replay" => !self.replay.is_empty(),
             _ => false,
         }
     }
@@ -1538,6 +1574,9 @@ pub enum At {
     NewFile { parent: String },
     /// The crate's manifest.
     Manifest,
+    /// Whole files, each written as given or deleted (a replay): `count` of them, the landing's file the first in
+    /// path order.
+    Files { count: u32 },
 }
 
 /// Where an operation lands: the file, its module, its crate, the item it works on, the place in the file.
@@ -1565,6 +1604,7 @@ impl Landing {
             At::NewFile { parent } if parent.is_empty() => format!("a new file {}, the root of {}", self.file, self.package),
             At::NewFile { parent } => format!("a new file {} (module {}), its mod line in {parent}", self.file, self.module),
             At::Manifest => format!("{} ({})", self.file, self.package),
+            At::Files { count } => format!("{count} whole files of the workspace, the first {}", self.file),
         }
     }
 }
@@ -2232,6 +2272,16 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
         Landing { file: rel(root, &d.location.path), module: d.module.clone(), package: package_of(k, &d.package), item: Some(d.id.clone()), at: at(line) }
     };
     match op {
+        Replay => {
+            if spec.target.trim() != WORKSPACE {
+                return Err(format!("`{}`: a replay's target is `{WORKSPACE}`, the workspace its paths are relative to", spec.target));
+            }
+            let mut paths: Vec<String> = spec.replay.iter().map(|f| replay_path(&f.path).unwrap_or_else(|_| f.path.clone())).collect();
+            paths.sort();
+            paths.dedup();
+            let first = paths.first().cloned().ok_or_else(|| "a replay with no file".to_string())?;
+            Ok(Landing { file: first, module: WORKSPACE.into(), package: WORKSPACE.into(), item: None, at: At::Files { count: paths.len() as u32 } })
+        }
         MakeLib => {
             let name = spec.target.trim().strip_prefix("crate:").filter(|n| !n.contains('/')).ok_or_else(|| format!("`{}` is not a crate:<name> route", spec.target))?;
             let p = k.packages.get(&name.replace('-', "_")).ok_or_else(|| format!("`{}` is no crate of the workspace", spec.target))?;
@@ -2305,6 +2355,290 @@ pub fn landing(k: &klepto::Klepto, root: &Path, spec: &ChangeSpec) -> std::resul
             })
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// the replay: one rule for the preflight and the writer
+
+/// What a file a replay makes without a `mode` is left with.
+pub const REPLAY_NEW_MODE: u32 = 0o644;
+
+/// A replay path in its one spelling: relative to the root, `/` between its parts, no `.` part and no empty one
+/// (`./a//b` is `a/b`). Refused: no part at all, an absolute path, a drive (`C:`), a `..` part, a `\`, a NUL.
+pub fn replay_path(raw: &str) -> std::result::Result<String, String> {
+    if raw.contains('\0') {
+        return Err(format!("`{raw}` holds a NUL"));
+    }
+    if raw.contains('\\') {
+        return Err(format!("`{raw}` holds a `\\`: the parts of a replay path are separated by `/`"));
+    }
+    if raw.starts_with('/') {
+        return Err(format!("`{raw}` is absolute: a replay path is relative to the root"));
+    }
+    let parts: Vec<&str> = raw.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
+    if parts.contains(&"..") {
+        return Err(format!("`{raw}` climbs out of the root with `..`"));
+    }
+    if parts.first().is_some_and(|p| p.len() >= 2 && p.as_bytes()[0].is_ascii_alphabetic() && p.as_bytes()[1] == b':') {
+        return Err(format!("`{raw}` names a drive: a replay path is relative to the root"));
+    }
+    if parts.is_empty() {
+        return Err(format!("`{raw}` names no file"));
+    }
+    Ok(parts.join("/"))
+}
+
+/// The permission bits a replay's `mode` names: three octal digits, or four with a leading `0` (`644`, `0755`).
+pub fn replay_mode(raw: &str) -> std::result::Result<u32, String> {
+    let digits = raw.strip_prefix('0').filter(|d| d.len() == 3).unwrap_or(raw);
+    if digits.len() != 3 || !digits.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
+        return Err(format!("mode `{raw}` is not three octal digits (`644`, `755`)"));
+    }
+    u32::from_str_radix(digits, 8).map_err(|e| format!("mode `{raw}`: {e}"))
+}
+
+/// A digest as a replay declares it: lowercase sha256 hex, 64 digits.
+fn is_sha256(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Lowercase sha256 hex of `bytes`: the digest a replay declares and a transform record keeps.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    stable_digest::StableDigest::sha256(bytes).as_str().to_string()
+}
+
+/// A file's permission bits as a replay reads and writes them.
+#[cfg(unix)]
+pub fn mode_of(meta: &std::fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o777
+}
+
+/// A file's permission bits as a replay reads and writes them (no Unix mode here: read-only or not).
+#[cfg(not(unix))]
+pub fn mode_of(meta: &std::fs::Metadata) -> u32 {
+    if meta.permissions().readonly() {
+        0o444
+    } else {
+        REPLAY_NEW_MODE
+    }
+}
+
+/// What a replay does to one file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplayAct {
+    /// The payload's bytes, their digest, and the permission bits the file is left with.
+    Write { bytes: Vec<u8>, sha256: String, mode: u32 },
+    Delete,
+}
+
+/// One file of a replay, read against the tree: its path in the one spelling, its digest before (`None`: absent),
+/// and what the replay does to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayStep {
+    pub path: String,
+    pub before: Option<String>,
+    pub act: ReplayAct,
+}
+
+impl ReplayStep {
+    /// The digest after (`None`: deleted).
+    pub fn after(&self) -> Option<&str> {
+        match &self.act {
+            ReplayAct::Write { sha256, .. } => Some(sha256),
+            ReplayAct::Delete => None,
+        }
+    }
+
+    /// The permission bits after (`None`: deleted).
+    pub fn mode(&self) -> Option<u32> {
+        match &self.act {
+            ReplayAct::Write { mode, .. } => Some(*mode),
+            ReplayAct::Delete => None,
+        }
+    }
+}
+
+/// A replay read against a tree: every check made, each a precondition the preflight keeps and the writer refuses
+/// by; the steps, in path order, only when every check holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayRead {
+    pub checks: Vec<crate::preflight::Check>,
+    pub steps: Vec<ReplayStep>,
+}
+
+impl ReplayRead {
+    pub fn holds(&self) -> bool {
+        self.checks.iter().all(|c| c.holds)
+    }
+
+    /// Each check that does not hold, as `what: detail`.
+    pub fn failures(&self) -> Vec<String> {
+        self.checks.iter().filter(|c| !c.holds).map(|c| format!("{}: {}", c.what, c.detail)).collect()
+    }
+}
+
+/// The file at `path` (a replay path) under `root`, as it is: `None` when it is not there; its bytes and permission
+/// bits when it is a file. Refused: a part of the way that is a symbolic link (a write through it could land outside
+/// the root) or a file (nothing can be under it), and a path that is a folder or a link itself.
+pub fn replay_on_disk(root: &Path, path: &str) -> std::result::Result<Option<(Vec<u8>, u32)>, String> {
+    let parts: Vec<&str> = path.split('/').collect();
+    let mut at = root.to_path_buf();
+    for (i, part) in parts.iter().enumerate() {
+        at.push(part);
+        let so_far = parts[..=i].join("/");
+        let meta = match std::fs::symlink_metadata(&at) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(format!("{so_far}: {e}")),
+        };
+        if meta.file_type().is_symlink() {
+            return Err(format!("{so_far} is a symbolic link: a replay reads and writes no file through one"));
+        }
+        if i + 1 < parts.len() {
+            if !meta.is_dir() {
+                return Err(format!("{so_far} is a file, so nothing can be under it"));
+            }
+        } else if !meta.is_file() {
+            return Err(format!("{so_far} is not a file"));
+        } else {
+            let bytes = std::fs::read(&at).map_err(|e| format!("{so_far}: {e}"))?;
+            return Ok(Some((bytes, mode_of(&meta))));
+        }
+    }
+    Ok(None)
+}
+
+/// A replay read against the tree at `root`, its payloads under `spec_dir` (the spec's folder): the one rule the
+/// preflight authorizes by and the writer writes by, so the transition is checked whole before anything is written.
+/// Each file: its path in the one spelling, inside the tree the tree digest reads, named once, neither a folder of
+/// another file named nor one spelling of another on a file system that ignores case; one state before
+/// (`before_sha256`, or `absent_before`) and one after (`after_sha256` with its `payload`, or `delete`, which carries
+/// neither payload nor mode); a valid mode; the file as declared before (its bytes' digest, or absent), reached
+/// through folders only; the payload there and its bytes' digest the one declared after.
+pub fn replay_read(root: &Path, spec_dir: &Path, spec: &ChangeSpec) -> ReplayRead {
+    use crate::preflight::Check;
+    let mut checks: Vec<Check> = Vec::new();
+    let mut check = |what: String, holds: bool, detail: String| checks.push(Check { what, holds, detail });
+    if spec.replay.is_empty() {
+        check("the replay names its files".into(), false, "no `replay` block".into());
+    }
+    let mut steps: Vec<ReplayStep> = Vec::new();
+    let mut named: BTreeMap<String, String> = BTreeMap::new();
+    let mut folded: BTreeMap<String, String> = BTreeMap::new();
+    for f in &spec.replay {
+        let path = match replay_path(&f.path) {
+            Ok(p) if crate::provenance::left_out(&p) => {
+                check(format!("{}: a path inside the tree", f.path), false, format!("{p} is where the tree digest does not read (target, .git, .passenger, .custodian, oneo.project.json): no check of the tree would see the write"));
+                continue;
+            }
+            Ok(p) => {
+                check(format!("{p}: a path inside the tree"), true, if p == f.path { "as written".into() } else { format!("`{}` spelled once: {p}", f.path) });
+                p
+            }
+            Err(e) => {
+                check(format!("{}: a path inside the tree", f.path), false, e);
+                continue;
+            }
+        };
+        let doing = |f: &ReplayFile| if f.delete { "deleted" } else { "written" };
+        if let Some(first) = named.get(&path) {
+            check(format!("{path}: named once"), false, format!("named twice ({first}, then {})", doing(f)));
+            continue;
+        }
+        named.insert(path.clone(), doing(f).into());
+        match folded.get(&path.to_lowercase()) {
+            Some(other) => check(format!("{path}: named once"), false, format!("{other} and {path} are one file where case is ignored")),
+            None => check(format!("{path}: named once"), true, doing(f).into()),
+        }
+        folded.insert(path.to_lowercase(), path.clone());
+        // the states declared: one before, one after
+        let before = match (&f.before_sha256, f.absent_before) {
+            (Some(h), false) if is_sha256(h) => Ok(Some(h.clone())),
+            (Some(h), false) => Err(format!("before_sha256 `{h}` is not 64 lowercase hex digits")),
+            (None, true) => Ok(None),
+            (Some(_), true) => Err("before_sha256 and absent_before both: one state before".into()),
+            (None, false) => Err("neither before_sha256 nor absent_before: say what the file is before".into()),
+        };
+        check(format!("{path}: one state before"), before.is_ok(), match &before {
+            Ok(Some(h)) => format!("sha256 {h}"),
+            Ok(None) => "absent".into(),
+            Err(e) => e.clone(),
+        });
+        let mode = f.mode.as_deref().map(replay_mode).transpose();
+        if f.mode.is_some() {
+            check(format!("{path}: its mode"), mode.is_ok(), match &mode {
+                Ok(bits) => format!("{:03o}", bits.unwrap_or_default()),
+                Err(e) => e.clone(),
+            });
+        }
+        let after = match (&f.after_sha256, &f.payload, f.delete) {
+            (Some(h), Some(p), false) if is_sha256(h) => Ok(Some((h.clone(), p.clone()))),
+            (Some(h), Some(_), false) => Err(format!("after_sha256 `{h}` is not 64 lowercase hex digits")),
+            (Some(_), None, false) => Err("after_sha256 without a payload: the bytes after are the payload's".into()),
+            (None, Some(_), false) => Err("a payload without after_sha256: the digest after binds the payload's bytes".into()),
+            (None, None, false) => Err("neither after_sha256 nor delete: say what the file is after".into()),
+            (None, None, true) if f.mode.is_some() => Err("delete with a mode: a deleted file has none".into()),
+            (None, None, true) if f.absent_before => Err("delete of a file absent before: nothing to delete".into()),
+            (None, None, true) => Ok(None),
+            (_, _, true) => Err("delete with after_sha256 or a payload: one state after".into()),
+        };
+        check(format!("{path}: one state after"), after.is_ok(), match &after {
+            Ok(Some((h, p))) => format!("sha256 {h}, from {p}"),
+            Ok(None) => "deleted".into(),
+            Err(e) => e.clone(),
+        });
+        let (Ok(before), Ok(after), Ok(mode)) = (before, after, mode) else { continue };
+        // the tree as it is
+        let now = replay_on_disk(root, &path);
+        let held = match (&now, &before) {
+            (Err(e), _) => Err(e.clone()),
+            (Ok(Some((bytes, _))), Some(want)) => {
+                let got = sha256_hex(bytes);
+                if &got == want { Ok(format!("sha256 {got}")) } else { Err(format!("sha256 {got}, declared {want}")) }
+            }
+            (Ok(None), Some(want)) => Err(format!("absent, declared sha256 {want}")),
+            (Ok(Some((bytes, _))), None) => Err(format!("there (sha256 {}), declared absent", sha256_hex(bytes))),
+            (Ok(None), None) => Ok("absent".into()),
+        };
+        check(format!("{path}: as declared before"), held.is_ok(), held.clone().unwrap_or_else(|e| e));
+        let act = match after {
+            None => Some(ReplayAct::Delete),
+            Some((want, payload)) => {
+                let read = replay_path(&payload).and_then(|p| std::fs::read(spec_dir.join(&p)).map_err(|e| format!("{}: {e}", spec_dir.join(&p).display())));
+                let bytes = match read {
+                    Ok(b) if sha256_hex(&b) == want => {
+                        check(format!("{path}: its payload holds the bytes after"), true, format!("{payload}: sha256 {want}"));
+                        Some(b)
+                    }
+                    Ok(b) => {
+                        check(format!("{path}: its payload holds the bytes after"), false, format!("{payload}: sha256 {}, declared {want}", sha256_hex(&b)));
+                        None
+                    }
+                    Err(e) => {
+                        check(format!("{path}: its payload holds the bytes after"), false, e);
+                        None
+                    }
+                };
+                // the bits after: the ones named, else the file's own, else a new file's
+                let bits = mode.or_else(|| now.as_ref().ok().and_then(|n| n.as_ref().map(|(_, m)| *m))).unwrap_or(REPLAY_NEW_MODE);
+                bytes.map(|bytes| ReplayAct::Write { bytes, sha256: want, mode: bits })
+            }
+        };
+        if let (Some(act), true) = (act, held.is_ok()) {
+            steps.push(ReplayStep { path, before, act });
+        }
+    }
+    // a file named is never a folder of another file named
+    let paths: Vec<&String> = named.keys().collect();
+    for (i, p) in paths.iter().enumerate() {
+        if let Some(q) = paths[i + 1..].iter().find(|q| q.starts_with(&format!("{p}/"))) {
+            check(format!("{p}: not a folder of another file named"), false, format!("{q} is under it"));
+        }
+    }
+    steps.sort_by(|a, b| a.path.cmp(&b.path));
+    let holds = checks.iter().all(|c| c.holds);
+    ReplayRead { checks, steps: if holds { steps } else { Vec::new() } }
 }
 
 #[cfg(test)]
