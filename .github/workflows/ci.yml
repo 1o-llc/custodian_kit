@@ -83,12 +83,13 @@ jobs:
           done
       - name: Test each consumer whose requirement takes this version (code_passenger first, its binary custodian's writer)
         run: |
+          set -o pipefail
           version=$(cargo metadata --no-deps --format-version 1 --manifest-path custodian_kit/Cargo.toml | jq -r '.packages[0].version')
           for repo in $CONSUMERS; do
             name="${repo#*/}"
             if ! cargo metadata --format-version 1 --manifest-path "$name/Cargo.toml" > /dev/null 2> "$RUNNER_TEMP/$name.log"; then
               cat "$RUNNER_TEMP/$name.log"
-              grep -qE 'candidate versions found which didn.t match' "$RUNNER_TEMP/$name.log" || exit 1
+              grep -qE 'failed to select a version for the requirement .custodian_kit = ' "$RUNNER_TEMP/$name.log" || exit 1
               echo "$name requires a custodian_kit that $version is not: it stays on the version it names; not built here"
               continue
             fi
@@ -110,9 +111,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Check each published consumer whose requirement takes this version
         run: |
+          set -o pipefail
           kit="$GITHUB_WORKSPACE/custodian_kit"
           version=$(cargo metadata --no-deps --format-version 1 --manifest-path "$kit/Cargo.toml" | jq -r '.packages[0].version')
-          ua="github.com/${GITHUB_REPOSITORY} CI"
+          # crates.io asks for a User-Agent: this check's name, nothing about a person
+          ua="custodian release check"
           crates=""
           page=1
           while :; do
@@ -126,9 +129,10 @@ jobs:
             case ${#crate} in
               1) at="1/$crate" ;; 2) at="2/$crate" ;; 3) at="3/${crate:0:1}/$crate" ;; *) at="${crate:0:2}/${crate:2:2}/$crate" ;;
             esac
-            # each version that is not yanked, with its custodian_kit requirement (a dev-dependency builds no consumer)
+            # each version that is not yanked, with its custodian_kit requirement (under its own name or renamed: the
+            # index's `package` is the crate's real name; a dev-dependency builds no consumer)
             curl -sf -A "$ua" "https://index.crates.io/$(echo "$at" | tr '[:upper:]' '[:lower:]')" \
-              | jq -r 'select(.yanked | not) | . as $v | .deps[] | select(.name == "custodian_kit" and .kind != "dev") | "\($v.vers) \(.req)"' \
+              | jq -r 'select(.yanked | not) | . as $v | .deps[] | select((.package // .name) == "custodian_kit" and .kind != "dev") | "\($v.vers) \(.req)"' \
               | while read -r vers req; do
                   dir="$RUNNER_TEMP/consumer-$crate-$vers"
                   mkdir -p "$dir/src"
