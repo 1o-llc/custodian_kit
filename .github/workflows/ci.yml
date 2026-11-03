@@ -1,7 +1,10 @@
 # Tests every push and pull request on the newest Rust and on the oldest one
-# this crate supports (rust-version in Cargo.toml), and runs clippy. On master,
-# once both pass, publishes to crates.io if Cargo.toml's version is not there yet
-# and CHANGELOG.md has its dated entry. Publishing uses crates.io trusted
+# this crate supports (rust-version in Cargo.toml), and runs clippy. Builds the
+# crates that use this one against this checkout: the current code_passenger and
+# custodian, and every published version of every crate on crates.io whose
+# custodian_kit requirement takes this version. On master, once all pass,
+# publishes to crates.io if Cargo.toml's version is not there yet and
+# CHANGELOG.md has its dated entry. Publishing uses crates.io trusted
 # publishing: no stored token.
 name: CI
 
@@ -48,8 +51,109 @@ jobs:
         # reported, not failing, until a version clears them and this gains -D warnings
         run: cargo clippy --locked --all-targets --all-features
 
+  consumers:
+    # code_passenger and custodian as they are now, each on the branch of this push's name when it has one (a change
+    # across the crates is tested together), else its default branch, built and tested against this checkout. One
+    # whose custodian_kit requirement does not take this version (a release that changes the shared types, a minor up)
+    # stays on the version it names: said, and not built.
+    name: the current consumers against this checkout
+    runs-on: ubuntu-latest
+    env:
+      CONSUMERS: jameshuntt/code_passenger 1o-llc/custodian
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: custodian_kit
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # custodian's tests run rustfmt's check
+          components: rustfmt
+      - name: cargo-expand (code_passenger's to-toolkit tests expand a function before and after)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-expand
+      - name: Clone each consumer beside this checkout (its ../custodian_kit is this one)
+        run: |
+          branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          for repo in $CONSUMERS; do
+            name="${repo#*/}"
+            git clone --depth 1 --branch "$branch" "https://github.com/$repo.git" "$name" 2>/dev/null \
+              || git clone --depth 1 "https://github.com/$repo.git" "$name"
+            echo "$name: $(git -C "$name" rev-parse --abbrev-ref HEAD) $(git -C "$name" rev-parse --short HEAD)"
+          done
+      - name: Test each consumer whose requirement takes this version (code_passenger first, its binary custodian's writer)
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 --manifest-path custodian_kit/Cargo.toml | jq -r '.packages[0].version')
+          for repo in $CONSUMERS; do
+            name="${repo#*/}"
+            if ! cargo metadata --format-version 1 --manifest-path "$name/Cargo.toml" > /dev/null 2> "$RUNNER_TEMP/$name.log"; then
+              cat "$RUNNER_TEMP/$name.log"
+              grep -qE 'candidate versions found which didn.t match' "$RUNNER_TEMP/$name.log" || exit 1
+              echo "$name requires a custodian_kit that $version is not: it stays on the version it names; not built here"
+              continue
+            fi
+            (cd "$name" && cargo test --all-features) || exit 1
+          done
+
+  published-consumers:
+    # Every published version of every crate on crates.io that depends on custodian_kit (crates.io's reverse
+    # dependencies; each version's requirement from the index), checked against this checkout when its requirement
+    # takes this version: a scratch crate names that version exactly and patches custodian_kit to this checkout, and
+    # the patch is used only where cargo would hand this version to it. A version that is meant to be compatible (^)
+    # and breaks a published crate fails here, before it is published.
+    name: the published consumers against this checkout
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: custodian_kit
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check each published consumer whose requirement takes this version
+        run: |
+          kit="$GITHUB_WORKSPACE/custodian_kit"
+          version=$(cargo metadata --no-deps --format-version 1 --manifest-path "$kit/Cargo.toml" | jq -r '.packages[0].version')
+          ua="github.com/${GITHUB_REPOSITORY} CI"
+          crates=""
+          page=1
+          while :; do
+            r=$(curl -sf -A "$ua" "https://crates.io/api/v1/crates/custodian_kit/reverse_dependencies?per_page=100&page=$page")
+            names=$(echo "$r" | jq -r '.versions[].crate')
+            [ -z "$names" ] && break
+            crates="$crates $names"
+            page=$((page + 1))
+          done
+          for crate in $(echo $crates | tr ' ' '\n' | sort -u); do
+            case ${#crate} in
+              1) at="1/$crate" ;; 2) at="2/$crate" ;; 3) at="3/${crate:0:1}/$crate" ;; *) at="${crate:0:2}/${crate:2:2}/$crate" ;;
+            esac
+            # each version that is not yanked, with its custodian_kit requirement (a dev-dependency builds no consumer)
+            curl -sf -A "$ua" "https://index.crates.io/$(echo "$at" | tr '[:upper:]' '[:lower:]')" \
+              | jq -r 'select(.yanked | not) | . as $v | .deps[] | select(.name == "custodian_kit" and .kind != "dev") | "\($v.vers) \(.req)"' \
+              | while read -r vers req; do
+                  dir="$RUNNER_TEMP/consumer-$crate-$vers"
+                  mkdir -p "$dir/src"
+                  : > "$dir/src/lib.rs"
+                  printf '[package]\nname = "consumer-check"\nversion = "0.0.0"\nedition = "2021"\npublish = false\n\n[dependencies]\n%s = "=%s"\n\n[patch.crates-io]\ncustodian_kit = { path = "%s" }\n' "$crate" "$vers" "$kit" > "$dir/Cargo.toml"
+                  if ! (cd "$dir" && cargo generate-lockfile -q 2> lock.log); then
+                    cat "$dir/lock.log"
+                    echo "$crate $vers: cargo resolves no lock for it today, with or without this checkout: not checked"
+                    continue
+                  fi
+                  used=$(cd "$dir" && cargo metadata --format-version 1 | jq -r --arg c "$crate" --arg v "$vers" '
+                    (.packages[] | select(.name == "custodian_kit" and .source == null) | .id) as $kit
+                    | (.packages[] | select(.name == $c and .version == $v) | .id) as $me
+                    | [.resolve.nodes[] | select(.id == $me) | .deps[] | select(.pkg == $kit)] | length')
+                  if [ "${used:-0}" = "0" ]; then
+                    echo "$crate $vers requires custodian_kit $req, which does not take $version: not checked"
+                    continue
+                  fi
+                  echo "$crate $vers requires custodian_kit $req, which takes $version: checking it against this checkout"
+                  (cd "$dir" && cargo check) || { echo "$crate $vers does not build against custodian_kit $version"; exit 1; }
+                done || exit 1
+          done
+
   publish:
-    needs: [test, clippy]
+    needs: [test, clippy, consumers, published-consumers]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     concurrency: publish
