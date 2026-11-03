@@ -10,7 +10,7 @@ vocabulary every writer matches word for word, so a new word is a minor up: 0.5.
 would be handed. code_passenger 0.5.0 and custodian 0.5.1 stay on 0.4.1; code_passenger 0.6.0 and custodian 0.6.0
 take 0.5.0. Breaking: `Operation` gains `Replay`, `ChangeSpec` gains `replay` (a struct literal without `..` stops
 compiling), `At` gains `Files`. Nothing is removed. Links are pinned to b7c44f8 and, for what a review of it found,
-4098fb7 (4683a7f for CI).
+4098fb7 and 4e3ec89 (4683a7f for CI).
 
 - **The operation.** [`Replay`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L68), target `*` (the workspace its paths are relative to), one
   `replay` block per file ([`ReplayFile`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L434), the spec's [`replay`](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/change.rs#L521)):
@@ -30,7 +30,9 @@ compiling), `At` gains `Files`. Nothing is removed. Links are pinned to b7c44f8 
   bytes declared after. A path is placed by one rule, [`replay_place`](https://github.com/1o-llc/custodian_kit/blob/4098fb7/src/change.rs#L2404) (used at
   [L2559](https://github.com/1o-llc/custodian_kit/blob/4098fb7/src/change.rs#L2559)): a path the tree digest does not read is refused, in any case
   ([`provenance::left_out`](https://github.com/1o-llc/custodian_kit/blob/4098fb7/src/provenance.rs#L45): `.custodian`, `.passenger`, `.git`, `target`, and `.GIT`,
-  `.Custodian`, `Target`, which a disk that ignores case makes the same folders), and so is a path whose longest
+  `.Custodian`, `Target`, which a disk that ignores case makes the same folders, and Unicode's case too:
+  [L47](https://github.com/1o-llc/custodian_kit/blob/4e3ec89/src/provenance.rs#L47) folds a name lowercased, the long s as `s` and the Kelvin sign as `k`, so
+  `.cuſtodian` and `oneo.project.jſon` are refused), and so is a path whose longest
   present part resolves on disk outside the root or into one of them; the writer's check that the tree did not move
   cannot see a write there. The steps come back, in path order, only when every check holds.
 - **The preflight** keeps each of those checks as a precondition ([preflight.rs L705](https://github.com/1o-llc/custodian_kit/blob/b7c44f8/src/preflight.rs#L705)); its write
@@ -53,7 +55,7 @@ compiling), `At` gains `Files`. Nothing is removed. Links are pinned to b7c44f8 
 
 Tests: `tests/replay.rs`: `a_replay_spec_reads_from_toml_and_1o_and_round_trips`,
 `a_replay_path_has_one_spelling_inside_the_root`, `a_whole_transition_holds_and_its_steps_say_each_file_after`,
-`each_way_a_transition_does_not_hold_is_refused` (32 refusals: `.GIT/hooks/post-checkout`, `.Custodian/state/j.txt`,
+`each_way_a_transition_does_not_hold_is_refused` (34 refusals: `.GIT/hooks/post-checkout`, `.cuſtodian/state/j.txt`, `.Custodian/state/j.txt`,
 `Target/x` and a link to `.git` among them), `a_replaced_file_with_no_mode_keeps_its_set_id_and_sticky_bits`,
 `a_governed_preflight_of_a_replay_keeps_each_check_and_binds_the_spec_the_code_and_the_lock`,
 `a_replay_that_does_not_hold_or_writes_outside_its_scope_is_not_authorized`;
