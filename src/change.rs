@@ -2538,6 +2538,19 @@ pub fn replay_on_disk(root: &Path, path: &str) -> std::result::Result<Option<(Ve
     Ok(None)
 }
 
+/// Each path a replay names that another it names is under, in any case, with the first such: a file named is never a
+/// folder of another file named.
+fn replay_folders<'a>(paths: &[&'a String]) -> Vec<(&'a String, &'a String)> {
+    let mut out = Vec::new();
+    for (i, p) in paths.iter().enumerate() {
+        let under = format!("{}/", p.to_lowercase());
+        if let Some(q) = paths.iter().enumerate().find(|(j, q)| *j != i && q.to_lowercase().starts_with(&under)).map(|(_, q)| q) {
+            out.push((*p, *q));
+        }
+    }
+    out
+}
+
 /// A replay read against the tree at `root`, its payloads under `spec_dir` (the spec's folder): the one rule the
 /// preflight authorizes by and the writer writes by, so the transition is checked whole before anything is written.
 /// Each file: its path in the one spelling, inside the tree the tree digest reads, named once, neither a folder of
@@ -2656,15 +2669,183 @@ pub fn replay_read(root: &Path, spec_dir: &Path, spec: &ChangeSpec) -> ReplayRea
     }
     // a file named is never a folder of another file named
     let paths: Vec<&String> = named.keys().collect();
-    for (i, p) in paths.iter().enumerate() {
-        let under = format!("{}/", p.to_lowercase());
-        if let Some(q) = paths.iter().enumerate().find(|(j, q)| *j != i && q.to_lowercase().starts_with(&under)).map(|(_, q)| q) {
-            check(format!("{p}: not a folder of another file named"), false, format!("{q} is under it"));
-        }
+    for (p, q) in replay_folders(&paths) {
+        check(format!("{p}: not a folder of another file named"), false, format!("{q} is under it"));
     }
     steps.sort_by(|a, b| a.path.cmp(&b.path));
     let holds = checks.iter().all(|c| c.holds);
     ReplayRead { checks, steps: if holds { steps } else { Vec::new() } }
+}
+
+// ---------------------------------------------------------------------------
+// a replay made from two trees
+
+/// The spec file a replay made from two trees is written as, in the folder [`TreeReplay::write`] makes.
+pub const REPLAY_SPEC_FILE: &str = "change.toml";
+/// The folder beside the spec its payloads are written under, each at its path relative to the tree's root.
+pub const REPLAY_PAYLOAD_DIR: &str = "payload";
+
+/// A replay made from two trees ([`replay_from_trees`]): one entry for each file that differs, in path order, and
+/// each entry's payload bytes by its path relative to the spec's folder.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TreeReplay {
+    pub files: Vec<ReplayFile>,
+    pub payloads: BTreeMap<String, Vec<u8>>,
+}
+
+/// Why a path where the tree digest does not read is no path of a replay made from two trees.
+const REPLAY_LEFT_OUT: &str = "where the tree digest does not read (target, .git, .passenger, .custodian, oneo.project.json, in any case), so a replay may not write it";
+
+/// One file of a tree as a replay reads it: its bytes and its permission bits.
+type TreeFile = (Vec<u8>, u32);
+
+/// Every file under `root` by its path relative to it (`/` between its parts), with whatever in the tree a replay
+/// cannot carry: a name that is not UTF-8, a symbolic link, anything else that is not a regular file or a folder, an
+/// empty folder (a replay names files, so it would be lost), a folder where the tree digest does not read once
+/// `placed` (named once, not each file in it). The walk is the raw tree's: nothing is left out unsaid, so nothing is
+/// passed over unseen ([`crate::provenance::tree_files`] leaves out what the tree digest does not read).
+fn tree_as_replay_reads(root: &Path, placed: &dyn Fn(&str) -> String) -> std::result::Result<(BTreeMap<String, TreeFile>, Vec<String>), String> {
+    let meta = std::fs::metadata(root).map_err(|e| format!("{}: {e}", root.display()))?;
+    if !meta.is_dir() {
+        return Err(format!("{} is not a folder", root.display()));
+    }
+    let mut files = BTreeMap::new();
+    let mut cannot = Vec::new();
+    let mut walk = walkdir::WalkDir::new(root).follow_links(false).sort_by_file_name().min_depth(1).into_iter();
+    while let Some(e) = walk.next() {
+        let e = e.map_err(|e| format!("{}: {e}", root.display()))?;
+        let at = e.path().strip_prefix(root).unwrap_or(e.path());
+        let Some(rel) = at.to_str().map(|r| r.replace(std::path::MAIN_SEPARATOR, "/")) else {
+            cannot.push(format!("{}: the name is not UTF-8, which a replay path cannot spell", at.display()));
+            continue;
+        };
+        let t = e.file_type();
+        if t.is_symlink() {
+            cannot.push(format!("{rel}: a symbolic link, which a replay does not carry"));
+        } else if t.is_dir() && crate::provenance::left_out(&placed(&rel)) {
+            cannot.push(format!("{}/: {REPLAY_LEFT_OUT}", placed(&rel)));
+            walk.skip_current_dir();
+        } else if t.is_dir() {
+            let empty = std::fs::read_dir(e.path()).map_err(|x| format!("{rel}: {x}"))?.next().is_none();
+            if empty {
+                cannot.push(format!("{rel}: an empty folder, which a replay (whole files) would lose"));
+            }
+        } else if t.is_file() {
+            let meta = e.metadata().map_err(|x| format!("{rel}: {x}"))?;
+            let bytes = std::fs::read(e.path()).map_err(|x| format!("{rel}: {x}"))?;
+            files.insert(rel, (bytes, mode_of(&meta)));
+        } else {
+            cannot.push(format!("{rel}: not a regular file, which a replay does not carry"));
+        }
+    }
+    Ok((files, cannot))
+}
+
+/// The replay that takes the tree at `before` to the tree at `after`, each path `under/` its path relative to its
+/// tree's root (`under` in a replay path's one spelling). A file in both with the same bytes and mode has no entry; a
+/// changed one is `before_sha256`, `after_sha256`, its `payload` and its `mode` (the same bytes with another mode is
+/// a change of mode alone, which [`replay_read`] holds); a new one is `absent_before` with the same three; a removed
+/// one is `delete` with `before_sha256`. Each payload is [`REPLAY_PAYLOAD_DIR`]`/` the file's path in its tree.
+///
+/// Refused whole, naming every path, when anything in either tree cannot be carried: what `tree_as_replay_reads`
+/// finds, a path that is not a replay path in its one spelling ([`replay_path`]) or that is where the tree digest
+/// does not read ([`crate::provenance::left_out`], the rule [`replay_place`] places by), a mode after that is not
+/// three octal digits (set-id or sticky bits), two entries that are one file where case is ignored, an entry that is a
+/// folder of another (`replay_folders`); and when the trees are the same (a replay names at least one file).
+pub fn replay_from_trees(before: &Path, after: &Path, under: Option<&str>) -> std::result::Result<TreeReplay, String> {
+    let under = under.map(replay_path).transpose()?;
+    let placed = |rel: &str| under.as_ref().map(|u| format!("{u}/{rel}")).unwrap_or_else(|| rel.to_string());
+    let (was, mut cannot) = tree_as_replay_reads(before, &placed)?;
+    let (now, more) = tree_as_replay_reads(after, &placed)?;
+    cannot.extend(more);
+    let mut paths: Vec<&String> = was.keys().chain(now.keys()).collect();
+    paths.sort();
+    paths.dedup();
+    for rel in &paths {
+        let path = placed(rel);
+        match replay_path(&path) {
+            Err(e) => cannot.push(e),
+            Ok(p) if p != path => cannot.push(format!("{path}: not a replay path in its one spelling ({p})")),
+            Ok(_) if crate::provenance::left_out(&path) => cannot.push(format!("{path}: {REPLAY_LEFT_OUT}")),
+            Ok(_) => {}
+        }
+    }
+    let mut made = TreeReplay::default();
+    for rel in paths {
+        let path = placed(rel);
+        let payload = format!("{REPLAY_PAYLOAD_DIR}/{rel}");
+        let entry = match (was.get(rel), now.get(rel)) {
+            (Some(b), Some(a)) if b == a => continue,
+            (b, Some((bytes, mode))) => {
+                if mode & !0o777 != 0 {
+                    cannot.push(format!("{path}: mode {mode:04o} after carries set-id or sticky bits, which a replay's mode (three octal digits) cannot say"));
+                }
+                made.payloads.insert(payload.clone(), bytes.clone());
+                ReplayFile { path, before_sha256: b.map(|(x, _)| sha256_hex(x)), absent_before: b.is_none(), after_sha256: Some(sha256_hex(bytes)), payload: Some(payload), mode: Some(format!("{:03o}", mode & 0o777)), delete: false }
+            }
+            (Some((bytes, _)), None) => ReplayFile { path, before_sha256: Some(sha256_hex(bytes)), delete: true, ..ReplayFile::default() },
+            (None, None) => continue,
+        };
+        made.files.push(entry);
+    }
+    // the entries as replay_read names them: one file where case is ignored is one entry, and none is a folder of another
+    let mut folded: BTreeMap<String, &String> = BTreeMap::new();
+    for f in &made.files {
+        if let Some(other) = folded.insert(f.path.to_lowercase(), &f.path) {
+            cannot.push(format!("{other} and {}: one file where case is ignored", f.path));
+        }
+    }
+    let named: Vec<&String> = made.files.iter().map(|f| &f.path).collect();
+    for (p, q) in replay_folders(&named) {
+        cannot.push(format!("{p}: a file before or after, and a folder of {q} in the other tree"));
+    }
+    if !cannot.is_empty() {
+        return Err(format!("the replay cannot carry every file, so none is made: {}", cannot.join("; ")));
+    }
+    if made.files.is_empty() {
+        return Err(format!("{} and {} are the same tree: no file to replay", before.display(), after.display()));
+    }
+    Ok(made)
+}
+
+impl TreeReplay {
+    /// The change spec: `replay` over the workspace (`*`), its files these.
+    pub fn spec(&self, name: &str, objective: &str) -> ChangeSpec {
+        ChangeSpec { name: name.into(), objective: objective.into(), operation: Some(Operation::Replay), target: WORKSPACE.into(), replay: self.files.clone(), ..ChangeSpec::default() }
+    }
+
+    /// Writes the spec as [`REPLAY_SPEC_FILE`] and every payload under [`REPLAY_PAYLOAD_DIR`] in the folder `out`,
+    /// which this makes: a folder already there is refused, and no file is ever written over. The spec is read back
+    /// from its text before anything is written (a name that is not one file name is refused). Returns the spec's file.
+    pub fn write(&self, out: &Path, name: &str, objective: &str) -> std::result::Result<std::path::PathBuf, String> {
+        if std::fs::symlink_metadata(out).is_ok() {
+            return Err(format!("{} is already there: a replay is written into a folder it makes, never over one", out.display()));
+        }
+        let spec = self.spec(name, objective);
+        let text = spec.to_toml().map_err(|e| e.to_string())?;
+        if ChangeSpec::from_toml(&text).map_err(|e| e.to_string())? != spec {
+            return Err(format!("{name}: the spec does not read back as written"));
+        }
+        let new = |p: &Path, bytes: &[u8]| -> std::result::Result<(), String> {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(p).map_err(|e| format!("{}: {e}", p.display()))?;
+            f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| format!("{}: {e}", p.display()))
+        };
+        if let Some(parent) = out.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        std::fs::create_dir(out).map_err(|e| format!("{}: {e}", out.display()))?;
+        for (rel, bytes) in &self.payloads {
+            let p = out.join(rel);
+            if let Some(dir) = p.parent() {
+                std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            }
+            new(&p, bytes)?;
+        }
+        let file = out.join(REPLAY_SPEC_FILE);
+        new(&file, text.as_bytes())?;
+        Ok(file)
+    }
 }
 
 #[cfg(test)]

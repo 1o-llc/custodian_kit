@@ -348,3 +348,150 @@ fn a_replay_that_does_not_hold_or_writes_outside_its_scope_is_not_authorized() {
     assert!(!p.authorized && p.why.iter().any(|y| y.contains("a replay's target is `*`")), "{:?}", p.why);
     assert_eq!(std::fs::read(store.root.join("src/lib.rs")).unwrap(), b"pub fn a() {}\n", "nothing written");
 }
+
+// ---------------------------------------------------------------------------
+// a replay made from two trees
+
+/// Every file under `root` with its bytes and permission bits, by its path relative to it.
+fn files_of(root: &Path) -> std::collections::BTreeMap<String, (Vec<u8>, u32)> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut out = std::collections::BTreeMap::new();
+    for e in walkdir::WalkDir::new(root).min_depth(1) {
+        let e = e.unwrap();
+        if e.file_type().is_file() {
+            let rel = e.path().strip_prefix(root).unwrap().to_string_lossy().into_owned();
+            out.insert(rel, (std::fs::read(e.path()).unwrap(), e.metadata().unwrap().permissions().mode() & 0o7777));
+        }
+    }
+    out
+}
+
+/// The steps of a replay that holds, made under `root` the plain way: each payload written with its bits, each
+/// deleted file taken away.
+fn apply(root: &Path, steps: &[change::ReplayStep]) {
+    for s in steps {
+        match &s.act {
+            ReplayAct::Write { bytes, mode: bits, .. } => {
+                write(root, &s.path, bytes);
+                set_mode(root, &s.path, *bits);
+            }
+            ReplayAct::Delete => std::fs::remove_file(root.join(&s.path)).unwrap(),
+        }
+    }
+}
+
+/// A before tree and an after tree with each kind of change: bytes, a new file, a deleted one, a mode alone, and a
+/// file that does not change.
+fn two_trees(tag: &str) -> (PathBuf, PathBuf) {
+    let (before, after) = (fresh(&format!("{tag}-before")), fresh(&format!("{tag}-after")));
+    for t in [&before, &after] {
+        write(t, "same.txt", b"unchanged\n");
+        write(t, "bin/tool", b"#!/bin/sh\necho 1\n");
+    }
+    set_mode(&before, "bin/tool", 0o755);
+    set_mode(&after, "bin/tool", 0o700);
+    write(&before, "src/lib.rs", b"pub fn a() {}\n");
+    write(&after, "src/lib.rs", b"pub fn b() {}\n");
+    write(&before, "notes.txt", b"old notes\n");
+    write(&after, "scripts/run.sh", b"#!/bin/sh\nexit 0\n");
+    set_mode(&after, "scripts/run.sh", 0o755);
+    write(&after, "assets/data.bin", &[0, 159, 146, 150, 255]);
+    (before, after)
+}
+
+/// A replay entry as its fields: path, before, absent before, after, payload, mode, delete.
+type Entry<'a> = (&'a str, Option<&'a str>, bool, Option<&'a str>, Option<&'a str>, Option<&'a str>, bool);
+
+#[test]
+fn a_replay_made_from_two_trees_reads_back_and_reaches_the_after_tree() {
+    let (before, after) = two_trees("from-trees");
+    let made = change::replay_from_trees(&before, &after, Some("specimen")).unwrap();
+    let got: Vec<Entry> = made.files.iter().map(|f| (f.path.as_str(), f.before_sha256.as_deref(), f.absent_before, f.after_sha256.as_deref(), f.payload.as_deref(), f.mode.as_deref(), f.delete)).collect();
+    let (tool, lib_a, lib_b, run, data, notes) = (sha(b"#!/bin/sh\necho 1\n"), sha(b"pub fn a() {}\n"), sha(b"pub fn b() {}\n"), sha(b"#!/bin/sh\nexit 0\n"), sha(&[0, 159, 146, 150, 255]), sha(b"old notes\n"));
+    assert_eq!(
+        got,
+        [
+            ("specimen/assets/data.bin", None, true, Some(data.as_str()), Some("payload/assets/data.bin"), Some("644"), false),
+            ("specimen/bin/tool", Some(tool.as_str()), false, Some(tool.as_str()), Some("payload/bin/tool"), Some("700"), false),
+            ("specimen/notes.txt", Some(notes.as_str()), false, None, None, None, true),
+            ("specimen/scripts/run.sh", None, true, Some(run.as_str()), Some("payload/scripts/run.sh"), Some("755"), false),
+            ("specimen/src/lib.rs", Some(lib_a.as_str()), false, Some(lib_b.as_str()), Some("payload/src/lib.rs"), Some("644"), false),
+        ],
+        "path order; the unchanged file has no entry; a mode alone is the same digest before and after with its mode"
+    );
+    // written into a folder it makes, read back unchanged
+    let out = fresh("from-trees-out").join("x0001");
+    let file = made.write(&out, "x0001", "PASS1 -> PASS2").unwrap();
+    assert_eq!(file, out.join(change::REPLAY_SPEC_FILE));
+    let spec = ChangeSpec::from_path(&file).unwrap();
+    assert_eq!(spec, made.spec("x0001", "PASS1 -> PASS2"));
+    assert_eq!(std::fs::read(out.join("payload/assets/data.bin")).unwrap(), [0, 159, 146, 150, 255]);
+    // the rule the writer writes by holds it over the before tree, and its steps make the after tree
+    let root = fresh("from-trees-root");
+    for (rel, (bytes, bits)) in files_of(&before) {
+        write(&root, &format!("specimen/{rel}"), &bytes);
+        set_mode(&root, &format!("specimen/{rel}"), bits);
+    }
+    let r = change::replay_read(&root, &out, &spec);
+    assert!(r.holds(), "{:?}", r.failures());
+    apply(&root, &r.steps);
+    assert_eq!(files_of(&root.join("specimen")), files_of(&after), "paths, bytes and modes");
+    // a folder already there is never written over
+    let again = made.write(&out, "x0001", "PASS1 -> PASS2").unwrap_err();
+    assert!(again.contains("already there"), "{again}");
+    assert_eq!(ChangeSpec::from_path(&file).unwrap(), spec);
+}
+
+/// `replay_from_trees` then `write`, as the line runs them: refused, naming `path`, and the folder never made.
+fn refused_naming(tag: &str, path: &str, setup: impl FnOnce(&Path, &Path)) {
+    refused_under(tag, "specimen", path, setup)
+}
+
+fn refused_under(tag: &str, under: &str, path: &str, setup: impl FnOnce(&Path, &Path)) {
+    let (before, after) = two_trees(tag);
+    setup(&before, &after);
+    let out = fresh(&format!("{tag}-out")).join("spec");
+    let e = change::replay_from_trees(&before, &after, Some(under)).and_then(|m| m.write(&out, "spec", "o")).unwrap_err();
+    assert!(e.contains(path), "{tag}: {path} named: {e}");
+    assert!(!out.exists(), "{tag}: nothing written");
+}
+
+#[test]
+fn a_replay_from_two_trees_is_refused_whole_for_anything_it_cannot_carry() {
+    use std::os::unix::fs::symlink;
+    refused_naming("link", "lib.rs.link: a symbolic link", |_, a| symlink("src/lib.rs", a.join("lib.rs.link")).unwrap());
+    refused_naming("link-before", "docs: a symbolic link", |b, _| symlink("src", b.join("docs")).unwrap());
+    refused_naming("empty-folder", "cache/empty: an empty folder", |_, a| std::fs::create_dir_all(a.join("cache/empty")).unwrap());
+    refused_naming("left-out", "specimen/target/: where the tree digest does not read", |_, a| write(a, "target/debug/x", b"built"));
+    refused_naming("left-out-unchanged", "specimen/.Git/: where the tree digest does not read", |b, a| {
+        write(b, ".Git/HEAD", b"ref");
+        write(a, ".Git/HEAD", b"ref");
+    });
+    refused_naming("backslash", "a\\b", |_, a| write(a, "a\\b", b"x"));
+    refused_naming("set-id", "specimen/bin/tool: mode 4755", |_, a| set_mode(a, "bin/tool", 0o4755));
+    refused_naming("case", "one file where case is ignored", |b, a| {
+        write(b, "Readme.md", b"x");
+        write(a, "README.md", b"y");
+    });
+    refused_naming("file-to-folder", "specimen/notes.txt: a file before or after, and a folder of specimen/notes.txt/a", |_, a| write(a, "notes.txt/a", b"x"));
+    refused_under("climbs", "../specimen", "climbs out of the root", |_, _| {});
+    let fifo = std::process::Command::new("mkfifo").arg(std::env::temp_dir().join("custodian-kit-replay-fifo-probe")).status();
+    if fifo.is_ok() {
+        let _ = std::fs::remove_file(std::env::temp_dir().join("custodian-kit-replay-fifo-probe"));
+        refused_naming("fifo", "pipe: not a regular file", |_, a| assert!(std::process::Command::new("mkfifo").arg(a.join("pipe")).status().unwrap().success()));
+    }
+    // every path is named, not the first alone
+    let (before, after) = two_trees("several");
+    symlink("x", after.join("l1")).unwrap();
+    write(&after, ".passenger/x", b"x");
+    let e = change::replay_from_trees(&before, &after, None).unwrap_err();
+    assert!(e.contains("l1: a symbolic link") && e.contains(".passenger/: where the tree digest does not read"), "{e}");
+    // a left-out root file (no `under`) is named as a file
+    let (before, after) = two_trees("root-file");
+    write(&after, "oneo.project.json", b"{}");
+    let e = change::replay_from_trees(&before, &after, None).unwrap_err();
+    assert!(e.contains("oneo.project.json: where the tree digest does not read"), "{e}");
+    // the same tree twice is no replay
+    let e = change::replay_from_trees(&before, &before, None).unwrap_err();
+    assert!(e.contains("the same tree"), "{e}");
+}
