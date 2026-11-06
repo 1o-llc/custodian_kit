@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.1 (unreleased)
+## 0.5.1 (2026-11-06)
 
 A replay made from two trees. The 517 replay specs of the BFCB ordered history were written by a script outside the
 kit, from each pair of kept version trees; the rule that reads a replay ([`replay_read`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2561)) was the kit's, the
