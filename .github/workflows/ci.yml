@@ -60,6 +60,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CONSUMERS: jameshuntt/code_passenger 1o-llc/custodian
+      # what a consumer builds against by path and is not tested here: custodian's ../experiments
+      SIBLINGS: jameshuntt/experiments
     steps:
       - uses: actions/checkout@v6
         with:
@@ -72,10 +74,10 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-expand
-      - name: Clone each consumer beside this checkout (its ../custodian_kit is this one)
+      - name: Clone each consumer and its siblings beside this checkout (its ../custodian_kit is this one)
         run: |
           branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
-          for repo in $CONSUMERS; do
+          for repo in $CONSUMERS $SIBLINGS; do
             name="${repo#*/}"
             git clone --depth 1 --branch "$branch" "https://github.com/$repo.git" "$name" 2>/dev/null \
               || git clone --depth 1 "https://github.com/$repo.git" "$name"
