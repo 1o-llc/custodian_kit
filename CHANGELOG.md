@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.5.1 (unreleased)
+
+A replay made from two trees. The 517 replay specs of the BFCB ordered history were written by a script outside the
+kit, from each pair of kept version trees; the rule that reads a replay ([`replay_read`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2561)) was the kit's, the
+rule that made one was not. Now the kit makes it, from the same rules it reads by, so a spec made here reads back
+through `replay_read` unchanged and its steps make the after tree. Additive: nothing that was there changes.
+
+- **[`replay_from_trees`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2755)`(before, after, under)`** walks both trees itself, the raw tree, every entry
+  ([`tree_as_replay_reads`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2707)): `provenance::tree_files` leaves out what the tree digest does not read, so a
+  file there would be passed over unseen. For each file in either tree: the same bytes and the same mode, no entry;
+  changed, `before_sha256`, `after_sha256`, its `payload` and its `mode`; new, `absent_before` with the same three;
+  removed, `delete` with `before_sha256`. The same bytes with another mode is a change of mode alone: its digest before
+  and after are one, and `replay_read` holds it. Each path is `under/` its path in its tree; each payload is
+  `payload/` that path. The result is a [`TreeReplay`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2691): the entries in path order and each payload's bytes.
+- **Refused whole, every path named, nothing made**, when either tree holds what a replay cannot carry: a symbolic
+  link, a pipe or any other file that is not a regular file, an empty folder (a replay names files, so it would be
+  lost), a name that is not UTF-8 or not a replay path in its one spelling ([`replay_path`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2368)), a path where
+  the tree digest does not read (`provenance::left_out`, the rule [`replay_place`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2404) places by; a folder
+  there is named once), set-id or sticky bits after (a `mode` is three octal digits), two entries that are one file
+  where case is ignored, a file in one tree that is a folder in the other; and two trees that are the same.
+- **[`TreeReplay::write`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2820)** writes [`change.toml`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2684) and `payload/` into a folder it makes: a folder
+  already there is refused, every file is opened new, and the spec is read back from its text before anything is
+  written.
+- **One folder rule.** That a file named is never a folder of another file named was a loop inside `replay_read`
+  ([L2657 before](https://github.com/1o-llc/custodian_kit/blob/2a54db0/src/change.rs#L2657)); it is [`replay_folders`](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2543), and `replay_read` ([L2672](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2672)) and
+  `replay_from_trees` ([L2799](https://github.com/1o-llc/custodian_kit/blob/88ddf5b/src/change.rs#L2799)) both use it. `replay_read`'s checks and their words are what they were.
+
+Tests: `tests/replay.rs`: `a_replay_made_from_two_trees_reads_back_and_reaches_the_after_tree` (a changed file, a new
+one, a deleted one, a mode alone and an unchanged one under `specimen`; written, read back equal, held by
+`replay_read` over the before tree, its steps made there: the after tree, paths, bytes and modes; a second write into
+the folder refused), `a_replay_from_two_trees_is_refused_whole_for_anything_it_cannot_carry` (a link in either tree, an
+empty folder, `target/` and an unchanged `.Git/`, a `\`, a set-id mode, a rename by case, a file become a folder, an
+`under` that climbs, a pipe, several at once each named, a left-out root file, the same tree twice: each refused, the
+folder never made).
+
+`cargo test --test replay`: 9 passed, 0 failed (7 of them as in 0.5.0).
+
 ## 0.5.0 (2026-11-03)
 
 `replay`, an operation of the change vocabulary: an exact transition of whole files, of any type, that the writer
